@@ -1,0 +1,49 @@
+{
+  "chapterNumber": 2,
+  "sourceFinalPath": "chapters/chapter_002/final.md",
+  "latestCommittedChapter": 2,
+  "newFacts": [
+    {
+      "id": "fact_ch001_radio_purchase",
+      "text": "历史重提错误地覆盖第一章旧收音机购买事实。",
+      "sourceChapter": 2,
+      "sourceSceneId": "scene_001",
+      "type": "event",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_ch002_conflict",
+      "chapter": 2,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "冲突 fixture 试图复用第一章 canon fact id。",
+      "participants": ["char_lincheng"],
+      "location": "旧楼一层",
+      "timestampLabel": "第二章深夜"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": [],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

@@ -1,0 +1,139 @@
+{
+  "chapterNumber": 3,
+  "sourceFinalPath": "chapters/chapter_003/final.md",
+  "latestCommittedChapter": 3,
+  "newFacts": [
+    {
+      "id": "fact_ch003_control_room",
+      "text": "林澈进入旧楼监控室并读取三年前的电梯监控硬盘。",
+      "sourceChapter": 3,
+      "sourceSceneId": "scene_002",
+      "type": "event",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    },
+    {
+      "id": "fact_ch003_missing_resident",
+      "text": "十七楼失踪住户在电梯监控缺帧中消失，旧收音机播放出缺帧里的呼救声。",
+      "sourceChapter": 3,
+      "sourceSceneId": "scene_002",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [
+    {
+      "characterId": "char_lincheng",
+      "field": "currentGoal",
+      "oldValueSummary": "寻找旧楼监控室录像",
+      "newValue": "找到十七楼求救声背后的失踪住户",
+      "reason": "第三章获得监控缺帧后，林澈决定继续追查失踪住户。"
+    },
+    {
+      "characterId": "char_lincheng",
+      "field": "emotionalState",
+      "oldValueSummary": "恐惧但主动",
+      "newValue": "主动追查",
+      "reason": "他复制录像并主动追下去。"
+    }
+  ],
+  "timelineEvents": [
+    {
+      "id": "event_ch003_archive",
+      "chapter": 3,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈借送餐身份从旧楼物业档案中记下失踪住户姓名和监控室门禁时间。",
+      "participants": ["char_lincheng", "char_property_guard"],
+      "location": "旧楼物业档案室",
+      "timestampLabel": "第三章傍晚"
+    },
+    {
+      "id": "event_ch003_control_room",
+      "chapter": 3,
+      "sceneId": "scene_002",
+      "order": 2,
+      "summary": "林澈在监控室看到失踪住户进入电梯后从缺帧中消失。",
+      "participants": ["char_lincheng"],
+      "location": "旧楼监控室",
+      "timestampLabel": "第三章夜晚"
+    }
+  ],
+  "narrativeDebtUpdates": [
+    {
+      "debtId": "debt_ch001_seventeenth_floor",
+      "action": "partially_pay",
+      "payload": {
+        "payoffHistory": [
+          {
+            "chapter": 3,
+            "text": "十七楼求救声被部分解释为失踪住户在监控缺帧中的呼救。",
+            "effect": "partially_paid"
+          }
+        ]
+      }
+    },
+    {
+      "debtId": "debt_ch002_missing_resident",
+      "action": "pay",
+      "payload": {
+        "payoffHistory": [
+          {
+            "chapter": 3,
+            "text": "监控录像确认失踪住户在电梯中消失。",
+            "effect": "paid"
+          }
+        ]
+      }
+    }
+  ],
+  "foreshadowingUpdates": [
+    {
+      "foreshadowingId": "fs_ch001_scratched_floor_number",
+      "action": "partially_pay",
+      "payload": {
+        "payoffText": "刮掉的楼层数字对应十七楼监控缺帧，但旧收音机来源仍未解释。"
+      }
+    },
+    {
+      "foreshadowingId": "fs_ch002_elevator_record",
+      "action": "pay",
+      "payload": {
+        "payoffText": "三年前旧日期对应失踪住户进入电梯并消失的监控时间。"
+      }
+    }
+  ],
+  "readerStatePatch": {
+    "addKnows": ["十七楼曾有住户在电梯监控中消失", "旧收音机能播放监控缺帧中的呼救声"],
+    "addSuspects": ["旧收音机正在引导林澈重走失踪者路线"],
+    "addQuestions": ["失踪住户与林澈母亲旧案有什么关系？"],
+    "removeQuestions": ["十七楼求救声来自哪里？", "十七楼失踪住户是谁？"],
+    "addExpectations": ["林澈会追查失踪住户与母亲失踪案的关系"],
+    "addDoesNotKnow": ["共同标记的真实含义"]
+  },
+  "relationshipUpdates": [
+    {
+      "fromCharacterId": "char_lincheng",
+      "toCharacterId": "char_missing_resident",
+      "change": "林澈从追查声音变为追查失踪住户。",
+      "evidence": "他复制监控片段，并决定继续查失踪住户。"
+    }
+  ],
+  "revealScheduleUpdates": []
+}

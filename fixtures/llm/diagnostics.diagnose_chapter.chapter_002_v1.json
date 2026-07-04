@@ -1,0 +1,61 @@
+{
+  "chapterNumber": 2,
+  "draftVersion": 1,
+  "hard_checks": {
+    "timeline_consistency": {
+      "passed": true,
+      "message": "第二章承接第一章深夜求救声，前往旧楼核实，时间推进清晰。"
+    },
+    "character_knowledge_consistency": {
+      "passed": true,
+      "message": "林澈只依据第一章获得的求救声和十七楼线索行动。"
+    },
+    "world_rule_consistency": {
+      "passed": true,
+      "message": "旧收音机继续以碎片声音指引，不解释完整异常规则。"
+    },
+    "no_unplanned_reveal": {
+      "passed": true,
+      "message": "没有提前揭示母亲旧案或异常组织。"
+    }
+  },
+  "soft_scores": {
+    "plot_progression": 8.7,
+    "character_consistency": 8.6,
+    "tension_curve": 8.8,
+    "emotional_impact": 8.4,
+    "chapter_hook": 8.8,
+    "style_match": 8.5,
+    "genre_satisfaction": 8.7,
+    "reader_curiosity": 8.9
+  },
+  "hardFailures": [],
+  "scores": {
+    "total": 8.7,
+    "plotProgression": 8.7,
+    "characterConsistency": 8.6,
+    "tensionCurve": 8.8,
+    "emotionalImpact": 8.4,
+    "hookStrength": 8.8,
+    "styleMatch": 8.5,
+    "genreSatisfaction": 8.7,
+    "readerCuriosity": 8.9,
+    "proseQuality": 8.5
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": true,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_ch002_mainline",
+        "satisfied": true,
+        "evidence": "林澈确认十七楼对应真实旧楼。"
+      },
+      {
+        "objectiveId": "obj_ch002_debt_advance",
+        "satisfied": true,
+        "evidence": "电梯记录把十七楼求救声升级到失踪住户线索。"
+      }
+    ]
+  },
+  "issues": []
+}

@@ -1,0 +1,47 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+.nyc_output/
+*.tsbuildinfo
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+*.local
+*.key
+*.pem
+*.p12
+*.pfx
+*.crt
+*.cert
+**/auth.json
+**/token.json
+**/tokens.json
+**/*auth*.json
+**/*token*.json
+
+# Generated Novel Loop projects and runtime artifacts
+projects/
+runs/
+snapshots/
+audit/
+diffs/
+artifacts/
+.project_index/
+
+# Codex CLI/runtime artifacts. Keep source schemas/prompts tracked; ignore raw run output.
+/codex/
+/.codex/
+**/codex/runs/
+**/codex/failures/
+**/raw_output.jsonl
+**/final_output.json
+**/parsed_output.json
+
+# Logs and temporary files
+*.log
+*.tmp
+*.temp
+.DS_Store

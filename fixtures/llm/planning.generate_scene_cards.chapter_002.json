@@ -1,0 +1,36 @@
+[
+  {
+    "sceneId": "scene_001",
+    "chapterNumber": 2,
+    "order": 1,
+    "purpose": "让林澈主动带着旧收音机前往十七楼对应旧楼。",
+    "conflict": "他想只确认地点就离开，但旧收音机在楼梯间再次响起。",
+    "entryPoint": "林澈在深夜来到求救声中的旧楼。",
+    "exitPoint": "他确认旧楼十七层门牌与收音机刮痕对应。",
+    "characters": ["char_lincheng"],
+    "location": "旧楼楼梯间",
+    "time": "第二章深夜",
+    "informationDelta": ["十七楼是真实地点", "旧收音机对旧楼有反应"],
+    "emotionalShift": "犹豫 -> 被迫确认",
+    "readerEffect": "把声音谜题落到现实空间。",
+    "constraints": ["不要解释异常来源", "不要揭示母亲旧案"],
+    "beats": ["林澈进入旧楼", "收音机播放新的呼救片段", "门牌数字呼应旋钮刮痕"]
+  },
+  {
+    "sceneId": "scene_002",
+    "chapterNumber": 2,
+    "order": 2,
+    "purpose": "引出电梯监控记录和失踪住户新债务。",
+    "conflict": "林澈想离开旧楼，但电梯记录显示有人在十七楼消失。",
+    "entryPoint": "电梯停在无人按键的十七楼。",
+    "exitPoint": "林澈决定寻找监控室录像。",
+    "characters": ["char_lincheng"],
+    "location": "旧楼电梯间",
+    "time": "第二章深夜",
+    "informationDelta": ["电梯曾记录失踪住户", "监控室可能有缺失录像"],
+    "emotionalShift": "恐惧 -> 决定继续",
+    "readerEffect": "升级旧债并引入新债。",
+    "constraints": ["不要让林澈掌握完整规则", "不要写 canon patch"],
+    "beats": ["电梯异常停靠", "显示屏闪过旧日期", "林澈记下监控室位置"]
+  }
+]

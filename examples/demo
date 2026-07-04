@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ID="${1:-demo-novel}"
+BRIEF_PATH="${2:-./examples/brief.md}"
+PROJECT_DIR="projects/$PROJECT_ID"
+
+if [ -d "$PROJECT_DIR" ]; then
+  echo "ERROR DEMO_PROJECT_EXISTS: $PROJECT_DIR already exists."
+  echo "Remove it first or pass a different id: ./examples/demo my-demo"
+  exit 2
+fi
+
+echo "==> Installing dependencies"
+corepack pnpm install
+
+echo "==> Building"
+corepack pnpm build
+
+echo "==> Running tests"
+corepack pnpm test
+
+echo "==> Initializing $PROJECT_ID"
+corepack pnpm novel-loop init "$PROJECT_ID" --brief "$BRIEF_PATH"
+
+echo "==> Building bible"
+corepack pnpm novel-loop build-bible "$PROJECT_ID" --provider mock
+
+echo "==> Planning global structure"
+corepack pnpm novel-loop plan-global "$PROJECT_ID" --provider mock
+
+echo "==> Producing, revising, and committing chapter 1"
+corepack pnpm novel-loop chapter "$PROJECT_ID" 1 --provider mock --max-revisions 2 --commit
+
+echo "==> Inspecting committed state"
+corepack pnpm novel-loop inspect "$PROJECT_ID" --debts --reader --characters
+
+echo "==> Validating project"
+corepack pnpm novel-loop validate "$PROJECT_ID"
+
+echo "==> Mock demo complete: $PROJECT_DIR"

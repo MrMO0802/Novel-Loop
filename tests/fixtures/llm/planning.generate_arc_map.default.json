@@ -1,0 +1,16 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "demo-novel",
+  "arcs": [
+    {
+      "id": "arc_001",
+      "name": "林澈从逃避到追查",
+      "type": "character",
+      "summary": "主角逐步从被动逃避转向主动调查。",
+      "startChapter": 1,
+      "targetEndChapter": 12,
+      "relatedCharacters": ["char_lincheng"],
+      "relatedThreads": ["thread_0001"]
+    }
+  ]
+}

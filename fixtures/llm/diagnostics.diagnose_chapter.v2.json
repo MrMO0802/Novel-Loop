@@ -1,0 +1,56 @@
+{
+  "chapterNumber": 1,
+  "draftVersion": 2,
+  "hard_checks": {
+    "timeline_consistency": {
+      "passed": true,
+      "message": "场景从傍晚旧货市场推进到深夜出租屋，没有时间跳跃错误。"
+    },
+    "character_knowledge_consistency": {
+      "passed": true,
+      "message": "林澈没有知道读者和角色尚未获得的旧案信息。"
+    },
+    "world_rule_consistency": {
+      "passed": true,
+      "message": "异常只通过收音机微光与求救声呈现，符合低可见性规则。"
+    },
+    "no_unplanned_reveal": {
+      "passed": true,
+      "message": "母亲失踪案关联被延后，结尾只保留十七楼谜题。"
+    }
+  },
+  "soft_scores": {
+    "plot_progression": 8.6,
+    "character_consistency": 8.8,
+    "tension_curve": 8.5,
+    "emotional_impact": 8.4,
+    "chapter_hook": 8.9,
+    "style_match": 8.5,
+    "genre_satisfaction": 8.7,
+    "reader_curiosity": 9
+  },
+  "hardFailures": [],
+  "scores": {
+    "total": 8.7,
+    "plotProgression": 8.6,
+    "characterConsistency": 8.8,
+    "tensionCurve": 8.5,
+    "emotionalImpact": 8.4,
+    "hookStrength": 8.9,
+    "styleMatch": 8.5,
+    "genreSatisfaction": 8.7,
+    "readerCuriosity": 9,
+    "proseQuality": 8.6
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": true,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_001",
+        "satisfied": true,
+        "evidence": "林澈保留旧收音机，并被十七楼谜题牵引。"
+      }
+    ]
+  },
+  "issues": []
+}

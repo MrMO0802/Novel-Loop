@@ -1,0 +1,54 @@
+{
+  "id": "mission_ch002",
+  "chapterNumber": 2,
+  "chapterFunction": "把十七楼求救声从声音谜题推进到现实地点，并升级林澈的主动调查。",
+  "requiredObjectives": [
+    {
+      "id": "obj_ch002_mainline",
+      "text": "让林澈确认十七楼求救声对应一栋真实旧楼。",
+      "type": "plot",
+      "priority": "must"
+    },
+    {
+      "id": "obj_ch002_debt_advance",
+      "text": "推进 chapter 1 留下的叙事债务：十七楼求救声来自哪里。",
+      "type": "debt",
+      "priority": "must"
+    },
+    {
+      "id": "obj_ch002_foreshadow_reinforce",
+      "text": "强化旧收音机旋钮被刮掉楼层数字的伏笔。",
+      "type": "foreshadowing",
+      "priority": "should"
+    }
+  ],
+  "debtsToPayOrAdvance": ["debt_ch001_seventeenth_floor"],
+  "debtsToIntroduce": [
+    {
+      "type": "mystery",
+      "promise": "十七楼曾有住户在电梯监控中消失。",
+      "importance": 8
+    }
+  ],
+  "characterDeltas": [
+    {
+      "characterId": "char_lincheng",
+      "from": "被迫面对异常",
+      "to": "主动前往十七楼核实声音线索",
+      "evidenceRequired": "他带着旧收音机进入旧楼，而不是把它藏起来。"
+    }
+  ],
+  "readerInformationDelta": {
+    "newKnowledge": ["十七楼求救声对应一栋真实旧楼"],
+    "newSuspicions": ["旧收音机能指向现实中的失踪地点"],
+    "questionsToMaintain": ["十七楼求救声来自哪里？"],
+    "questionsToAnswer": []
+  },
+  "forbiddenMoves": [
+    "不要揭示母亲失踪案真相",
+    "不要解释异常组织设定",
+    "不要让林澈掌握旧收音机规则"
+  ],
+  "targetEmotionalCurve": ["犹豫", "核实", "恐惧升级", "决定继续"],
+  "targetWordCount": 3500
+}

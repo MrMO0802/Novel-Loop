@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "required": ["arcs"],
+  "properties": {
+    "arcs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type", "summary"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

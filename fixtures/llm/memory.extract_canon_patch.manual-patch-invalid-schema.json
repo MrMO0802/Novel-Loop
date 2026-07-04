@@ -1,0 +1,20 @@
+{
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": [],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

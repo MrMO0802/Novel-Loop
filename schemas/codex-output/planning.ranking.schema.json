@@ -1,0 +1,11 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "candidates", "selectedCandidateId", "selectedPlanPath", "rationale"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "candidates": { "type": "array" },
+    "selectedCandidateId": { "type": "string" },
+    "selectedPlanPath": { "type": "string" },
+    "rationale": { "type": "string" }
+  }
+}

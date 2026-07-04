@@ -1,0 +1,53 @@
+{
+  "chapterNumber": 1,
+  "candidates": [
+    {
+      "candidateId": "plan_001",
+      "planPath": "chapters/chapter_001/plan_candidates/plan_001.md",
+      "scores": {
+        "plot_progression": 7,
+        "character_arc_value": 7,
+        "tension_potential": 7,
+        "continuity_risk": 3,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.2,
+      "strengths": ["日常切入自然"],
+      "risks": ["冲突强度略低"]
+    },
+    {
+      "candidateId": "plan_002",
+      "planPath": "chapters/chapter_001/plan_candidates/plan_002.md",
+      "scores": {
+        "plot_progression": 8,
+        "character_arc_value": 9,
+        "tension_potential": 9,
+        "continuity_risk": 4,
+        "reader_hook_strength": 9,
+        "genre_satisfaction": 9
+      },
+      "totalScore": 8.8,
+      "strengths": ["角色选择明确", "悬疑钩子强"],
+      "risks": ["需要延迟解释反转"]
+    },
+    {
+      "candidateId": "plan_003",
+      "planPath": "chapters/chapter_001/plan_candidates/plan_003.md",
+      "scores": {
+        "plot_progression": 9,
+        "character_arc_value": 7,
+        "tension_potential": 8,
+        "continuity_risk": 6,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.8,
+      "strengths": ["主线推进快"],
+      "risks": ["第一章信息密度偏高"]
+    }
+  ],
+  "selectedCandidateId": "plan_002",
+  "selectedPlanPath": "chapters/chapter_001/plan_candidates/plan_002.md",
+  "rationale": "Plan 002 在人物弧光、紧张潜力、读者钩子和类型满足上最均衡，且连续性风险可控。"
+}

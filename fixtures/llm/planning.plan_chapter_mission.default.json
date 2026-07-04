@@ -1,0 +1,54 @@
+{
+  "id": "mission_ch001",
+  "chapterNumber": 1,
+  "chapterFunction": "建立旧收音机异常事件，并让林澈被迫面对第一个求救声。",
+  "requiredObjectives": [
+    {
+      "id": "obj_mainline_001",
+      "text": "推进旧收音机求救声主线，让林澈意识到它与真实地点有关。",
+      "type": "plot",
+      "priority": "must"
+    },
+    {
+      "id": "obj_debt_001",
+      "text": "引入叙事债务：17 楼到底发生过什么。",
+      "type": "debt",
+      "priority": "must"
+    },
+    {
+      "id": "obj_foreshadow_001",
+      "text": "新增伏笔：收音机旋钮上被刮掉的楼层数字。",
+      "type": "foreshadowing",
+      "priority": "should"
+    }
+  ],
+  "debtsToPayOrAdvance": ["debt_0001"],
+  "debtsToIntroduce": [
+    {
+      "type": "mystery",
+      "promise": "17 楼隐藏着旧收音机求救声的关键线索。",
+      "importance": 9
+    }
+  ],
+  "characterDeltas": [
+    {
+      "characterId": "char_lincheng",
+      "from": "逃避麻烦",
+      "to": "被异常细节逼迫继续追查",
+      "evidenceRequired": "他没有丢掉旧收音机，而是记录下求救声里的地址。"
+    }
+  ],
+  "readerInformationDelta": {
+    "newKnowledge": ["旧收音机可以在无电状态播放求救声"],
+    "newSuspicions": ["求救声可能对应真实失踪案件"],
+    "questionsToMaintain": ["17 楼到底发生过什么？"],
+    "questionsToAnswer": []
+  },
+  "forbiddenMoves": [
+    "不要解释异常组织设定",
+    "不要揭示旧收音机与林澈母亲失踪案的关系",
+    "不要让主角开局掌握异常规则"
+  ],
+  "targetEmotionalCurve": ["日常疲惫", "细节不安", "夜半惊疑", "被迫行动"],
+  "targetWordCount": 3500
+}

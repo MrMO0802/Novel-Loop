@@ -1,0 +1,158 @@
+{
+  "chapterNumber": 1,
+  "sourceFinalPath": "chapters/chapter_001/final.md",
+  "latestCommittedChapter": 1,
+  "newFacts": [
+    {
+      "id": "fact_ch001_radio_purchase",
+      "text": "林澈在旧货市场买到一台木壳旧收音机。",
+      "sourceChapter": 1,
+      "sourceSceneId": "scene_001",
+      "type": "event",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    },
+    {
+      "id": "fact_ch001_radio_distress",
+      "text": "旧收音机会在没有电池时播放提到十七楼的求救声。",
+      "sourceChapter": 1,
+      "sourceSceneId": "scene_002",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [
+    {
+      "id": "char_lincheng",
+      "name": "林澈",
+      "role": "protagonist",
+      "age": 24,
+      "publicDescription": "外卖员，疲惫克制，但会被异常细节牵引。",
+      "privateTruths": [],
+      "personality": ["克制", "敏锐", "习惯先压下恐惧"],
+      "desire": "维持平静生活",
+      "fear": "被无法解释的事件拖入危险",
+      "flaw": "遇到异常时先试图自我说服",
+      "currentGoal": "查清十七楼求救声的来源",
+      "emotionalState": "警觉",
+      "physicalState": "疲惫",
+      "knowledge": [
+        {
+          "factId": "fact_ch001_radio_purchase",
+          "text": "旧收音机来自旧货市场。",
+          "status": "knows",
+          "learnedInChapter": 1
+        },
+        {
+          "factId": "fact_ch001_radio_distress",
+          "text": "旧收音机会在没有电池时播放十七楼求救声。",
+          "status": "knows",
+          "learnedInChapter": 1
+        }
+      ],
+      "arc": {
+        "startingPoint": "只想避开麻烦",
+        "currentStage": "被迫面对异常",
+        "targetEndState": "主动追查真相"
+      },
+      "constraints": ["不能开局无敌", "不能提前知道母亲失踪案关联"],
+      "lastUpdatedChapter": 1
+    }
+  ],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_ch001_market",
+      "chapter": 1,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈在旧货市场买下无电也会亮灯的旧收音机。",
+      "participants": ["char_lincheng"],
+      "location": "旧货市场",
+      "timestampLabel": "第一章傍晚"
+    },
+    {
+      "id": "event_ch001_room",
+      "chapter": 1,
+      "sceneId": "scene_002",
+      "order": 2,
+      "summary": "旧收音机在出租屋无电播放提到十七楼的求救声。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋",
+      "timestampLabel": "第一章深夜"
+    }
+  ],
+  "narrativeDebtUpdates": [
+    {
+      "action": "create",
+      "payload": {
+        "id": "debt_ch001_seventeenth_floor",
+        "type": "mystery",
+        "promise": "十七楼求救声背后存在未解释的异常事件。",
+        "readerQuestion": "十七楼求救声来自哪里？",
+        "introducedInChapter": 1,
+        "introducedInSceneId": "scene_002",
+        "status": "open",
+        "importance": 9,
+        "urgency": 8,
+        "payoffTargetChapter": 5,
+        "relatedCharacters": ["char_lincheng"],
+        "relatedThreads": [],
+        "payoffHistory": [
+          {
+            "chapter": 1,
+            "text": "旧收音机第一次播放十七楼求救声。",
+            "effect": "maintained"
+          }
+        ]
+      }
+    }
+  ],
+  "foreshadowingUpdates": [
+    {
+      "action": "create",
+      "payload": {
+        "id": "fs_ch001_scratched_floor_number",
+        "surfaceDetail": "旧收音机旋钮上有被刮掉的楼层数字。",
+        "hiddenMeaning": "被刮掉的数字与十七楼求救声有关。",
+        "introducedInChapter": 1,
+        "payoffTargetChapter": 5,
+        "status": "unresolved",
+        "subtlety": "medium",
+        "relatedDebtId": "debt_ch001_seventeenth_floor"
+      }
+    }
+  ],
+  "readerStatePatch": {
+    "addKnows": ["林澈买到了旧收音机", "旧收音机会在没有电池时播放求救声"],
+    "addSuspects": ["十七楼与旧收音机异常有关"],
+    "addQuestions": ["十七楼求救声来自哪里？"],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会继续调查旧收音机"],
+    "addDoesNotKnow": ["旧收音机真正来源", "旧收音机与林澈母亲失踪案的关系"]
+  },
+  "relationshipUpdates": [
+    {
+      "fromCharacterId": "char_lincheng",
+      "toCharacterId": "obj_old_radio",
+      "change": "林澈从偶然持有变为被旧收音机牵引调查。",
+      "evidence": "他没有丢掉收音机，而是记住了十七楼求救声。"
+    }
+  ],
+  "revealScheduleUpdates": []
+}

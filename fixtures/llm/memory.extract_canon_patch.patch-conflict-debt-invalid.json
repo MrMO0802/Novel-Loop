@@ -1,0 +1,45 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_ch004_debt_invalid",
+      "chapter": 4,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈重听失踪住户录音。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    }
+  ],
+  "narrativeDebtUpdates": [
+    {
+      "debtId": "debt_ch002_missing_resident",
+      "action": "escalate",
+      "payload": {
+        "payoffHistory": [
+          {
+            "chapter": 4,
+            "text": "错误地把已解决失踪住户债务重新升级。",
+            "effect": "escalated"
+          }
+        ]
+      }
+    }
+  ],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": [],
+    "addSuspects": ["旧收音机可能隐藏更多失踪者录音"],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

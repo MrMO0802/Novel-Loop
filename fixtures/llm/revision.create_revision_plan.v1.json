@@ -1,0 +1,20 @@
+{
+  "chapterNumber": 1,
+  "fromDraftVersion": 1,
+  "revision_strategy": "delay_reveal",
+  "strategy": "delay_reveal",
+  "operations": [
+    {
+      "target": {
+        "type": "scene",
+        "sceneId": "scene_002"
+      },
+      "operation": "remove_unplanned_reveal_and_refocus_hook",
+      "reason": "draft_v1 过早暗示旧收音机与林澈母亲失踪案有关。",
+      "concrete_instruction": "删除母亲失踪案暗示，把结尾改成十七楼楼层谜题。",
+      "instruction": "删除母亲失踪案暗示，把结尾改成十七楼楼层谜题。",
+      "expectedEffect": "保留读者好奇心，同时避免破坏 reveal schedule。"
+    }
+  ],
+  "riskNotes": ["不要解释旧收音机来源。", "不要写 canon patch。"]
+}

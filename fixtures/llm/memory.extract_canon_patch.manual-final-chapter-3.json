@@ -1,0 +1,49 @@
+{
+  "chapterNumber": 3,
+  "sourceFinalPath": "chapters/chapter_003/final.md",
+  "latestCommittedChapter": 3,
+  "newFacts": [
+    {
+      "id": "fact_manual_ch003_editor_note",
+      "text": "人工审稿后确认第三章结尾的录音尾音应被记录为可追查线索，而不是完整真相。",
+      "sourceChapter": 3,
+      "sourceSceneId": "scene_002",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_manual_ch003_editor_note",
+      "chapter": 3,
+      "sceneId": "scene_002",
+      "order": 3,
+      "summary": "人工修订后，第三章结尾强调录音尾音只是下一步追查线索。",
+      "participants": ["char_lincheng"],
+      "location": "旧楼监控室",
+      "timestampLabel": "第三章夜晚"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": ["第三章修订版只确认录音尾音是线索"],
+    "addSuspects": ["录音尾音可能指向更早的失踪案"],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会继续追查录音尾音"],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

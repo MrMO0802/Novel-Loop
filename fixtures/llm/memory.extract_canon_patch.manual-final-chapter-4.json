@@ -1,0 +1,48 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [
+    {
+      "id": "fact_manual_ch004_reviewed_signal",
+      "text": "人工审稿确认第四章中的错序录音被整理为一条新的可追查信号。",
+      "sourceChapter": 4,
+      "sourceSceneId": "scene_001",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_manual_ch004_reviewed_signal",
+      "chapter": 4,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈在人工修订后的第四章中整理错序录音，并确认它指向旧案信号。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": ["第四章修订版确认错序录音是一条新线索"],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会追查错序录音指向的旧案"],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

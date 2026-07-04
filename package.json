@@ -1,0 +1,32 @@
+{
+  "name": "novel-loop-engine",
+  "version": "0.1.0",
+  "description": "Local-first CLI skeleton for the Novel Loop Engine.",
+  "type": "module",
+  "bin": {
+    "novel-loop": "dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "vitest run",
+    "novel-loop": "node dist/cli/index.js",
+    "clean:demo": "node scripts/clean-generated.mjs demo",
+    "clean:test": "node scripts/clean-generated.mjs test",
+    "clean:generated": "node scripts/clean-generated.mjs generated",
+    "demo:codex-single-chapter": "node scripts/demo-codex-single-chapter.mjs",
+    "release:checklist": "node scripts/print-release-checklist.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^20.17.30",
+    "typescript": "^5.8.3",
+    "vitest": "^3.2.4"
+  },
+  "packageManager": "pnpm@10.12.1"
+}

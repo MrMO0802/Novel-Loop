@@ -1,0 +1,38 @@
+{
+  "id": "mission_ch004",
+  "chapterNumber": 4,
+  "chapterFunction": "让林澈继续追查缺帧录音，并保留旧收音机来源谜题。",
+  "requiredObjectives": [
+    {
+      "id": "obj_ch004_recording",
+      "text": "推进缺帧录音与旧收音机之间的联系。",
+      "type": "plot",
+      "priority": "must"
+    },
+    {
+      "id": "obj_ch004_reader",
+      "text": "让读者怀疑旧收音机在选择性播放过去片段。",
+      "type": "reader",
+      "priority": "should"
+    }
+  ],
+  "debtsToPayOrAdvance": ["debt_ch001_seventeenth_floor"],
+  "debtsToIntroduce": [],
+  "characterDeltas": [
+    {
+      "characterId": "char_lincheng",
+      "from": "主动追查",
+      "to": "尝试验证旧收音机播放规律",
+      "evidenceRequired": "他对照监控时间和录音时间。"
+    }
+  ],
+  "readerInformationDelta": {
+    "newKnowledge": ["缺帧录音存在可对照的时间戳"],
+    "newSuspicions": ["旧收音机可能在选择性播放失踪片段"],
+    "questionsToMaintain": ["旧收音机真正来源是什么？"],
+    "questionsToAnswer": []
+  },
+  "forbiddenMoves": ["不要揭示母亲失踪案真相", "不要解释旧收音机完整规则"],
+  "targetEmotionalCurve": ["谨慎验证", "发现矛盾", "短暂受挫", "继续追查"],
+  "targetWordCount": 3200
+}

@@ -1,0 +1,157 @@
+{
+  "chapterNumber": 2,
+  "sourceFinalPath": "chapters/chapter_002/final.md",
+  "latestCommittedChapter": 2,
+  "newFacts": [
+    {
+      "id": "fact_ch002_real_address",
+      "text": "林澈确认十七楼求救声对应一栋真实旧楼。",
+      "sourceChapter": 2,
+      "sourceSceneId": "scene_001",
+      "type": "event",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    },
+    {
+      "id": "fact_ch002_elevator_record",
+      "text": "旧楼电梯记录显示三年前十七楼有住户异常失踪。",
+      "sourceChapter": 2,
+      "sourceSceneId": "scene_002",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [
+    {
+      "characterId": "char_lincheng",
+      "field": "currentGoal",
+      "oldValueSummary": "查清十七楼求救声的来源",
+      "newValue": "寻找旧楼监控室录像",
+      "reason": "第二章结尾林澈决定继续追查监控室。"
+    },
+    {
+      "characterId": "char_lincheng",
+      "field": "emotionalState",
+      "oldValueSummary": "警觉",
+      "newValue": "恐惧但主动",
+      "reason": "他没有离开旧楼，而是继续接近监控室。"
+    }
+  ],
+  "timelineEvents": [
+    {
+      "id": "event_ch002_stairwell",
+      "chapter": 2,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈深夜到达旧楼，在楼梯间确认十七楼门牌与旧收音机刮痕对应。",
+      "participants": ["char_lincheng"],
+      "location": "旧楼楼梯间",
+      "timestampLabel": "第二章深夜"
+    },
+    {
+      "id": "event_ch002_elevator",
+      "chapter": 2,
+      "sceneId": "scene_002",
+      "order": 2,
+      "summary": "旧楼电梯异常停靠十七楼，并提示监控室存在失踪住户录像。",
+      "participants": ["char_lincheng"],
+      "location": "旧楼电梯间",
+      "timestampLabel": "第二章深夜"
+    }
+  ],
+  "narrativeDebtUpdates": [
+    {
+      "debtId": "debt_ch001_seventeenth_floor",
+      "action": "escalate",
+      "payload": {
+        "payoffTargetChapter": 4,
+        "payoffHistory": [
+          {
+            "chapter": 2,
+            "text": "十七楼求救声被证实对应真实旧楼和电梯记录。",
+            "effect": "escalated"
+          }
+        ]
+      }
+    },
+    {
+      "action": "create",
+      "payload": {
+        "id": "debt_ch002_missing_resident",
+        "type": "mystery",
+        "promise": "三年前十七楼失踪住户留下了缺失监控录像。",
+        "readerQuestion": "十七楼失踪住户是谁？",
+        "introducedInChapter": 2,
+        "introducedInSceneId": "scene_002",
+        "status": "open",
+        "importance": 8,
+        "urgency": 7,
+        "payoffTargetChapter": 3,
+        "relatedCharacters": ["char_lincheng"],
+        "relatedThreads": [],
+        "payoffHistory": [
+          {
+            "chapter": 2,
+            "text": "电梯记录第一次提到三年前失踪住户。",
+            "effect": "maintained"
+          }
+        ]
+      }
+    }
+  ],
+  "foreshadowingUpdates": [
+    {
+      "foreshadowingId": "fs_ch001_scratched_floor_number",
+      "action": "reinforce",
+      "payload": {
+        "payoffText": "旧楼十七楼门牌刮痕与旧收音机旋钮刮痕相互呼应。"
+      }
+    },
+    {
+      "action": "create",
+      "payload": {
+        "id": "fs_ch002_elevator_record",
+        "surfaceDetail": "电梯显示屏闪过三年前的旧日期。",
+        "hiddenMeaning": "旧日期对应失踪住户进入电梯的监控时间。",
+        "introducedInChapter": 2,
+        "payoffTargetChapter": 3,
+        "status": "unresolved",
+        "subtlety": "medium",
+        "relatedDebtId": "debt_ch002_missing_resident"
+      }
+    }
+  ],
+  "readerStatePatch": {
+    "addKnows": ["十七楼求救声对应真实旧楼", "旧楼电梯记录与三年前失踪住户有关"],
+    "addSuspects": ["旧收音机能指向现实中的失踪地点"],
+    "addQuestions": ["十七楼失踪住户是谁？"],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会寻找监控室录像"],
+    "addDoesNotKnow": ["失踪住户与旧收音机的关系"]
+  },
+  "relationshipUpdates": [
+    {
+      "fromCharacterId": "char_lincheng",
+      "toCharacterId": "loc_old_building_17f",
+      "change": "林澈从持有旧收音机变为主动进入十七楼线索现场。",
+      "evidence": "他深夜进入旧楼并记下监控室位置。"
+    }
+  ],
+  "revealScheduleUpdates": []
+}

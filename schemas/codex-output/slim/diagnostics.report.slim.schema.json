@@ -1,0 +1,12 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "draftVersion", "passed", "averageScore", "issues"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "draftVersion": { "type": "integer" },
+    "passed": { "type": "boolean" },
+    "averageScore": { "type": "number" },
+    "issues": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

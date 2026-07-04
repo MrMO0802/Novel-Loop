@@ -1,0 +1,16 @@
+{
+  "type": "object",
+  "required": ["title", "ok", "summary"],
+  "properties": {
+    "title": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "additionalProperties": false
+}

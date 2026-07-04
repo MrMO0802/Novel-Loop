@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "required": ["chapters"],
+  "properties": {
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chapterNumber", "title", "summary", "primaryFunction", "targetDebts"],
+        "properties": {
+          "chapterNumber": { "type": "integer" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "primaryFunction": { "type": "string" },
+          "targetDebts": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

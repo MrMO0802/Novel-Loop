@@ -1,0 +1,41 @@
+{
+  "chapterNumber": 1,
+  "draftVersion": 1,
+  "hardFailures": [
+    {
+      "code": "FORBIDDEN_REVEAL",
+      "severity": "critical",
+      "message": "The draft reveals the radio's origin too early."
+    }
+  ],
+  "scores": {
+    "total": 5.1,
+    "plotProgression": 6,
+    "characterConsistency": 6,
+    "tensionCurve": 5,
+    "emotionalImpact": 5,
+    "hookStrength": 4,
+    "styleMatch": 6,
+    "genreSatisfaction": 5,
+    "readerCuriosity": 5,
+    "proseQuality": 6
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": false,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_001",
+        "satisfied": false,
+        "issue": "The scene explains the twist too early."
+      }
+    ]
+  },
+  "issues": [
+    {
+      "type": "reveal",
+      "severity": "critical",
+      "message": "Forbidden reveal appears before its reveal window.",
+      "recommendation": "Delay the reveal."
+    }
+  ]
+}

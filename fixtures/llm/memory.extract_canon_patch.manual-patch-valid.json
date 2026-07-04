@@ -1,0 +1,48 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [
+    {
+      "id": "fact_manual_patch_ch004_valid",
+      "text": "人工 patch 确认第四章新增的录音片段只作为线索进入 canon。",
+      "sourceChapter": 4,
+      "sourceSceneId": "scene_001",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_manual_patch_ch004_valid",
+      "chapter": 4,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈整理人工 patch 中确认的新增录音线索。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": ["第四章人工 patch 新增一条录音线索"],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会追查人工 patch 确认的录音线索"],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

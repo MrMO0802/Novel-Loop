@@ -1,0 +1,159 @@
+{
+  "type": "object",
+  "required": [
+    "chapterNumber",
+    "sourceFinalPath",
+    "latestCommittedChapter",
+    "newFacts",
+    "characterStates",
+    "characterUpdates",
+    "timelineEvents",
+    "narrativeDebtUpdates",
+    "foreshadowingUpdates",
+    "readerStatePatch",
+    "relationshipUpdates",
+    "revealScheduleUpdates"
+  ],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "sourceFinalPath": { "type": "string" },
+    "latestCommittedChapter": { "type": "integer", "minimum": 0 },
+    "newFacts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "sourceChapter", "type", "readerVisible", "authorVisible", "visibleCharacterIds", "confidence", "createdAt"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "sourceChapter": { "type": "integer" },
+          "type": { "type": "string", "enum": ["event", "character", "world", "relationship", "object", "mystery", "theme"] },
+          "readerVisible": { "type": "boolean" },
+          "authorVisible": { "type": "boolean" },
+          "visibleCharacterIds": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "confidence": { "type": "string", "enum": ["explicit", "strongly_implied", "weakly_implied"] },
+          "createdAt": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "characterStates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["characterId", "summary"],
+        "properties": {
+          "characterId": { "type": "string" },
+          "summary": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "characterUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["characterId", "field", "oldValueSummary", "newValue", "reason"],
+        "properties": {
+          "characterId": { "type": "string" },
+          "field": { "type": "string" },
+          "oldValueSummary": { "type": "string" },
+          "newValue": { "type": "string" },
+          "reason": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "timelineEvents": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "chapter", "sceneId", "order", "summary", "participants", "location", "timestampLabel"],
+        "properties": {
+          "id": { "type": "string" },
+          "chapter": { "type": "integer" },
+          "sceneId": { "type": "string" },
+          "order": { "type": "integer" },
+          "summary": { "type": "string" },
+          "participants": {
+            "type": "array",
+            "items": { "type": "string" }
+          },
+          "location": { "type": "string" },
+          "timestampLabel": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "narrativeDebtUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["debtId", "action", "text"],
+        "properties": {
+          "debtId": { "type": "string" },
+          "action": { "type": "string", "enum": ["create", "maintain", "escalate", "partially_pay", "pay", "cancel"] },
+          "text": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "foreshadowingUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["foreshadowingId", "action", "text"],
+        "properties": {
+          "foreshadowingId": { "type": "string" },
+          "action": { "type": "string", "enum": ["create", "reinforce", "partially_pay", "pay", "abandon"] },
+          "text": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "readerStatePatch": {
+      "type": "object",
+      "required": ["addKnows", "addSuspects", "addQuestions", "removeQuestions", "addExpectations", "addDoesNotKnow"],
+      "properties": {
+        "addKnows": { "type": "array", "items": { "type": "string" } },
+        "addSuspects": { "type": "array", "items": { "type": "string" } },
+        "addQuestions": { "type": "array", "items": { "type": "string" } },
+        "removeQuestions": { "type": "array", "items": { "type": "string" } },
+        "addExpectations": { "type": "array", "items": { "type": "string" } },
+        "addDoesNotKnow": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    },
+    "relationshipUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["fromCharacterId", "toCharacterId", "change", "evidence"],
+        "properties": {
+          "fromCharacterId": { "type": "string" },
+          "toCharacterId": { "type": "string" },
+          "change": { "type": "string" },
+          "evidence": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "revealScheduleUpdates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["revealId", "action", "text"],
+        "properties": {
+          "revealId": { "type": "string" },
+          "action": { "type": "string", "enum": ["create", "advance_stage", "mark_revealed", "delay"] },
+          "text": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

@@ -1,0 +1,28 @@
+{
+  "type": "object",
+  "required": ["id", "chapterNumber", "chapterFunction", "requiredObjectives", "readerInformationDelta", "forbiddenMoves"],
+  "properties": {
+    "id": { "type": "string" },
+    "chapterNumber": { "type": "integer" },
+    "chapterFunction": { "type": "string" },
+    "requiredObjectives": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "text", "type", "priority"],
+        "properties": {
+          "id": { "type": "string" },
+          "text": { "type": "string" },
+          "type": { "type": "string" },
+          "priority": { "type": "string" }
+        }
+      }
+    },
+    "debtsToPayOrAdvance": { "type": "array", "items": { "type": "string" } },
+    "debtsToIntroduce": { "type": "array" },
+    "characterDeltas": { "type": "array" },
+    "readerInformationDelta": { "type": "object" },
+    "forbiddenMoves": { "type": "array", "items": { "type": "string" } },
+    "targetEmotionalCurve": { "type": "array", "items": { "type": "string" } }
+  }
+}

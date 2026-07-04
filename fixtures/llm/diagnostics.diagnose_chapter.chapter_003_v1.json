@@ -1,0 +1,61 @@
+{
+  "chapterNumber": 3,
+  "draftVersion": 1,
+  "hard_checks": {
+    "timeline_consistency": {
+      "passed": true,
+      "message": "第三章从档案室到监控室，事件顺序清晰。"
+    },
+    "character_knowledge_consistency": {
+      "passed": true,
+      "message": "林澈只根据已提交的旧楼、电梯记录和监控室线索行动。"
+    },
+    "world_rule_consistency": {
+      "passed": true,
+      "message": "旧收音机补足缺帧声音，但没有解释异常规则。"
+    },
+    "no_unplanned_reveal": {
+      "passed": true,
+      "message": "母亲旧案只以共同标记提示，没有完整揭示。"
+    }
+  },
+  "soft_scores": {
+    "plot_progression": 8.9,
+    "character_consistency": 8.8,
+    "tension_curve": 8.9,
+    "emotional_impact": 8.6,
+    "chapter_hook": 9,
+    "style_match": 8.5,
+    "genre_satisfaction": 8.8,
+    "reader_curiosity": 9.1
+  },
+  "hardFailures": [],
+  "scores": {
+    "total": 8.9,
+    "plotProgression": 8.9,
+    "characterConsistency": 8.8,
+    "tensionCurve": 8.9,
+    "emotionalImpact": 8.6,
+    "hookStrength": 9,
+    "styleMatch": 8.5,
+    "genreSatisfaction": 8.8,
+    "readerCuriosity": 9.1,
+    "proseQuality": 8.6
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": true,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_ch003_partial_payoff",
+        "satisfied": true,
+        "evidence": "监控缺帧部分回答十七楼求救声来自失踪住户。"
+      },
+      {
+        "objectiveId": "obj_ch003_character",
+        "satisfied": true,
+        "evidence": "林澈主动复制录像并决定继续追查。"
+      }
+    ]
+  },
+  "issues": []
+}

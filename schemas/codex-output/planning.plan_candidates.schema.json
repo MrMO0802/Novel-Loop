@@ -1,0 +1,22 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "candidates"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "candidates": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "title", "summary", "markdown"],
+        "properties": {
+          "id": { "type": "string" },
+          "title": { "type": "string" },
+          "summary": { "type": "string" },
+          "markdown": { "type": "string" },
+          "strengths": { "type": "array", "items": { "type": "string" } },
+          "risks": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

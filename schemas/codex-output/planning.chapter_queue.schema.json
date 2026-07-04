@@ -1,0 +1,26 @@
+{
+  "type": "object",
+  "required": ["schemaVersion", "projectId", "chapters"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "projectId": { "type": "string" },
+    "chapters": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chapterNumber", "title", "status"],
+        "properties": {
+          "chapterNumber": { "type": "integer" },
+          "title": { "type": "string" },
+          "status": { "type": "string" },
+          "artifactPath": { "type": "string" },
+          "currentStage": { "type": "string" },
+          "completedStages": { "type": "array", "items": { "type": "string" } },
+          "summary": { "type": "string" },
+          "primaryFunction": { "type": "string" },
+          "targetDebts": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

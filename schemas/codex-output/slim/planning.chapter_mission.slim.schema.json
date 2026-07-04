@@ -1,0 +1,13 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "chapterFunction", "objectives", "readerKnowledge", "readerQuestions", "forbiddenMoves"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "chapterFunction": { "type": "string" },
+    "objectives": { "type": "array", "items": { "type": "string" } },
+    "readerKnowledge": { "type": "array", "items": { "type": "string" } },
+    "readerQuestions": { "type": "array", "items": { "type": "string" } },
+    "forbiddenMoves": { "type": "array", "items": { "type": "string" } }
+  },
+  "additionalProperties": false
+}

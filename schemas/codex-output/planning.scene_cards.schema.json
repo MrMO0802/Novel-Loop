@@ -1,0 +1,24 @@
+{
+  "type": "array",
+  "items": {
+    "type": "object",
+    "required": ["sceneId", "chapterNumber", "order", "purpose", "conflict", "entryPoint", "exitPoint", "characters", "location", "time", "informationDelta", "emotionalShift", "readerEffect", "constraints"],
+    "properties": {
+      "sceneId": { "type": "string" },
+      "chapterNumber": { "type": "integer" },
+      "order": { "type": "integer" },
+      "purpose": { "type": "string" },
+      "conflict": { "type": "string" },
+      "entryPoint": { "type": "string" },
+      "exitPoint": { "type": "string" },
+      "characters": { "type": "array", "items": { "type": "string" } },
+      "location": { "type": "string" },
+      "time": { "type": "string" },
+      "informationDelta": { "type": "array", "items": { "type": "string" } },
+      "emotionalShift": { "type": "string" },
+      "readerEffect": { "type": "string" },
+      "constraints": { "type": "array", "items": { "type": "string" } },
+      "beats": { "type": "array", "items": { "type": "string" } }
+    }
+  }
+}

@@ -1,0 +1,36 @@
+[
+  {
+    "sceneId": "scene_001",
+    "chapterNumber": 1,
+    "order": 1,
+    "purpose": "让林澈从日常疲惫进入旧收音机异常事件。",
+    "conflict": "林澈只想快速回家，摊主却急着把旧收音机脱手。",
+    "entryPoint": "林澈在旧货市场绕路避雨。",
+    "exitPoint": "他带走旧收音机，并发现它在没有电池时短暂亮灯。",
+    "characters": ["char_lincheng", "char_vendor"],
+    "location": "旧货市场",
+    "time": "第一章傍晚",
+    "informationDelta": ["旧收音机来源可疑", "旋钮上有被刮掉的楼层数字"],
+    "emotionalShift": "疲惫克制 -> 隐约不安",
+    "readerEffect": "建立核心物件与低烈度悬疑。",
+    "constraints": ["不要解释旧收音机来源", "不要揭示母亲失踪案"],
+    "beats": ["林澈避雨进入旧货市场", "摊主急着出手旧收音机", "收音机无电短暂亮灯"]
+  },
+  {
+    "sceneId": "scene_002",
+    "chapterNumber": 1,
+    "order": 2,
+    "purpose": "把异常从物件细节推进到明确求救声。",
+    "conflict": "林澈想证明只是错觉，但旧收音机在无人操作时播放求救声。",
+    "entryPoint": "林澈回到出租屋，尝试拆开旧收音机。",
+    "exitPoint": "求救声说出十七楼，林澈被迫保留收音机。",
+    "characters": ["char_lincheng"],
+    "location": "林澈出租屋",
+    "time": "第一章深夜",
+    "informationDelta": ["旧收音机会在无电状态播放求救声", "求救声提到十七楼"],
+    "emotionalShift": "怀疑压制 -> 被迫警觉",
+    "readerEffect": "确认异常真实，并留下楼层谜题。",
+    "constraints": ["不要解释求救声来源", "不要出现真实 provider 调用"],
+    "beats": ["林澈检查空电池仓", "旧收音机自行播放求救声", "十七楼成为新的读者问题"]
+  }
+]

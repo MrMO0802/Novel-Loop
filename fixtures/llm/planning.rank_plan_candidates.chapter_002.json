@@ -1,0 +1,53 @@
+{
+  "chapterNumber": 2,
+  "candidates": [
+    {
+      "candidateId": "plan_001",
+      "planPath": "chapters/chapter_002/plan_candidates/plan_001.md",
+      "scores": {
+        "plot_progression": 7,
+        "character_arc_value": 7,
+        "tension_potential": 7,
+        "continuity_risk": 3,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.4,
+      "strengths": ["调查线清晰"],
+      "risks": ["张力偏弱"]
+    },
+    {
+      "candidateId": "plan_002",
+      "planPath": "chapters/chapter_002/plan_candidates/plan_002.md",
+      "scores": {
+        "plot_progression": 9,
+        "character_arc_value": 8,
+        "tension_potential": 9,
+        "continuity_risk": 4,
+        "reader_hook_strength": 9,
+        "genre_satisfaction": 9
+      },
+      "totalScore": 8.8,
+      "strengths": ["主角选择主动", "承接债务明确", "钩子强"],
+      "risks": ["需要控制解释量"]
+    },
+    {
+      "candidateId": "plan_003",
+      "planPath": "chapters/chapter_002/plan_candidates/plan_003.md",
+      "scores": {
+        "plot_progression": 8,
+        "character_arc_value": 7,
+        "tension_potential": 8,
+        "continuity_risk": 5,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.7,
+      "strengths": ["职业结合好"],
+      "risks": ["与前章方案相似"]
+    }
+  ],
+  "selectedCandidateId": "plan_002",
+  "selectedPlanPath": "chapters/chapter_002/plan_candidates/plan_002.md",
+  "rationale": "Plan 002 能最好地升级 chapter 1 债务，同时让林澈做出主动选择。"
+}

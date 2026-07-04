@@ -1,0 +1,31 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_ch004_reader_leak",
+      "chapter": 4,
+      "sceneId": "scene_002",
+      "order": 1,
+      "summary": "林澈听见一个尚未确认的姓名尾音。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": ["旧收音机与林澈母亲失踪案的关系"],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

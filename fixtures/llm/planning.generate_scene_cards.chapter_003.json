@@ -1,0 +1,36 @@
+[
+  {
+    "sceneId": "scene_001",
+    "chapterNumber": 3,
+    "order": 1,
+    "purpose": "让林澈进入旧楼档案和监控线，主动寻找证据。",
+    "conflict": "物业人员不愿开放旧档案，林澈必须借外卖身份拖延时间。",
+    "entryPoint": "林澈以送错餐为由进入物业档案室外。",
+    "exitPoint": "他拿到失踪住户名字和监控室门禁时间。",
+    "characters": ["char_lincheng", "char_property_guard"],
+    "location": "旧楼物业档案室",
+    "time": "第三章傍晚",
+    "informationDelta": ["失踪住户有姓名", "监控室保存过十七楼电梯记录"],
+    "emotionalShift": "紧张 -> 目标明确",
+    "readerEffect": "让调查从直觉转为证据。",
+    "constraints": ["不要完全揭示母亲旧案", "不要让配角完全信任林澈"],
+    "beats": ["林澈借送餐进入", "档案页缺失一角", "门禁时间指向监控室"]
+  },
+  {
+    "sceneId": "scene_002",
+    "chapterNumber": 3,
+    "order": 2,
+    "purpose": "用监控画面部分偿还十七楼谜题，并打开更大失踪案。",
+    "conflict": "监控画面缺帧，旧收音机却播放出缺帧里的呼救声。",
+    "entryPoint": "林澈在监控室找到旧硬盘。",
+    "exitPoint": "他复制片段，决定追查失踪住户与母亲旧案的共同标记。",
+    "characters": ["char_lincheng"],
+    "location": "旧楼监控室",
+    "time": "第三章夜晚",
+    "informationDelta": ["十七楼住户在电梯监控中消失", "旧收音机声音与监控时间一致"],
+    "emotionalShift": "恐惧 -> 主动追查",
+    "readerEffect": "部分偿还旧债，同时制造长线期待。",
+    "constraints": ["母亲旧案只给标记", "不要解释异常组织"],
+    "beats": ["硬盘读取旧监控", "画面出现缺帧", "旧收音机补上缺帧中的呼救声"]
+  }
+]

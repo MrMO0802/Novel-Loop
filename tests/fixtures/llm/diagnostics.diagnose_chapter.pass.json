@@ -1,0 +1,28 @@
+{
+  "chapterNumber": 1,
+  "draftVersion": 1,
+  "hardFailures": [],
+  "scores": {
+    "total": 8.7,
+    "plotProgression": 9,
+    "characterConsistency": 8,
+    "tensionCurve": 9,
+    "emotionalImpact": 8,
+    "hookStrength": 9,
+    "styleMatch": 8,
+    "genreSatisfaction": 9,
+    "readerCuriosity": 9,
+    "proseQuality": 8
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": true,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_001",
+        "satisfied": true,
+        "evidence": "The protagonist keeps the radio."
+      }
+    ]
+  },
+  "issues": []
+}

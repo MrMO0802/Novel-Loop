@@ -1,0 +1,53 @@
+{
+  "chapterNumber": 3,
+  "candidates": [
+    {
+      "candidateId": "plan_001",
+      "planPath": "chapters/chapter_003/plan_candidates/plan_001.md",
+      "scores": {
+        "plot_progression": 8,
+        "character_arc_value": 7,
+        "tension_potential": 7,
+        "continuity_risk": 3,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.7,
+      "strengths": ["线索稳定"],
+      "risks": ["场面单薄"]
+    },
+    {
+      "candidateId": "plan_002",
+      "planPath": "chapters/chapter_003/plan_candidates/plan_002.md",
+      "scores": {
+        "plot_progression": 9,
+        "character_arc_value": 9,
+        "tension_potential": 9,
+        "continuity_risk": 4,
+        "reader_hook_strength": 9,
+        "genre_satisfaction": 9
+      },
+      "totalScore": 9,
+      "strengths": ["部分偿还债务", "强化主角主动性", "保留长线钩子"],
+      "risks": ["母亲旧案提示必须克制"]
+    },
+    {
+      "candidateId": "plan_003",
+      "planPath": "chapters/chapter_003/plan_candidates/plan_003.md",
+      "scores": {
+        "plot_progression": 7,
+        "character_arc_value": 8,
+        "tension_potential": 8,
+        "continuity_risk": 5,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.8,
+      "strengths": ["互动强"],
+      "risks": ["硬证据不足"]
+    }
+  ],
+  "selectedCandidateId": "plan_002",
+  "selectedPlanPath": "chapters/chapter_003/plan_candidates/plan_002.md",
+  "rationale": "Plan 002 在偿还旧债、推进新谜题、强化主角行动上最均衡。"
+}

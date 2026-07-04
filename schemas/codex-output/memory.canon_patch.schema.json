@@ -1,0 +1,18 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "sourceFinalPath", "readerStatePatch"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "sourceFinalPath": { "type": "string" },
+    "latestCommittedChapter": { "type": "integer" },
+    "newFacts": { "type": "array" },
+    "characterStates": { "type": "array" },
+    "characterUpdates": { "type": "array" },
+    "timelineEvents": { "type": "array" },
+    "narrativeDebtUpdates": { "type": "array" },
+    "foreshadowingUpdates": { "type": "array" },
+    "readerStatePatch": { "type": "object" },
+    "relationshipUpdates": { "type": "array" },
+    "revealScheduleUpdates": { "type": "array" }
+  }
+}

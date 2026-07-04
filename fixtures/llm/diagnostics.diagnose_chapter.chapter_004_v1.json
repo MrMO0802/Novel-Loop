@@ -1,0 +1,56 @@
+{
+  "chapterNumber": 4,
+  "draftVersion": 1,
+  "hard_checks": {
+    "timeline_consistency": {
+      "passed": true,
+      "message": "正文只呈现录音错序为疑点，没有提交为事实。"
+    },
+    "character_knowledge_consistency": {
+      "passed": true,
+      "message": "林澈只知道录音存在错序，未确认姓名真相。"
+    },
+    "world_rule_consistency": {
+      "passed": true,
+      "message": "旧收音机规则仍保持未知。"
+    },
+    "no_unplanned_reveal": {
+      "passed": true,
+      "message": "姓名被保留在模糊怀疑层。"
+    }
+  },
+  "soft_scores": {
+    "plot_progression": 8.5,
+    "character_consistency": 8.4,
+    "tension_curve": 8.6,
+    "emotional_impact": 8.2,
+    "chapter_hook": 8.8,
+    "style_match": 8.4,
+    "genre_satisfaction": 8.6,
+    "reader_curiosity": 9
+  },
+  "hardFailures": [],
+  "scores": {
+    "total": 8.6,
+    "plotProgression": 8.5,
+    "characterConsistency": 8.4,
+    "tensionCurve": 8.6,
+    "emotionalImpact": 8.2,
+    "hookStrength": 8.8,
+    "styleMatch": 8.4,
+    "genreSatisfaction": 8.6,
+    "readerCuriosity": 9,
+    "proseQuality": 8.4
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": true,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_ch004_recording",
+        "satisfied": true,
+        "evidence": "林澈对照并倒放录音。"
+      }
+    ]
+  },
+  "issues": []
+}

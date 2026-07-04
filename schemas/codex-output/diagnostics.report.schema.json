@@ -1,0 +1,14 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "draftVersion", "hard_checks", "soft_scores", "scores", "missionSatisfaction"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "draftVersion": { "type": "integer" },
+    "hard_checks": { "type": "object" },
+    "soft_scores": { "type": "object" },
+    "hardFailures": { "type": "array" },
+    "scores": { "type": "object" },
+    "missionSatisfaction": { "type": "object" },
+    "issues": { "type": "array" }
+  }
+}

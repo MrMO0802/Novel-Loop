@@ -1,0 +1,14 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "demo-novel",
+  "chapters": [
+    {
+      "chapterNumber": 1,
+      "title": "旧收音机",
+      "status": "planned",
+      "summary": "林澈买到异常旧收音机。",
+      "primaryFunction": "hook",
+      "targetDebts": ["debt_0001"]
+    }
+  ]
+}

@@ -1,0 +1,53 @@
+{
+  "chapterNumber": 4,
+  "candidates": [
+    {
+      "candidateId": "plan_001",
+      "planPath": "chapters/chapter_004/plan_candidates/plan_001.md",
+      "scores": {
+        "plot_progression": 8,
+        "character_arc_value": 7,
+        "tension_potential": 7,
+        "continuity_risk": 4,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 7.8,
+      "strengths": ["清晰"],
+      "risks": ["张力一般"]
+    },
+    {
+      "candidateId": "plan_002",
+      "planPath": "chapters/chapter_004/plan_candidates/plan_002.md",
+      "scores": {
+        "plot_progression": 9,
+        "character_arc_value": 8,
+        "tension_potential": 8,
+        "continuity_risk": 5,
+        "reader_hook_strength": 9,
+        "genre_satisfaction": 9
+      },
+      "totalScore": 8.7,
+      "strengths": ["钩子强"],
+      "risks": ["需避免未计划揭示"]
+    },
+    {
+      "candidateId": "plan_003",
+      "planPath": "chapters/chapter_004/plan_candidates/plan_003.md",
+      "scores": {
+        "plot_progression": 7,
+        "character_arc_value": 8,
+        "tension_potential": 9,
+        "continuity_risk": 5,
+        "reader_hook_strength": 8,
+        "genre_satisfaction": 8
+      },
+      "totalScore": 8,
+      "strengths": ["场面紧张"],
+      "risks": ["线索推进慢"]
+    }
+  ],
+  "selectedCandidateId": "plan_002",
+  "selectedPlanPath": "chapters/chapter_004/plan_candidates/plan_002.md",
+  "rationale": "Plan 002 最适合展示录音线索与连续性风险。"
+}

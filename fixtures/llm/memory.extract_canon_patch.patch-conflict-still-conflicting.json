@@ -1,0 +1,40 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_ch004_still_conflict_b",
+      "chapter": 4,
+      "sceneId": "scene_002",
+      "order": 2,
+      "summary": "修复后仍冲突测试事件 B。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    },
+    {
+      "id": "event_ch004_still_conflict_a",
+      "chapter": 4,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "修复后仍冲突测试事件 A。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": [],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

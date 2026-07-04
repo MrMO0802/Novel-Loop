@@ -1,0 +1,29 @@
+{
+  "type": "object",
+  "required": ["chapterNumber", "fromDraftVersion", "strategy", "operations", "riskNotes"],
+  "properties": {
+    "chapterNumber": { "type": "integer" },
+    "fromDraftVersion": { "type": "integer" },
+    "strategy": { "type": "string" },
+    "operations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["targetType", "sceneId", "operation", "reason", "instruction"],
+        "properties": {
+          "targetType": { "type": "string" },
+          "sceneId": { "type": "string" },
+          "operation": { "type": "string" },
+          "reason": { "type": "string" },
+          "instruction": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "riskNotes": {
+      "type": "array",
+      "items": { "type": "string" }
+    }
+  },
+  "additionalProperties": false
+}

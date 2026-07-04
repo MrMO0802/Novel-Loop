@@ -1,0 +1,157 @@
+{
+  "chapterNumber": 2,
+  "sourceFinalPath": "chapters/chapter_002/final.md",
+  "latestCommittedChapter": 2,
+  "newFacts": [
+    {
+      "id": "fact_ch002_recommitted_address",
+      "text": "历史重提后的第二章确认旧楼十七楼线索来自一份被篡改的电梯维修单。",
+      "sourceChapter": 2,
+      "sourceSceneId": "scene_001",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    },
+    {
+      "id": "fact_ch002_recommitted_guard",
+      "text": "物业保安承认三年前曾按要求删除十七楼电梯异常停靠记录。",
+      "sourceChapter": 2,
+      "sourceSceneId": "scene_002",
+      "type": "event",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [
+    {
+      "characterId": "char_lincheng",
+      "field": "currentGoal",
+      "oldValueSummary": "查清十七楼求救声的来源",
+      "newValue": "找到被删除的十七楼电梯记录",
+      "reason": "历史重提后的第二章把追查目标改为被删除的维修记录。"
+    },
+    {
+      "characterId": "char_lincheng",
+      "field": "emotionalState",
+      "oldValueSummary": "警觉",
+      "newValue": "压住恐惧并继续逼近真相",
+      "reason": "保安的回避让林澈确认事件有人为掩盖。"
+    }
+  ],
+  "timelineEvents": [
+    {
+      "id": "event_ch002_recommitted_work_order",
+      "chapter": 2,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈在旧楼公告栏背面发现被撕掉的十七楼电梯维修单残页。",
+      "participants": ["char_lincheng"],
+      "location": "旧楼一层公告栏",
+      "timestampLabel": "第二章深夜"
+    },
+    {
+      "id": "event_ch002_recommitted_guard",
+      "chapter": 2,
+      "sceneId": "scene_002",
+      "order": 2,
+      "summary": "物业保安承认三年前有人要求删除十七楼电梯异常停靠记录。",
+      "participants": ["char_lincheng", "char_property_guard"],
+      "location": "旧楼值班室",
+      "timestampLabel": "第二章深夜"
+    }
+  ],
+  "narrativeDebtUpdates": [
+    {
+      "debtId": "debt_ch001_seventeenth_floor",
+      "action": "escalate",
+      "payload": {
+        "payoffTargetChapter": 4,
+        "payoffHistory": [
+          {
+            "chapter": 2,
+            "text": "十七楼求救声被改写为与被删除的电梯记录有关。",
+            "effect": "escalated"
+          }
+        ]
+      }
+    },
+    {
+      "action": "create",
+      "payload": {
+        "id": "debt_ch002_missing_resident",
+        "type": "mystery",
+        "promise": "被删除的十七楼电梯记录指向三年前失踪住户。",
+        "readerQuestion": "谁删除了十七楼电梯记录？",
+        "introducedInChapter": 2,
+        "introducedInSceneId": "scene_002",
+        "status": "open",
+        "importance": 8,
+        "urgency": 7,
+        "payoffTargetChapter": 3,
+        "relatedCharacters": ["char_lincheng"],
+        "relatedThreads": [],
+        "payoffHistory": [
+          {
+            "chapter": 2,
+            "text": "物业保安第一次承认十七楼电梯记录被人为删除。",
+            "effect": "maintained"
+          }
+        ]
+      }
+    }
+  ],
+  "foreshadowingUpdates": [
+    {
+      "foreshadowingId": "fs_ch001_scratched_floor_number",
+      "action": "reinforce",
+      "payload": {
+        "payoffText": "被刮掉的楼层数字与被撕掉的维修单残页互相呼应。"
+      }
+    },
+    {
+      "action": "create",
+      "payload": {
+        "id": "fs_ch002_elevator_record",
+        "surfaceDetail": "维修单残页上的日期被黑笔涂掉。",
+        "hiddenMeaning": "被涂掉的日期对应失踪住户进入电梯的夜晚。",
+        "introducedInChapter": 2,
+        "payoffTargetChapter": 3,
+        "status": "unresolved",
+        "subtlety": "medium",
+        "relatedDebtId": "debt_ch002_missing_resident"
+      }
+    }
+  ],
+  "readerStatePatch": {
+    "addKnows": ["十七楼电梯记录曾被人为删除", "物业保安知道三年前的异常停靠记录"],
+    "addSuspects": ["旧收音机正在指向一场被掩盖的失踪"],
+    "addQuestions": ["谁删除了十七楼电梯记录？"],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会追查被删除记录背后的失踪住户"],
+    "addDoesNotKnow": ["删除记录的人与旧收音机的关系"]
+  },
+  "relationshipUpdates": [
+    {
+      "fromCharacterId": "char_lincheng",
+      "toCharacterId": "char_property_guard",
+      "change": "林澈从旁观异常变为逼问旧楼知情者。",
+      "evidence": "他在值班室逼问保安并得到删除记录的承认。"
+    }
+  ],
+  "revealScheduleUpdates": []
+}

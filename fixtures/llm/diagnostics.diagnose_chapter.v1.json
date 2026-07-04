@@ -1,0 +1,74 @@
+{
+  "chapterNumber": 1,
+  "draftVersion": 1,
+  "hard_checks": {
+    "timeline_consistency": {
+      "passed": true,
+      "message": "场景顺序从旧货市场到出租屋，时间推进清晰。"
+    },
+    "character_knowledge_consistency": {
+      "passed": true,
+      "message": "林澈只根据自己观察到的收音机异常作出反应。"
+    },
+    "world_rule_consistency": {
+      "passed": true,
+      "message": "旧收音机异常保持低可见性，没有公开暴露。"
+    },
+    "no_unplanned_reveal": {
+      "passed": false,
+      "severity": "critical",
+      "message": "draft_v1 过早暗示旧收音机与林澈母亲失踪案有关。",
+      "evidence": "结尾将十七楼与母亲失踪案直接联想，违反 forbiddenMoves。"
+    }
+  },
+  "soft_scores": {
+    "plot_progression": 8.1,
+    "character_consistency": 8.2,
+    "tension_curve": 7.9,
+    "emotional_impact": 8,
+    "chapter_hook": 8.4,
+    "style_match": 8.1,
+    "genre_satisfaction": 8.3,
+    "reader_curiosity": 8.8
+  },
+  "hardFailures": [
+    {
+      "code": "no_unplanned_reveal",
+      "severity": "critical",
+      "message": "draft_v1 过早暗示旧收音机与林澈母亲失踪案有关。",
+      "evidence": "结尾将十七楼与母亲失踪案直接联想，违反 forbiddenMoves。",
+      "suggestedFix": "删除母亲失踪案暗示，只保留十七楼楼层谜题。"
+    }
+  ],
+  "scores": {
+    "total": 8.2,
+    "plotProgression": 8.1,
+    "characterConsistency": 8.2,
+    "tensionCurve": 7.9,
+    "emotionalImpact": 8,
+    "hookStrength": 8.4,
+    "styleMatch": 8.1,
+    "genreSatisfaction": 8.3,
+    "readerCuriosity": 8.8,
+    "proseQuality": 8.2
+  },
+  "missionSatisfaction": {
+    "allRequiredSatisfied": true,
+    "objectiveResults": [
+      {
+        "objectiveId": "obj_001",
+        "satisfied": true,
+        "evidence": "林澈通过旧收音机异常被迫进入调查。"
+      }
+    ]
+  },
+  "issues": [
+    {
+      "type": "reveal",
+      "severity": "critical",
+      "message": "提前触及母亲失踪案关联。",
+      "locationHint": "scene_002",
+      "recommendation": "把结尾改为十七楼楼层谜题。"
+    }
+  ]
+}

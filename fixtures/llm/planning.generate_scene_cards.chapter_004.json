@@ -1,0 +1,36 @@
+[
+  {
+    "sceneId": "scene_001",
+    "chapterNumber": 4,
+    "order": 1,
+    "purpose": "让林澈对照监控缺帧与旧收音机录音。",
+    "conflict": "录音时间戳与监控时间不完全吻合。",
+    "entryPoint": "林澈在出租屋打开录音软件。",
+    "exitPoint": "他发现录音里有一段疑似倒放时间戳。",
+    "characters": ["char_lincheng"],
+    "location": "林澈出租屋",
+    "time": "第四章凌晨",
+    "informationDelta": ["缺帧录音可以被技术对照"],
+    "emotionalShift": "谨慎 -> 困惑",
+    "readerEffect": "提示旧收音机播放并非随机。",
+    "constraints": ["不要解释旧收音机完整规则"],
+    "beats": ["导入录音", "对照监控", "发现错序片段"]
+  },
+  {
+    "sceneId": "scene_002",
+    "chapterNumber": 4,
+    "order": 2,
+    "purpose": "让林澈从错序录音里得到下一步追查方向。",
+    "conflict": "倒放声音提到尚未出现的名字，林澈不敢确认。",
+    "entryPoint": "林澈反复倒放错序片段。",
+    "exitPoint": "他决定去查档案里的空白姓名栏。",
+    "characters": ["char_lincheng"],
+    "location": "林澈出租屋",
+    "time": "第四章凌晨后半",
+    "informationDelta": ["录音里出现未确认姓名"],
+    "emotionalShift": "困惑 -> 克制行动",
+    "readerEffect": "把真相保留在怀疑层。",
+    "constraints": ["未出现姓名不能写成读者已知真相"],
+    "beats": ["倒放片段", "听见模糊姓名", "决定查空白姓名栏"]
+  }
+]

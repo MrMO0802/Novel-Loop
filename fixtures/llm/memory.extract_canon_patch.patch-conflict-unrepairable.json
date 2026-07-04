@@ -1,0 +1,46 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 3,
+  "newFacts": [
+    {
+      "id": "fact_ch004_unrepairable",
+      "text": "这个 patch 声称提交后的最新章节仍是 3。",
+      "sourceChapter": 4,
+      "sourceSceneId": "scene_001",
+      "type": "world",
+      "visibility": {
+        "reader": false,
+        "author": true,
+        "characters": {}
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [
+    {
+      "id": "event_ch004_unrepairable",
+      "chapter": 4,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "不可修复冲突示例。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋"
+    }
+  ],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": [],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

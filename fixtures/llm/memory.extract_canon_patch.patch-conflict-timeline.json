@@ -1,0 +1,89 @@
+{
+  "chapterNumber": 4,
+  "sourceFinalPath": "chapters/chapter_004/final.md",
+  "latestCommittedChapter": 4,
+  "newFacts": [
+    {
+      "id": "fact_ch004_recording_analysis",
+      "text": "林澈发现旧收音机录音与监控缺帧存在可对照的时间戳。",
+      "sourceChapter": 4,
+      "sourceSceneId": "scene_001",
+      "type": "mystery",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [
+    {
+      "characterId": "char_lincheng",
+      "field": "currentGoal",
+      "oldValueSummary": "找到十七楼求救声背后的失踪住户",
+      "newValue": "查清缺帧录音里的空白姓名栏",
+      "reason": "第四章林澈决定回到档案室查空白姓名栏。"
+    }
+  ],
+  "timelineEvents": [
+    {
+      "id": "event_ch004_reverse_name",
+      "chapter": 4,
+      "sceneId": "scene_002",
+      "order": 2,
+      "summary": "林澈倒放录音，听见一个尚未确认的姓名尾音。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋",
+      "timestampLabel": "第四章凌晨后半"
+    },
+    {
+      "id": "event_ch004_waveform",
+      "chapter": 4,
+      "sceneId": "scene_001",
+      "order": 1,
+      "summary": "林澈对照监控缺帧与旧收音机录音，发现时间戳错序。",
+      "participants": ["char_lincheng"],
+      "location": "林澈出租屋",
+      "timestampLabel": "第四章凌晨"
+    }
+  ],
+  "narrativeDebtUpdates": [
+    {
+      "debtId": "debt_ch001_seventeenth_floor",
+      "action": "escalate",
+      "payload": {
+        "payoffHistory": [
+          {
+            "chapter": 4,
+            "text": "错序录音提示旧收音机能播放不同时序的信息。",
+            "effect": "escalated"
+          }
+        ]
+      }
+    }
+  ],
+  "foreshadowingUpdates": [
+    {
+      "foreshadowingId": "fs_ch001_scratched_floor_number",
+      "action": "reinforce",
+      "payload": {
+        "payoffText": "刮掉数字与错序录音中的门牌号再次呼应。"
+      }
+    }
+  ],
+  "readerStatePatch": {
+    "addKnows": ["林澈发现旧收音机录音与监控缺帧存在可对照时间戳"],
+    "addSuspects": ["旧收音机可能在选择性播放失踪片段"],
+    "addQuestions": ["空白姓名栏对应谁？"],
+    "removeQuestions": [],
+    "addExpectations": ["林澈会回到档案室查空白姓名栏"],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

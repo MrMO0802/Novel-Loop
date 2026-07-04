@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ID="${1:-demo-novel}"
+BRIEF_PATH="${2:-./examples/brief.md}"
+PROJECT_DIR="projects/$PROJECT_ID"
+
+require_file() {
+  local relative_path="$1"
+  if [ ! -f "$PROJECT_DIR/$relative_path" ]; then
+    echo "ERROR AUDIT_MISSING_FILE: $relative_path"
+    exit 1
+  fi
+}
+
+require_glob() {
+  local pattern="$1"
+  shopt -s nullglob
+  local matches=( "$PROJECT_DIR"/$pattern )
+  shopt -u nullglob
+  if [ "${#matches[@]}" -eq 0 ]; then
+    echo "ERROR AUDIT_MISSING_GLOB: $pattern"
+    exit 1
+  fi
+}
+
+echo "==> Cleaning $PROJECT_DIR"
+rm -rf "$PROJECT_DIR"
+
+echo "==> Running mock baseline"
+corepack pnpm novel-loop init "$PROJECT_ID" --brief "$BRIEF_PATH"
+corepack pnpm novel-loop build-bible "$PROJECT_ID" --provider mock
+corepack pnpm novel-loop plan-global "$PROJECT_ID" --provider mock
+corepack pnpm novel-loop chapter "$PROJECT_ID" 1 --provider mock --max-revisions 2 --commit
+corepack pnpm novel-loop inspect "$PROJECT_ID" --debts --reader --characters
+corepack pnpm novel-loop validate "$PROJECT_ID"
+
+echo "==> Auditing artifacts"
+require_file "strategy/story_bible.md"
+require_file "strategy/genre_contract.md"
+require_file "strategy/reader_promise.md"
+require_file "strategy/style_guide.md"
+require_file "planning/global_outline.md"
+require_file "planning/volume_01_outline.md"
+require_file "planning/arc_map.json"
+require_file "planning/chapter_queue.json"
+require_file "state/story_state.json"
+require_file "chapters/chapter_001/mission.json"
+require_glob "chapters/chapter_001/plan_candidates/*.md"
+require_file "chapters/chapter_001/ranking.json"
+require_file "chapters/chapter_001/selected_plan.md"
+require_file "chapters/chapter_001/scene_cards.json"
+require_glob "chapters/chapter_001/scenes/*.md"
+require_file "chapters/chapter_001/draft_v1.md"
+require_file "chapters/chapter_001/diagnostics_v1.json"
+require_file "chapters/chapter_001/revision_plan_v1.json"
+require_file "chapters/chapter_001/draft_v2.md"
+require_file "chapters/chapter_001/diagnostics_v2.json"
+require_file "chapters/chapter_001/final.md"
+require_file "chapters/chapter_001/canon_patch.json"
+require_file "chapters/chapter_001/commit_report.json"
+require_glob "snapshots/*.json"
+require_glob "runs/*/run_manifest.json"
+
+echo "Release audit complete: $PROJECT_DIR"

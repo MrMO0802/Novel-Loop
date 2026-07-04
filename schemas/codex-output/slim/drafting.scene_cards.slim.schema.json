@@ -1,0 +1,23 @@
+{
+  "type": "object",
+  "required": ["scenes"],
+  "properties": {
+    "scenes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["purpose", "conflict", "entryPoint", "exitPoint", "location", "characters"],
+        "properties": {
+          "purpose": { "type": "string" },
+          "conflict": { "type": "string" },
+          "entryPoint": { "type": "string" },
+          "exitPoint": { "type": "string" },
+          "location": { "type": "string" },
+          "characters": { "type": "array", "items": { "type": "string" } }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

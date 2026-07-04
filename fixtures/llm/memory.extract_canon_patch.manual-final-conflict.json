@@ -1,0 +1,38 @@
+{
+  "chapterNumber": 3,
+  "sourceFinalPath": "chapters/chapter_003/final.md",
+  "latestCommittedChapter": 3,
+  "newFacts": [
+    {
+      "id": "fact_ch003_control_room",
+      "text": "冲突 fixture 试图覆盖第三章已有监控室事实。",
+      "sourceChapter": 3,
+      "sourceSceneId": "scene_002",
+      "type": "event",
+      "visibility": {
+        "reader": true,
+        "author": true,
+        "characters": {
+          "char_lincheng": true
+        }
+      },
+      "confidence": "explicit",
+      "createdAt": "2026-07-02T00:00:00.000Z"
+    }
+  ],
+  "characterStates": [],
+  "characterUpdates": [],
+  "timelineEvents": [],
+  "narrativeDebtUpdates": [],
+  "foreshadowingUpdates": [],
+  "readerStatePatch": {
+    "addKnows": [],
+    "addSuspects": [],
+    "addQuestions": [],
+    "removeQuestions": [],
+    "addExpectations": [],
+    "addDoesNotKnow": []
+  },
+  "relationshipUpdates": [],
+  "revealScheduleUpdates": []
+}

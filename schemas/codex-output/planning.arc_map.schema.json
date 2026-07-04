@@ -1,0 +1,25 @@
+{
+  "type": "object",
+  "required": ["schemaVersion", "projectId", "arcs"],
+  "properties": {
+    "schemaVersion": { "type": "string" },
+    "projectId": { "type": "string" },
+    "arcs": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "type", "summary"],
+        "properties": {
+          "id": { "type": "string" },
+          "name": { "type": "string" },
+          "type": { "type": "string" },
+          "summary": { "type": "string" },
+          "startChapter": { "type": "integer" },
+          "targetEndChapter": { "type": "integer" },
+          "relatedCharacters": { "type": "array", "items": { "type": "string" } },
+          "relatedThreads": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  }
+}

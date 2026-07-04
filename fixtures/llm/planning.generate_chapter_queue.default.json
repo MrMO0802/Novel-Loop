@@ -1,0 +1,38 @@
+{
+  "schemaVersion": "1.0",
+  "projectId": "demo-novel",
+  "chapters": [
+    {
+      "chapterNumber": 1,
+      "title": "旧收音机",
+      "status": "planned",
+      "summary": "林澈买到一台没有电池也会响起求救声的旧收音机。",
+      "primaryFunction": "hook",
+      "targetDebts": ["debt_0001"]
+    },
+    {
+      "chapterNumber": 2,
+      "title": "夜半求救",
+      "status": "planned",
+      "summary": "林澈第一次确认求救声与现实地点有关。",
+      "primaryFunction": "escalation",
+      "targetDebts": ["debt_0001"]
+    },
+    {
+      "chapterNumber": 3,
+      "title": "监控室",
+      "status": "planned",
+      "summary": "林澈找到十七楼监控记录，确认失踪住户与旧收音机有关。",
+      "primaryFunction": "partial_payoff",
+      "targetDebts": ["debt_ch001_seventeenth_floor", "debt_ch002_missing_resident"]
+    },
+    {
+      "chapterNumber": 4,
+      "title": "错序录音",
+      "status": "planned",
+      "summary": "林澈尝试还原缺帧录音，却发现时间线与既有事实发生冲突。",
+      "primaryFunction": "conflict_recovery_demo",
+      "targetDebts": ["debt_ch001_seventeenth_floor"]
+    }
+  ]
+}

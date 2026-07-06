@@ -26,4 +26,57 @@ describe('M27 codex chapter quality report v2', () => {
       await removeTempRoot(tempRoot);
     }
   }, 30_000);
+
+  test('accepts legacy flat quality reports by deriving nested sections', () => {
+    const parsed = CodexChapterQualityReportSchema.parse({
+      reportId: 'codex_quality_ch001_v1',
+      projectId: 'codex-bench',
+      chapterNumber: 1,
+      provider: 'codex-text',
+      generatedAt: '2026-07-04T08:38:39.767Z',
+      finalChapterPath: 'chapters/chapter_001/final.md',
+      canonPatchPath: 'chapters/chapter_001/canon_patch_codex_normalized_v1.json',
+      diagnosticsPath: 'chapters/chapter_001/diagnostics_v1.json',
+      hasTitle: true,
+      approximateWordCount: 140,
+      sceneCount: 2,
+      hasOpeningHook: true,
+      hasEndingHook: false,
+      protagonistPresent: true,
+      conflictPresent: false,
+      informationDeltaPresent: true,
+      styleGuideFollowed: true,
+      repeatedParagraphRisk: false,
+      unresolvedPlaceholders: [],
+      forbiddenPhrases: [],
+      jsonArtifactsConsistent: true,
+      canonPatchMatchesFinal: true,
+      diagnosticsHardChecksPassed: true,
+      readerQuestionGenerated: true,
+      nextChapterHook: false,
+      softScores: {
+        readability: 8,
+        narrativeMomentum: 4,
+        characterConsistency: 8,
+        tension: 4,
+        genreFit: 4,
+        proseQuality: 8,
+        chapterHook: 4
+      },
+      criticalIssues: [],
+      warnings: [],
+      normalizationWarnings: [],
+      blocking: false,
+      storyStateMutated: false
+    });
+
+    expect(parsed.structure).toMatchObject({
+      hasTitle: true,
+      sceneCount: 2,
+      hasOpeningHook: true,
+      hasInformationDelta: true
+    });
+    expect(parsed.style.placeholderRisk).toBe(false);
+    expect(parsed.patchConsistency.canonPatchMatchesFinal).toBe(true);
+  });
 });

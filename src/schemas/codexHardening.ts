@@ -126,7 +126,7 @@ export const CodexQualityPatchConsistencySchema = z.object({
   foreshadowingSupportedByText: z.boolean()
 });
 
-export const CodexChapterQualityReportSchema = z.object({
+const CodexChapterQualityReportBaseSchema = z.object({
   reportId: z.string(),
   projectId: z.string(),
   chapterNumber: z.number().int().positive(),
@@ -174,6 +174,61 @@ export const CodexChapterQualityReportSchema = z.object({
   blocking: z.boolean(),
   storyStateMutated: z.literal(false)
 });
+
+export const CodexChapterQualityReportSchema = z.preprocess((value) => {
+  if (!isRecord(value)) return value;
+  return {
+    ...value,
+    structure: value.structure ?? {
+      hasTitle: asBoolean(value.hasTitle),
+      sceneCount: asNonnegativeInteger(value.sceneCount),
+      hasOpeningHook: asBoolean(value.hasOpeningHook),
+      hasEndingHook: asBoolean(value.hasEndingHook),
+      hasClearConflict: asBoolean(value.conflictPresent),
+      hasInformationDelta: asBoolean(value.informationDeltaPresent),
+      hasProtagonistDecision: asBoolean(value.protagonistPresent),
+      hasNextChapterHook: asBoolean(value.nextChapterHook)
+    },
+    continuity: value.continuity ?? {
+      referencesPreviousChapter: false,
+      referencesOpenDebt: false,
+      advancesAtLeastOneDebt: false,
+      advancesOrReinforcesForeshadowing: false,
+      updatesReaderExpectation: asBoolean(value.readerQuestionGenerated),
+      preservesCharacterGoalContinuity: asBoolean(value.protagonistPresent)
+    },
+    style: value.style ?? {
+      repeatedParagraphRisk: asBoolean(value.repeatedParagraphRisk),
+      placeholderRisk: asStringArray(value.unresolvedPlaceholders).length > 0,
+      forbiddenPhraseRisk: asStringArray(value.forbiddenPhrases).length > 0,
+      expositionOverloadRisk: false,
+      dialogueBalanceEstimate: 'unknown'
+    },
+    patchConsistency: value.patchConsistency ?? {
+      canonPatchMatchesFinal: asBoolean(value.canonPatchMatchesFinal),
+      timelineMatchesFinal: asBoolean(value.jsonArtifactsConsistent),
+      characterChangesSupportedByText: asBoolean(value.canonPatchMatchesFinal),
+      debtsSupportedByText: asBoolean(value.canonPatchMatchesFinal),
+      foreshadowingSupportedByText: asBoolean(value.canonPatchMatchesFinal)
+    }
+  };
+}, CodexChapterQualityReportBaseSchema);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function asBoolean(value: unknown): boolean {
+  return value === true;
+}
+
+function asNonnegativeInteger(value: unknown): number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 0 ? value : 0;
+}
+
+function asStringArray(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
+}
 
 export const CodexSingleChapterSmokeStageSchema = z.object({
   stageName: z.string(),

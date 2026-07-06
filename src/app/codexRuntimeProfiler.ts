@@ -33,7 +33,8 @@ const M27_STAGES = [
   'final_chapter',
   'canon_patch_proposal',
   'state_diff',
-  'confirm_apply'
+  'confirm_apply',
+  'other_codex'
 ];
 
 export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileStore = new FileStore()): Promise<ProfileCodexRuntimeResult> {
@@ -54,9 +55,11 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
   for (const manifest of await readRunManifests(paths, fileStore)) {
     sourceRunCount += 1;
     if (!('schemaVersion' in manifest) || manifest.schemaVersion !== '2') continue;
+    const promptStagesInManifest = new Set<string>();
     for (const call of manifest.promptCalls) {
       if (call.provider !== 'codex-text' && call.provider !== 'codex-cli') continue;
       const stage = stageForPromptId(call.promptId);
+      promptStagesInManifest.add(stage);
       durationByStage[stage] = (durationByStage[stage] ?? 0) + Math.round(call.latencyMs);
       codexCallsByStage[stage] = (codexCallsByStage[stage] ?? 0) + 1;
       retriesByStage[stage] = (retriesByStage[stage] ?? 0) + (call.retryCount ?? 0);
@@ -69,6 +72,17 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
       const chapterKey = chapterKeyForPrompt(manifest, call.promptId);
       if (chapterKey !== undefined) {
         durationByChapter[chapterKey] = (durationByChapter[chapterKey] ?? 0) + Math.round(call.latencyMs);
+      }
+    }
+    for (const stageRecord of manifest.stages) {
+      const stage = stageForRunStage(stageRecord.stage, stageRecord.name);
+      const durationMs = durationForRunStage(stageRecord);
+      if (stage === undefined || durationMs === undefined || promptStagesInManifest.has(stage)) continue;
+      durationByStage[stage] = (durationByStage[stage] ?? 0) + durationMs;
+      totalDurationMs += durationMs;
+      const chapterKey = stageRecord.chapterNumber === undefined ? chapterKeyForPrompt(manifest, '') : `chapter_${String(stageRecord.chapterNumber).padStart(3, '0')}`;
+      if (chapterKey !== undefined) {
+        durationByChapter[chapterKey] = (durationByChapter[chapterKey] ?? 0) + durationMs;
       }
     }
   }
@@ -107,7 +121,7 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
     stage: stage.stage,
     reason: candidateReason(stage.stage, promptBytesByStage[stage.stage] ?? 0, codexCallsByStage[stage.stage] ?? 0),
     suggestedAction: suggestedActionForStage(stage.stage),
-    estimatedImpact: stage.durationMs > 120_000 || stage.codexCallCount > 4 ? 'high' as const : stage.durationMs > 30_000 ? 'medium' as const : 'low' as const
+    estimatedImpact: stage.durationMs >= 120_000 || stage.codexCallCount > 4 ? 'high' as const : stage.durationMs > 30_000 ? 'medium' as const : 'low' as const
   }));
   const artifact = await nextAuditArtifact(paths, fileStore, 'codex_stage_runtime_profile');
   const report = await fileStore.writeJson(
@@ -198,7 +212,7 @@ function stageForPromptId(promptId: string): string {
   if (promptId.includes('final_chapter') || promptId.includes('rewrite_chapter')) return 'final_chapter';
   if (promptId.includes('canon_patch')) return 'canon_patch_proposal';
   if (promptId.includes('state_diff')) return 'state_diff';
-  return 'confirm_apply';
+  return 'other_codex';
 }
 
 function stageForBenchmarkStage(stageName: string): string {
@@ -208,7 +222,26 @@ function stageForBenchmarkStage(stageName: string): string {
   if (stageName.includes('draft')) return 'write_scene';
   if (stageName.includes('preview')) return 'canon_patch_proposal';
   if (stageName.includes('confirm')) return 'confirm_apply';
-  return 'confirm_apply';
+  return 'other_codex';
+}
+
+function stageForRunStage(stage: string, name: string): string | undefined {
+  const normalized = `${stage} ${name}`.toLowerCase().replace(/-/g, '_');
+  for (const m27Stage of M27_STAGES) {
+    if (normalized.includes(m27Stage)) return m27Stage;
+  }
+  if (normalized.includes('diff')) return 'state_diff';
+  if (normalized.includes('confirm') || normalized.includes('apply')) return 'confirm_apply';
+  return undefined;
+}
+
+function durationForRunStage(stage: { durationMs?: number | undefined; startedAt?: string | undefined; endedAt?: string | undefined }): number | undefined {
+  if (stage.durationMs !== undefined) return Math.round(stage.durationMs);
+  if (stage.startedAt === undefined || stage.endedAt === undefined) return undefined;
+  const started = Date.parse(stage.startedAt);
+  const ended = Date.parse(stage.endedAt);
+  if (!Number.isFinite(started) || !Number.isFinite(ended) || ended < started) return undefined;
+  return ended - started;
 }
 
 function chapterKeyForPrompt(manifest: RunManifest, promptId: string): string | undefined {

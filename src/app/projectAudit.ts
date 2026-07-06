@@ -27,7 +27,7 @@ import {
   RunManifestSchema,
   StoryStateSchema
 } from '../schemas/index.js';
-import type { RunManifest } from '../schemas/index.js';
+import type { CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -369,7 +369,9 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_call_reduction', path.join('audit', fileName), CodexCallReductionReportSchema);
       }
       if (/^codex_stage_runtime_profile_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_stage_profile', path.join('audit', fileName), CodexStageRuntimeProfileReportSchema);
+        const relativePath = path.join('audit', fileName);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_stage_profile', relativePath, CodexStageRuntimeProfileReportSchema);
+        await checkCodexStageRuntimeProfile(issues, paths, fileStore, fileName, relativePath);
       }
       if (/^codex_runtime_benchmark_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_benchmark', path.join('audit', fileName), CodexRuntimeBenchmarkReportSchema);
@@ -400,6 +402,84 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       }
       if (/^codex_commit_consistency_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_commit', relativePath, CodexCommitConsistencyReportSchema);
+      }
+    }
+  }
+}
+
+async function checkCodexStageRuntimeProfile(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  fileName: string,
+  relativePath: string
+): Promise<void> {
+  let report: CodexStageRuntimeProfileReport;
+  try {
+    report = await fileStore.readJson(paths.auditArtifact(fileName), CodexStageRuntimeProfileReportSchema);
+  } catch {
+    return;
+  }
+  if (report.remainingUnclassifiedCount > 0) {
+    issues.push(issue(
+      `codex_profile_unclassified_${fileName}`,
+      'warning',
+      'codex_profiling',
+      relativePath,
+      `${report.remainingUnclassifiedCount} Codex prompt call(s) remain attributed to other_codex.`,
+      'Add promptId rules to src/providers/codex/promptStageMapping.ts for recurring unknown calls.',
+      false
+    ));
+  }
+  const promptIdTotal = sumRecord(report.promptCallsByPromptId);
+  const stageTotal = sumRecord(report.promptCallsByStage);
+  const runTotal = sumRecord(report.promptCallsByRun);
+  if (promptIdTotal !== report.profiledPromptCallCount || stageTotal !== report.profiledPromptCallCount || runTotal !== report.profiledPromptCallCount) {
+    issues.push(issue(
+      `codex_profile_count_mismatch_${fileName}`,
+      'error',
+      'codex_profiling',
+      relativePath,
+      'Codex profile prompt call attribution totals do not match profiledPromptCallCount.',
+      'Regenerate the runtime profile from run manifest v2 data.',
+      true
+    ));
+  }
+  if (report.unclassifiedCalls.length !== report.remainingUnclassifiedCount) {
+    issues.push(issue(
+      `codex_profile_unclassified_count_mismatch_${fileName}`,
+      'error',
+      'codex_profiling',
+      relativePath,
+      'remainingUnclassifiedCount does not match unclassifiedCalls.length.',
+      'Regenerate the runtime profile.',
+      true
+    ));
+  }
+  const otherStageCalls = report.promptCallsByStage.other_codex ?? 0;
+  if (report.otherCodexBreakdown.totalCalls !== otherStageCalls) {
+    issues.push(issue(
+      `codex_profile_other_breakdown_mismatch_${fileName}`,
+      'error',
+      'codex_profiling',
+      relativePath,
+      'other_codex breakdown totalCalls does not match promptCallsByStage.other_codex.',
+      'Regenerate the runtime profile.',
+      true
+    ));
+  }
+  for (const call of uniqueProfileCalls(report)) {
+    for (const artifactPath of call.artifactPaths) {
+      if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) {
+        issues.push(issue(
+          `codex_profile_missing_artifact_${sanitizeIssueId(fileName)}_${sanitizeIssueId(call.promptCallId)}_${sanitizeIssueId(artifactPath)}`,
+          'error',
+          'codex_profiling',
+          artifactPath,
+          `Profiled prompt call ${call.promptCallId} references a missing artifact.`,
+          'Restore the Codex raw/final/parsed artifact or regenerate the profile after cleaning stale references.',
+          true
+        ));
       }
     }
   }
@@ -495,6 +575,32 @@ function summarize(issues: AuditIssue[]): ProjectAuditReport['summary'] {
 
 function issue(issueId: string, severity: AuditIssue['severity'], category: string, issuePath: string, message: string, suggestedFix: string, blocking: boolean): AuditIssue {
   return { issueId, severity, category, path: issuePath, message, suggestedFix, blocking };
+}
+
+function sumRecord(record: Record<string, number>): number {
+  return Object.values(record).reduce((sum, value) => sum + value, 0);
+}
+
+function uniqueProfileCalls(report: CodexStageRuntimeProfileReport): Array<CodexStageRuntimeProfileReport['slowestPromptCalls'][number]> {
+  const calls = new Map<string, CodexStageRuntimeProfileReport['slowestPromptCalls'][number]>();
+  for (const group of [
+    report.slowestPromptCalls,
+    report.largestPromptInputs,
+    report.largestSchemas,
+    report.largestOutputs,
+    report.repairCalls,
+    report.retryCalls,
+    report.unclassifiedCalls
+  ]) {
+    for (const call of group) {
+      calls.set(`${call.runId}:${call.promptCallId}`, call);
+    }
+  }
+  return [...calls.values()];
+}
+
+function sanitizeIssueId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'unknown';
 }
 
 function renderAuditMarkdown(report: ProjectAuditReport): string {

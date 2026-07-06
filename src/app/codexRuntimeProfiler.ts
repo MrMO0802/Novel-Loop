@@ -1,7 +1,8 @@
 import path from 'node:path';
 
+import { inferCodexPromptStage } from '../providers/codex/promptStageMapping.js';
 import { CodexRuntimeBenchmarkReportSchema, CodexStageRuntimeProfileReportSchema, RunManifestSchema } from '../schemas/index.js';
-import type { CodexRuntimeBenchmarkReport, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
+import type { CodexRuntimeBenchmarkReport, CodexStageRuntimeProfileReport, RunManifest, RunManifestV2 } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 
@@ -14,6 +15,48 @@ export interface ProfileCodexRuntimeResult {
   report: CodexStageRuntimeProfileReport;
   reportPath: string;
   markdownPath: string;
+}
+
+interface PromptCallProfileDraft {
+  promptCallId: string;
+  runId: string;
+  command: string;
+  status: string;
+  chapterNumber?: number;
+  promptId: string;
+  promptFamily: string;
+  inferredStage: string;
+  likelyCategory: string;
+  classified: boolean;
+  durationMs: number;
+  latencyMs: number;
+  promptInputBytes: number;
+  contextBytes: number;
+  schemaBytes: number;
+  outputBytes: number;
+  rawJsonlBytes: number;
+  retryCount: number;
+  repairCount: number;
+  jsonParsed: boolean;
+  schemaValid: boolean;
+  artifactPaths: string[];
+  finalOutputPath?: string;
+  parsedOutputPath?: string;
+  errorType?: string;
+  suggestedOptimization: string;
+}
+
+interface RunProfileDraft {
+  runId: string;
+  command: string;
+  status: string;
+  chapterNumber?: number;
+  durationMs: number;
+  codexCallCount: number;
+  slowestPromptCallId?: string;
+  slowestPromptDurationMs: number;
+  artifactCount: number;
+  stateMutationApplied: boolean;
 }
 
 const DEFAULT_PROJECTS_ROOT = './projects';
@@ -34,6 +77,12 @@ const M27_STAGES = [
   'canon_patch_proposal',
   'state_diff',
   'confirm_apply',
+  'health_check',
+  'smoke',
+  'exec_json_smoke',
+  'json_repair',
+  'normalization',
+  'provider_inspect',
   'other_codex'
 ];
 
@@ -49,40 +98,71 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
   const outputBytesByStage = emptyStageMap();
   const schemaBytesByStage = emptyStageMap();
   const durationByChapter: Record<string, number> = {};
+  const durationByCommand: Record<string, number> = {};
+  const durationByPromptId: Record<string, number> = {};
+  const durationByPromptFamily: Record<string, number> = {};
+  const durationByChapterStage: Record<string, number> = {};
+  const promptCallsByPromptId: Record<string, number> = {};
+  const promptCallsByStage: Record<string, number> = {};
+  const promptCallsByRun: Record<string, number> = {};
+  const promptCallsByChapter: Record<string, number> = {};
+  const callProfiles: PromptCallProfileDraft[] = [];
+  const runProfiles = new Map<string, RunProfileDraft>();
   let sourceRunCount = 0;
   let totalDurationMs = 0;
 
   for (const manifest of await readRunManifests(paths, fileStore)) {
     sourceRunCount += 1;
-    if (!('schemaVersion' in manifest) || manifest.schemaVersion !== '2') continue;
+    if (!isV2RunManifest(manifest)) continue;
+    const runProfile = createRunProfile(manifest);
+    runProfiles.set(manifest.runId, runProfile);
     const promptStagesInManifest = new Set<string>();
-    for (const call of manifest.promptCalls) {
+    for (const [index, call] of manifest.promptCalls.entries()) {
       if (call.provider !== 'codex-text' && call.provider !== 'codex-cli') continue;
-      const stage = stageForPromptId(call.promptId);
-      promptStagesInManifest.add(stage);
-      durationByStage[stage] = (durationByStage[stage] ?? 0) + Math.round(call.latencyMs);
-      codexCallsByStage[stage] = (codexCallsByStage[stage] ?? 0) + 1;
-      retriesByStage[stage] = (retriesByStage[stage] ?? 0) + (call.retryCount ?? 0);
-      repairsByStage[stage] = (repairsByStage[stage] ?? 0) + (call.finishReason === 'repaired' || call.promptId.includes('repair') ? 1 : 0);
-      timeoutByStage[stage] = (timeoutByStage[stage] ?? 0) + (call.errorType === 'CODEX_TIMEOUT' ? 1 : 0);
-      promptBytesByStage[stage] = (promptBytesByStage[stage] ?? 0) + (call.promptInputBytes ?? 0);
-      outputBytesByStage[stage] = (outputBytesByStage[stage] ?? 0) + (call.outputBytes ?? 0);
-      schemaBytesByStage[stage] = (schemaBytesByStage[stage] ?? 0) + (call.schemaBytes ?? 0);
-      totalDurationMs += Math.round(call.latencyMs);
-      const chapterKey = chapterKeyForPrompt(manifest, call.promptId);
-      if (chapterKey !== undefined) {
-        durationByChapter[chapterKey] = (durationByChapter[chapterKey] ?? 0) + Math.round(call.latencyMs);
+      const callProfile = toPromptCallProfile(manifest, call, index);
+      callProfiles.push(callProfile);
+      promptStagesInManifest.add(callProfile.inferredStage);
+      addToStageAggregates(callProfile, {
+        durationByStage,
+        codexCallsByStage,
+        retriesByStage,
+        repairsByStage,
+        timeoutByStage,
+        promptBytesByStage,
+        outputBytesByStage,
+        schemaBytesByStage
+      });
+      increment(promptCallsByPromptId, callProfile.promptId, 1);
+      increment(promptCallsByStage, callProfile.inferredStage, 1);
+      increment(promptCallsByRun, callProfile.runId, 1);
+      if (callProfile.chapterNumber !== undefined) {
+        increment(promptCallsByChapter, chapterKey(callProfile.chapterNumber), 1);
+        increment(durationByChapter, chapterKey(callProfile.chapterNumber), callProfile.durationMs);
+        increment(durationByChapterStage, `${chapterKey(callProfile.chapterNumber)}.${callProfile.inferredStage}`, callProfile.durationMs);
       }
+      increment(durationByCommand, callProfile.command, callProfile.durationMs);
+      increment(durationByPromptId, callProfile.promptId, callProfile.durationMs);
+      increment(durationByPromptFamily, callProfile.promptFamily, callProfile.durationMs);
+      runProfile.durationMs += callProfile.durationMs;
+      runProfile.codexCallCount += 1;
+      if (callProfile.durationMs > runProfile.slowestPromptDurationMs) {
+        runProfile.slowestPromptDurationMs = callProfile.durationMs;
+        runProfile.slowestPromptCallId = callProfile.promptCallId;
+      }
+      totalDurationMs += callProfile.durationMs;
     }
     for (const stageRecord of manifest.stages) {
       const stage = stageForRunStage(stageRecord.stage, stageRecord.name);
       const durationMs = durationForRunStage(stageRecord);
       if (stage === undefined || durationMs === undefined || promptStagesInManifest.has(stage)) continue;
-      durationByStage[stage] = (durationByStage[stage] ?? 0) + durationMs;
+      increment(durationByStage, stage, durationMs);
+      increment(durationByCommand, manifest.command, durationMs);
       totalDurationMs += durationMs;
-      const chapterKey = stageRecord.chapterNumber === undefined ? chapterKeyForPrompt(manifest, '') : `chapter_${String(stageRecord.chapterNumber).padStart(3, '0')}`;
-      if (chapterKey !== undefined) {
-        durationByChapter[chapterKey] = (durationByChapter[chapterKey] ?? 0) + durationMs;
+      runProfile.durationMs += durationMs;
+      const stageChapter = stageRecord.chapterNumber ?? chapterNumberForManifest(manifest);
+      if (stageChapter !== undefined) {
+        increment(durationByChapter, chapterKey(stageChapter), durationMs);
+        increment(durationByChapterStage, `${chapterKey(stageChapter)}.${stage}`, durationMs);
       }
     }
   }
@@ -96,18 +176,19 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
     for (const stage of benchmark.report.stages) {
       const mappedStage = stageForBenchmarkStage(stage.stageName);
       if ((codexCallsByStage[mappedStage] ?? 0) === 0) {
-        durationByStage[mappedStage] = (durationByStage[mappedStage] ?? 0) + stage.durationMs;
-        codexCallsByStage[mappedStage] = (codexCallsByStage[mappedStage] ?? 0) + stage.codexCallCount;
-        retriesByStage[mappedStage] = (retriesByStage[mappedStage] ?? 0) + stage.retryCount;
-        repairsByStage[mappedStage] = (repairsByStage[mappedStage] ?? 0) + stage.repairCount;
-        timeoutByStage[mappedStage] = (timeoutByStage[mappedStage] ?? 0) + stage.timeoutCount;
-        promptBytesByStage[mappedStage] = (promptBytesByStage[mappedStage] ?? 0) + stage.promptInputBytes;
-        outputBytesByStage[mappedStage] = (outputBytesByStage[mappedStage] ?? 0) + stage.outputBytes;
-        schemaBytesByStage[mappedStage] = (schemaBytesByStage[mappedStage] ?? 0) + stage.schemaBytes;
+        increment(durationByStage, mappedStage, stage.durationMs);
+        increment(codexCallsByStage, mappedStage, stage.codexCallCount);
+        increment(retriesByStage, mappedStage, stage.retryCount);
+        increment(repairsByStage, mappedStage, stage.repairCount);
+        increment(timeoutByStage, mappedStage, stage.timeoutCount);
+        increment(promptBytesByStage, mappedStage, stage.promptInputBytes);
+        increment(outputBytesByStage, mappedStage, stage.outputBytes);
+        increment(schemaBytesByStage, mappedStage, stage.schemaBytes);
       }
-      const chapterKey = chapterKeyForStageName(stage.stageName);
-      if (chapterKey !== undefined) {
-        durationByChapter[chapterKey] = (durationByChapter[chapterKey] ?? 0) + stage.durationMs;
+      const stageChapter = chapterNumberForStageName(stage.stageName);
+      if (stageChapter !== undefined) {
+        increment(durationByChapter, chapterKey(stageChapter), stage.durationMs);
+        increment(durationByChapterStage, `${chapterKey(stageChapter)}.${mappedStage}`, stage.durationMs);
       }
     }
   }
@@ -117,12 +198,23 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
     .filter((stage) => stage.durationMs > 0 || stage.codexCallCount > 0)
     .sort((left, right) => right.durationMs - left.durationMs)
     .slice(0, 8);
-  const optimizationCandidates = slowestStages.map((stage) => ({
-    stage: stage.stage,
-    reason: candidateReason(stage.stage, promptBytesByStage[stage.stage] ?? 0, codexCallsByStage[stage.stage] ?? 0),
-    suggestedAction: suggestedActionForStage(stage.stage),
-    estimatedImpact: stage.durationMs >= 120_000 || stage.codexCallCount > 4 ? 'high' as const : stage.durationMs > 30_000 ? 'medium' as const : 'low' as const
-  }));
+  const slowestPromptCalls = sortCalls(callProfiles, 'durationMs').slice(0, 10);
+  const largestPromptInputs = sortCalls(callProfiles, 'promptInputBytes').slice(0, 10);
+  const largestSchemas = sortCalls(callProfiles, 'schemaBytes').filter((call) => call.schemaBytes > 0).slice(0, 10);
+  const largestOutputs = sortCalls(callProfiles, 'outputBytes').slice(0, 10);
+  const repairCalls = callProfiles.filter((call) => call.repairCount > 0).sort((left, right) => right.durationMs - left.durationMs);
+  const retryCalls = callProfiles.filter((call) => call.retryCount > 0).sort((left, right) => right.retryCount - left.retryCount || right.durationMs - left.durationMs);
+  const unclassifiedCalls = callProfiles.filter((call) => !call.classified).sort((left, right) => right.durationMs - left.durationMs);
+  const otherCodexBreakdown = buildOtherCodexBreakdown(callProfiles);
+  const slowestRuns = [...runProfiles.values()]
+    .filter((run) => run.durationMs > 0 || run.codexCallCount > 0)
+    .sort((left, right) => right.durationMs - left.durationMs)
+    .slice(0, 10)
+    .map(({ slowestPromptDurationMs, ...run }) => {
+      void slowestPromptDurationMs;
+      return run;
+    });
+  const optimizationCandidates = buildOptimizationCandidates(slowestPromptCalls, unclassifiedCalls);
   const artifact = await nextAuditArtifact(paths, fileStore, 'codex_stage_runtime_profile');
   const report = await fileStore.writeJson(
     artifact.jsonPath,
@@ -142,6 +234,25 @@ export async function profileCodexRuntime(input: ProfileCodexRuntimeInput, fileS
       promptBytesByStage,
       outputBytesByStage,
       schemaBytesByStage,
+      profiledPromptCallCount: callProfiles.length,
+      slowestPromptCalls,
+      promptCallsByPromptId,
+      promptCallsByStage,
+      promptCallsByRun,
+      promptCallsByChapter,
+      largestPromptInputs,
+      largestSchemas,
+      largestOutputs,
+      repairCalls,
+      retryCalls,
+      unclassifiedCalls,
+      remainingUnclassifiedCount: unclassifiedCalls.length,
+      otherCodexBreakdown,
+      slowestRuns,
+      durationByCommand,
+      durationByPromptId,
+      durationByPromptFamily,
+      durationByChapterStage,
       slowestStages,
       optimizationCandidates,
       storyStateMutated: false
@@ -192,30 +303,106 @@ async function readBenchmarkReports(
   return reports;
 }
 
+function isV2RunManifest(manifest: RunManifest): manifest is RunManifestV2 {
+  return 'schemaVersion' in manifest && manifest.schemaVersion === '2';
+}
+
 function emptyStageMap(): Record<string, number> {
   return Object.fromEntries(M27_STAGES.map((stage) => [stage, 0]));
 }
 
-function stageForPromptId(promptId: string): string {
-  if (promptId.startsWith('strategy.')) return 'build_bible';
-  if (promptId.includes('generate_global_outline') || promptId.includes('plan_global_outline')) return 'plan_global_outline';
-  if (promptId.includes('generate_volume_outline') || promptId.includes('plan_volume_outline')) return 'plan_volume_outline';
-  if (promptId.includes('arc_map')) return 'plan_arc_map';
-  if (promptId.includes('chapter_queue')) return 'plan_chapter_queue';
-  if (promptId.includes('plan_chapter_mission')) return 'chapter_mission';
-  if (promptId.includes('generate_plan_candidates')) return 'plan_candidates';
-  if (promptId.includes('rank_plan_candidates')) return 'ranking';
-  if (promptId.includes('scene_cards')) return 'scene_cards';
-  if (promptId.includes('write_scene')) return 'write_scene';
-  if (promptId.includes('diagnostics') || promptId.includes('diagnose')) return 'diagnostics';
-  if (promptId.includes('revision_plan') || promptId.includes('create_revision')) return 'revision_plan';
-  if (promptId.includes('final_chapter') || promptId.includes('rewrite_chapter')) return 'final_chapter';
-  if (promptId.includes('canon_patch')) return 'canon_patch_proposal';
-  if (promptId.includes('state_diff')) return 'state_diff';
-  return 'other_codex';
+function toPromptCallProfile(manifest: RunManifestV2, call: RunManifestV2['promptCalls'][number], index: number): PromptCallProfileDraft {
+  const mapping = inferCodexPromptStage(call.promptId);
+  const durationMs = Math.round(call.latencyMs);
+  const repairCount = call.finishReason === 'repaired' || mapping.stage === 'json_repair' ? 1 : 0;
+  const artifactPaths = uniqueStrings([
+    call.rawOutputPath,
+    call.finalOutputPath,
+    call.parsedOutputPath,
+    call.inputArtifactPath,
+    call.outputArtifactPath
+  ]);
+  const base = {
+    promptCallId: call.promptCallId ?? `prompt_${String(index + 1).padStart(3, '0')}_${sanitizeId(call.promptId)}`,
+    runId: manifest.runId,
+    command: manifest.command,
+    status: call.status ?? 'succeeded',
+    promptId: call.promptId,
+    promptFamily: mapping.promptFamily,
+    inferredStage: mapping.stage,
+    likelyCategory: mapping.likelyCategory,
+    classified: mapping.classified,
+    durationMs,
+    latencyMs: call.latencyMs,
+    promptInputBytes: call.promptInputBytes ?? 0,
+    contextBytes: call.contextBytes ?? 0,
+    schemaBytes: call.schemaBytes ?? 0,
+    outputBytes: call.outputBytes ?? 0,
+    rawJsonlBytes: call.rawJsonlBytes ?? 0,
+    retryCount: call.retryCount ?? 0,
+    repairCount,
+    jsonParsed: call.jsonParsed ?? false,
+    schemaValid: call.schemaValid ?? false,
+    artifactPaths,
+    suggestedOptimization: suggestedOptimizationForCall(mapping.stage, call.promptId, {
+      promptInputBytes: call.promptInputBytes ?? 0,
+      schemaBytes: call.schemaBytes ?? 0,
+      retryCount: call.retryCount ?? 0,
+      repairCount
+    })
+  };
+  const chapterNumber = chapterNumberForManifest(manifest);
+  return {
+    ...base,
+    ...(chapterNumber === undefined ? {} : { chapterNumber }),
+    ...(call.finalOutputPath === undefined ? {} : { finalOutputPath: call.finalOutputPath }),
+    ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath }),
+    ...(call.errorType === undefined ? {} : { errorType: call.errorType })
+  };
+}
+
+function createRunProfile(manifest: RunManifestV2): RunProfileDraft {
+  const chapterNumber = chapterNumberForManifest(manifest);
+  return {
+    runId: manifest.runId,
+    command: manifest.command,
+    status: manifest.status,
+    ...(chapterNumber === undefined ? {} : { chapterNumber }),
+    durationMs: 0,
+    codexCallCount: 0,
+    slowestPromptDurationMs: 0,
+    artifactCount: manifest.artifacts.length,
+    stateMutationApplied: manifest.stateMutations.some((mutation) => mutation.applied)
+  };
+}
+
+function addToStageAggregates(
+  call: PromptCallProfileDraft,
+  maps: {
+    durationByStage: Record<string, number>;
+    codexCallsByStage: Record<string, number>;
+    retriesByStage: Record<string, number>;
+    repairsByStage: Record<string, number>;
+    timeoutByStage: Record<string, number>;
+    promptBytesByStage: Record<string, number>;
+    outputBytesByStage: Record<string, number>;
+    schemaBytesByStage: Record<string, number>;
+  }
+): void {
+  increment(maps.durationByStage, call.inferredStage, call.durationMs);
+  increment(maps.codexCallsByStage, call.inferredStage, 1);
+  increment(maps.retriesByStage, call.inferredStage, call.retryCount);
+  increment(maps.repairsByStage, call.inferredStage, call.repairCount);
+  increment(maps.timeoutByStage, call.inferredStage, call.errorType === 'CODEX_TIMEOUT' ? 1 : 0);
+  increment(maps.promptBytesByStage, call.inferredStage, call.promptInputBytes);
+  increment(maps.outputBytesByStage, call.inferredStage, call.outputBytes);
+  increment(maps.schemaBytesByStage, call.inferredStage, call.schemaBytes);
 }
 
 function stageForBenchmarkStage(stageName: string): string {
+  if (stageName === 'codex-status') return 'health_check';
+  if (stageName === 'codex-smoke') return 'smoke';
+  if (stageName === 'codex-exec-json') return 'exec_json_smoke';
   if (stageName === 'build-bible') return 'build_bible';
   if (stageName === 'plan-global') return 'plan_global_outline';
   if (stageName.includes('dry-run')) return 'chapter_mission';
@@ -244,32 +431,164 @@ function durationForRunStage(stage: { durationMs?: number | undefined; startedAt
   return ended - started;
 }
 
-function chapterKeyForPrompt(manifest: RunManifest, promptId: string): string | undefined {
-  void promptId;
-  if ('schemaVersion' in manifest && manifest.schemaVersion === '2') {
-    const chapterNumber = manifest.resolvedContext.chapterNumber ?? manifest.resolvedContext.resolvedChapterNumber;
-    return chapterNumber === undefined ? undefined : `chapter_${String(chapterNumber).padStart(3, '0')}`;
-  }
-  return undefined;
+function chapterNumberForManifest(manifest: RunManifestV2): number | undefined {
+  return manifest.resolvedContext.chapterNumber ?? manifest.resolvedContext.resolvedChapterNumber;
 }
 
-function chapterKeyForStageName(stageName: string): string | undefined {
+function chapterNumberForStageName(stageName: string): number | undefined {
   const match = /chapter-(\d{3})/.exec(stageName);
-  return match === null ? undefined : `chapter_${match[1]}`;
+  if (match === null) return undefined;
+  return Number.parseInt(match[1]!, 10);
 }
 
-function candidateReason(stage: string, promptBytes: number, calls: number): string {
-  if (promptBytes > 24_000) return `${stage} sends large prompt context (${promptBytes} bytes).`;
-  if (calls > 3) return `${stage} uses ${calls} Codex calls.`;
-  return `${stage} is among the slowest observed stages.`;
+function chapterKey(chapterNumber: number): string {
+  return `chapter_${String(chapterNumber).padStart(3, '0')}`;
 }
 
-function suggestedActionForStage(stage: string): string {
-  if (stage === 'ranking') return 'Keep ranking deterministic/local when candidate scores are already structured.';
-  if (stage === 'diagnostics') return 'Prefer local hard checks and reserve Codex for prose-sensitive revision guidance.';
-  if (stage === 'write_scene') return 'Use compact chapter summaries and capped scene count.';
-  if (stage === 'canon_patch_proposal') return 'Keep patch prompt schema minimal and reuse preview for confirm.';
-  return 'Reduce prompt context with chapter summaries and context budget manifests.';
+function buildOtherCodexBreakdown(callProfiles: PromptCallProfileDraft[]) {
+  const otherCalls = callProfiles.filter((call) => call.inferredStage === 'other_codex');
+  return {
+    totalCalls: otherCalls.length,
+    totalDurationMs: otherCalls.reduce((sum, call) => sum + call.durationMs, 0),
+    byPromptId: metricItems(otherCalls, (call) => call.promptId),
+    byRunId: metricItems(otherCalls, (call) => call.runId),
+    byCommand: metricItems(otherCalls, (call) => call.command),
+    byArtifactType: metricItems(flattenOtherArtifactTypes(otherCalls), (item) => item.artifactType, (item) => item.durationMs),
+    likelyCategories: metricItems(otherCalls, (call) => call.likelyCategory).map((item) => ({
+      category: item.key,
+      totalCalls: item.totalCalls,
+      totalDurationMs: item.totalDurationMs
+    }))
+  };
+}
+
+function flattenOtherArtifactTypes(calls: PromptCallProfileDraft[]): Array<{ artifactType: string; durationMs: number }> {
+  const items: Array<{ artifactType: string; durationMs: number }> = [];
+  for (const call of calls) {
+    for (const artifactType of new Set(call.artifactPaths.map(artifactTypeForPath))) {
+      items.push({ artifactType, durationMs: call.durationMs });
+    }
+  }
+  return items;
+}
+
+function buildOptimizationCandidates(slowestPromptCalls: PromptCallProfileDraft[], unclassifiedCalls: PromptCallProfileDraft[]) {
+  const candidates = [...slowestPromptCalls.slice(0, 8)];
+  for (const call of unclassifiedCalls) {
+    if (!candidates.some((candidate) => candidate.promptCallId === call.promptCallId)) {
+      candidates.push(call);
+    }
+  }
+  return candidates.slice(0, 12).map((call, index) => {
+    const suggestedAction = suggestedActionForCall(call);
+    return {
+      candidateId: `candidate_${String(index + 1).padStart(3, '0')}_${sanitizeId(call.promptId)}`,
+      stage: call.inferredStage,
+      promptId: call.promptId,
+      reason: candidateReason(call),
+      evidence: candidateEvidence(call),
+      estimatedImpact: call.durationMs >= 120_000 || call.promptInputBytes > 24_000 || call.retryCount > 0 || call.repairCount > 0 ? 'high' as const : call.durationMs > 30_000 ? 'medium' as const : 'low' as const,
+      suggestedAction,
+      riskLevel: riskLevelForAction(suggestedAction),
+      safetyImpact: 'no_state_mutation' as const
+    };
+  });
+}
+
+function suggestedActionForCall(call: PromptCallProfileDraft):
+  | 'reduce_context'
+  | 'slim_schema'
+  | 'split_task'
+  | 'merge_task'
+  | 'localize_task'
+  | 'cache_summary'
+  | 'reuse_artifact'
+  | 'improve_mapping'
+  | 'inspect_prompt'
+  | 'no_action_safety_critical' {
+  if (!call.classified || call.inferredStage === 'other_codex') return 'improve_mapping';
+  if (call.repairCount > 0 || call.retryCount > 0 || call.schemaBytes > 12_000) return 'slim_schema';
+  if (call.promptInputBytes > 24_000) return 'reduce_context';
+  if (call.inferredStage === 'diagnostics' || call.inferredStage === 'ranking') return 'localize_task';
+  if (call.inferredStage === 'canon_patch_proposal') return 'slim_schema';
+  if (call.inferredStage === 'write_scene') return 'reduce_context';
+  if (call.inferredStage === 'build_bible') return 'inspect_prompt';
+  return 'cache_summary';
+}
+
+function suggestedOptimizationForCall(stage: string, promptId: string, metrics: { promptInputBytes: number; schemaBytes: number; retryCount: number; repairCount: number }): string {
+  if (stage === 'other_codex') return `Improve prompt stage mapping for ${promptId}.`;
+  if (metrics.retryCount > 0 || metrics.repairCount > 0) return 'Slim schema or harden prompt JSON instructions.';
+  if (metrics.schemaBytes > 12_000) return 'Slim output schema for this prompt.';
+  if (metrics.promptInputBytes > 24_000) return 'Reduce context or use cached summaries.';
+  return 'Inspect prompt only if this call appears in slowest rankings.';
+}
+
+function candidateReason(call: PromptCallProfileDraft): string {
+  if (!call.classified || call.inferredStage === 'other_codex') return `${call.promptId} is not mapped to a specific stage.`;
+  if (call.promptInputBytes > 24_000) return `${call.promptId} sends large prompt context (${call.promptInputBytes} bytes).`;
+  if (call.retryCount > 0 || call.repairCount > 0) return `${call.promptId} required retry or repair.`;
+  return `${call.promptId} is among the slowest observed prompt calls.`;
+}
+
+function candidateEvidence(call: PromptCallProfileDraft): string[] {
+  return [
+    `durationMs=${call.durationMs}`,
+    `promptInputBytes=${call.promptInputBytes}`,
+    `schemaBytes=${call.schemaBytes}`,
+    `outputBytes=${call.outputBytes}`,
+    `retryCount=${call.retryCount}`,
+    `repairCount=${call.repairCount}`,
+    `runId=${call.runId}`
+  ];
+}
+
+function riskLevelForAction(action: ReturnType<typeof suggestedActionForCall>): 'low' | 'medium' | 'high' {
+  if (action === 'no_action_safety_critical') return 'high';
+  if (action === 'merge_task' || action === 'split_task') return 'medium';
+  return 'low';
+}
+
+function metricItems<T>(
+  items: T[],
+  keyFor: (item: T) => string,
+  durationFor: (item: T) => number = (item) => (item as PromptCallProfileDraft).durationMs
+): Array<{ key: string; totalCalls: number; totalDurationMs: number }> {
+  const metrics = new Map<string, { totalCalls: number; totalDurationMs: number }>();
+  for (const item of items) {
+    const key = keyFor(item);
+    const current = metrics.get(key) ?? { totalCalls: 0, totalDurationMs: 0 };
+    current.totalCalls += 1;
+    current.totalDurationMs += durationFor(item);
+    metrics.set(key, current);
+  }
+  return [...metrics.entries()]
+    .map(([key, value]) => ({ key, ...value }))
+    .sort((left, right) => right.totalDurationMs - left.totalDurationMs || right.totalCalls - left.totalCalls || left.key.localeCompare(right.key));
+}
+
+function sortCalls(calls: PromptCallProfileDraft[], metric: keyof Pick<PromptCallProfileDraft, 'durationMs' | 'promptInputBytes' | 'schemaBytes' | 'outputBytes'>): PromptCallProfileDraft[] {
+  return [...calls].sort((left, right) => right[metric] - left[metric] || right.durationMs - left.durationMs || left.promptCallId.localeCompare(right.promptCallId));
+}
+
+function artifactTypeForPath(artifactPath: string): string {
+  if (artifactPath.endsWith('.jsonl')) return 'codex_raw_output';
+  if (artifactPath.includes('parsed')) return 'codex_parsed_json';
+  if (artifactPath.includes('/prompts/')) return 'prompt_artifact';
+  if (artifactPath.length > 0) return 'codex_final_output';
+  return 'unknown';
+}
+
+function increment(target: Record<string, number>, key: string, amount: number): void {
+  target[key] = (target[key] ?? 0) + amount;
+}
+
+function uniqueStrings(values: Array<string | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => value !== undefined && value.length > 0))];
+}
+
+function sanitizeId(value: string): string {
+  return value.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').toLowerCase() || 'unknown';
 }
 
 async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, baseName: string) {
@@ -296,15 +615,63 @@ function renderProfileMarkdown(report: CodexStageRuntimeProfileReport): string {
     '',
     `totalDurationMs: ${report.totalDurationMs}`,
     `sourceRunCount: ${report.sourceRunCount}`,
+    `profiledPromptCallCount: ${report.profiledPromptCallCount}`,
+    `remainingUnclassifiedCount: ${report.remainingUnclassifiedCount}`,
     '',
-    '## Slowest Stages',
-    ...(report.slowestStages.length === 0
-      ? ['- none']
-      : report.slowestStages.map((stage) => `- ${stage.stage}: ${stage.durationMs}ms, calls=${stage.codexCallCount}`)),
+    '## Top 10 slowest prompt calls',
+    renderCallTable(report.slowestPromptCalls),
     '',
-    '## Optimization Candidates',
+    '## Top 10 largest prompt inputs',
+    renderCallTable(report.largestPromptInputs, 'promptInputBytes'),
+    '',
+    '## Top 10 largest schemas',
+    renderCallTable(report.largestSchemas, 'schemaBytes'),
+    '',
+    '## Top 10 largest outputs',
+    renderCallTable(report.largestOutputs, 'outputBytes'),
+    '',
+    '## Duration by stage',
+    renderRecordTable(report.durationByStage, 'stage'),
+    '',
+    '## Duration by promptId',
+    renderRecordTable(report.durationByPromptId, 'promptId'),
+    '',
+    '## other_codex breakdown',
+    `totalCalls: ${report.otherCodexBreakdown.totalCalls}`,
+    `totalDurationMs: ${report.otherCodexBreakdown.totalDurationMs}`,
+    '',
+    '### other_codex by promptId',
+    renderMetricTable(report.otherCodexBreakdown.byPromptId),
+    '',
+    '### other_codex likely categories',
+    renderMetricTable(report.otherCodexBreakdown.likelyCategories.map((item) => ({ key: item.category, totalCalls: item.totalCalls, totalDurationMs: item.totalDurationMs }))),
+    '',
+    '## Recommended next optimizations',
     ...(report.optimizationCandidates.length === 0
       ? ['- none']
-      : report.optimizationCandidates.map((item) => `- ${item.stage}: ${item.suggestedAction} (${item.estimatedImpact})`))
+      : report.optimizationCandidates.map((item) => `- ${item.candidateId}: ${item.promptId} -> ${item.suggestedAction} (${item.estimatedImpact})`))
   ].join('\n') + '\n';
+}
+
+function renderCallTable(calls: CodexStageRuntimeProfileReport['slowestPromptCalls'], metric = 'durationMs'): string {
+  if (calls.length === 0) return '- none';
+  return [
+    '| promptCallId | runId | promptId | stage | durationMs | promptInputBytes | schemaBytes | outputBytes | retries | repairs |',
+    '| --- | --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |',
+    ...calls.map((call) => `| ${call.promptCallId} | ${call.runId} | ${call.promptId} | ${call.inferredStage} | ${call.durationMs} | ${call.promptInputBytes} | ${call.schemaBytes} | ${call.outputBytes} | ${call.retryCount} | ${call.repairCount} |`)
+  ].join('\n') + `\n\nSorted by ${metric}.`;
+}
+
+function renderRecordTable(record: Record<string, number>, label: string): string {
+  const rows = Object.entries(record)
+    .filter(([, value]) => value > 0)
+    .sort((left, right) => right[1] - left[1])
+    .slice(0, 25);
+  if (rows.length === 0) return '- none';
+  return ['| ' + label + ' | durationMs |', '| --- | ---: |', ...rows.map(([key, value]) => `| ${key} | ${value} |`)].join('\n');
+}
+
+function renderMetricTable(items: Array<{ key: string; totalCalls: number; totalDurationMs: number }>): string {
+  if (items.length === 0) return '- none';
+  return ['| key | calls | durationMs |', '| --- | ---: | ---: |', ...items.map((item) => `| ${item.key} | ${item.totalCalls} | ${item.totalDurationMs} |`)].join('\n');
 }

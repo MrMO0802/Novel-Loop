@@ -1,3 +1,10 @@
+---
+promptId: revision.rewrite_chapter
+task: revise chapter draft
+expectedOutput: markdown
+contextBudget: compact
+qualityRisks: unsupported rewrite, lost continuity
+---
 Return final markdown only.
 
 Task:

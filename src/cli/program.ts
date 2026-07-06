@@ -12,6 +12,7 @@ import { registerEvaluateChapterCommand } from './commands/evaluateChapter.js';
 import { registerInitCommand } from './commands/init.js';
 import { registerInspectCommand } from './commands/inspect.js';
 import { registerPlanGlobalCommand } from './commands/planGlobal.js';
+import { registerPromptsCommand } from './commands/prompts.js';
 import { registerProvidersCommand } from './commands/providers.js';
 import { registerRecommitCommand } from './commands/recommit.js';
 import { registerRegenerationPlanCommand } from './commands/regenerationPlan.js';
@@ -31,13 +32,14 @@ export function createProgram(): Command {
   const program = new Command()
     .name('novel-loop')
     .description('Novel Loop Engine local-first CLI')
-    .version('0.1.0')
+    .version('2.5.0-rc.1')
     .showHelpAfterError();
 
   registerInitCommand(program);
   registerValidateCommand(program);
   registerBuildBibleCommand(program);
   registerPlanGlobalCommand(program);
+  registerPromptsCommand(program);
   registerProvidersCommand(program);
   registerChapterCommand(program);
   registerInspectCommand(program);

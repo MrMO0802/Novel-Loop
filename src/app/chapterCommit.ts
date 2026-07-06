@@ -4,6 +4,8 @@ import { z } from 'zod';
 
 import { ChapterQueueStore } from './chapterQueue.js';
 import { blockCodexTextUnsafeOperation } from './codexTextSafety.js';
+import { recordCommitJournalPhase, startCommitJournal } from './commitJournal.js';
+import type { CommitJournalHandle } from './commitJournal.js';
 import { injectFailure } from './pipelineFailure.js';
 import type { FailureInjectionPoint } from './pipelineFailure.js';
 import { ProviderFactory, type ProviderName } from '../llm/ProviderFactory.js';
@@ -223,6 +225,7 @@ export async function commitChapterState(input: ChapterCommitInput, fileStore = 
   const snapshotStore = new SnapshotStore(paths, fileStore);
   const artifacts: string[] = [];
   let activeStage: ChapterQueueStage = 'canon_patch';
+  let commitJournal: CommitJournalHandle | undefined;
 
   try {
     if (
@@ -349,6 +352,19 @@ export async function commitChapterState(input: ChapterCommitInput, fileStore = 
     await queueStore.markStageStart(input.chapterNumber, 'committing', 'commit', input.runId);
     injectFailure(input, 'commit');
 
+    commitJournal = await startCommitJournal({
+      paths,
+      fileStore,
+      chapterNumber: input.chapterNumber,
+      commitKind: 'chapter_commit',
+      provider: input.provider ?? 'mock',
+      runId: input.runId,
+      canonPatchPath: patchPath,
+      latestCommittedChapterBefore: storyStateBefore.latestCommittedChapter,
+      latestCommittedChapterAfter: patch.latestCommittedChapter ?? patch.chapterNumber
+    });
+    artifacts.push(commitJournal.relativePath);
+
     const beforeSnapshot = await snapshotStore.createSnapshot(storyStateBefore, {
       reason: `before_chapter_${formatChapterNumber(input.chapterNumber)}_commit`,
       sourceChapter: input.chapterNumber,
@@ -358,14 +374,25 @@ export async function commitChapterState(input: ChapterCommitInput, fileStore = 
       await new RunLogger(paths, fileStore).recordSnapshot(input.runId, beforeSnapshot, storyStateBefore);
     }
     artifacts.push(relativeSnapshotArtifact(beforeSnapshot.path));
+    await recordCommitJournalPhase(commitJournal, fileStore, 'before_snapshot_created', {
+      beforeSnapshotId: beforeSnapshot.snapshotId
+    });
 
     const applied = await applyCanonPatch(input, patch, fileStore);
     artifacts.push(path.join('state', 'story_state.json'));
+    await recordCommitJournalPhase(commitJournal, fileStore, 'story_state_written', {
+      stateWriteCompleted: true,
+      latestCommittedChapterAfter: applied.storyState.latestCommittedChapter
+    });
+    injectFailure(input, 'post_state_write');
 
     const afterSnapshot = await snapshotStore.createSnapshot(applied.storyState, {
       reason: `after_chapter_${formatChapterNumber(input.chapterNumber)}_commit`,
       sourceChapter: input.chapterNumber,
       ...(input.runId === undefined ? {} : { runId: input.runId })
+    });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'after_snapshot_created', {
+      afterSnapshotId: afterSnapshot.snapshotId
     });
     if (input.runId !== undefined && (await fileStore.exists(paths.runManifest(input.runId)))) {
       const mutationType = input.regenerateStale === true ? 'regenerate_stale_commit' : 'apply_canon_patch';
@@ -386,6 +413,7 @@ export async function commitChapterState(input: ChapterCommitInput, fileStore = 
         applied: true
       });
     }
+    await recordCommitJournalPhase(commitJournal, fileStore, 'state_mutation_recorded');
     artifacts.push(relativeSnapshotArtifact(afterSnapshot.path));
 
     if (repaired) {
@@ -421,7 +449,12 @@ export async function commitChapterState(input: ChapterCommitInput, fileStore = 
     };
     const writtenReport = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'commit_report.json'), report, CommitReportSchema);
     artifacts.push(relativeChapterArtifact(input.chapterNumber, 'commit_report.json'));
+    await recordCommitJournalPhase(commitJournal, fileStore, 'commit_report_written', {
+      commitReportPath: relativeChapterArtifact(input.chapterNumber, 'commit_report.json')
+    });
     await queueStore.markCommitted(input.chapterNumber, input.runId);
+    await recordCommitJournalPhase(commitJournal, fileStore, 'queue_committed', { queueCommitted: true });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'completed');
 
     return {
       status: 'committed',
@@ -435,6 +468,9 @@ export async function commitChapterState(input: ChapterCommitInput, fileStore = 
       repaired
     };
   } catch (error) {
+    if (commitJournal !== undefined) {
+      await recordCommitJournalPhase(commitJournal, fileStore, 'failed', {}, error instanceof Error ? error.message : String(error));
+    }
     if (!(error instanceof AppError && error.code === 'CANON_PATCH_CONFLICT')) {
       await queueStore.markFailed(input.chapterNumber, activeStage, input.runId, error);
     }

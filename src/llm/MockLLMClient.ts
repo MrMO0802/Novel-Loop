@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { resolveBundledAssetPath } from '../runtime/packageAssets.js';
 import { FileStore } from '../storage/FileStore.js';
 import { JsonResponseParser } from './JsonResponseParser.js';
 import type { LLMClient, LLMRequest, LLMResponse } from './LLMClient.js';
@@ -22,7 +23,7 @@ export class MockLLMClient implements LLMClient {
   private readonly fileStore: FileStore;
 
   constructor(options: MockLLMClientOptions = {}) {
-    this.fixturesRoot = options.fixturesRoot ? path.resolve(options.fixturesRoot) : undefined;
+    this.fixturesRoot = options.fixturesRoot ? resolveBundledAssetPath(options.fixturesRoot, 'fixtures/llm') : undefined;
     this.fixtures = options.fixtures ?? {};
     this.scenario = options.scenario ?? 'default';
     this.parser = options.parser ?? new JsonResponseParser();

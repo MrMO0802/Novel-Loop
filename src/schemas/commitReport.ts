@@ -75,6 +75,56 @@ export const CodexCommitConsistencyReportSchema = z.object({
   updatedAt: z.string().optional()
 });
 
+export const CommitJournalPhaseSchema = z.enum([
+  'prepared',
+  'approval_recorded',
+  'canonical_patch_written',
+  'before_snapshot_created',
+  'story_state_written',
+  'after_snapshot_created',
+  'state_mutation_recorded',
+  'commit_report_written',
+  'codex_commit_report_written',
+  'queue_committed',
+  'completed',
+  'failed'
+]);
+
+export const CommitJournalPhaseStatusSchema = z.enum(['completed', 'failed']);
+
+export const CommitJournalEntrySchema = z.object({
+  phase: CommitJournalPhaseSchema,
+  status: CommitJournalPhaseStatusSchema,
+  at: z.string(),
+  message: z.string().optional()
+});
+
+export const CommitJournalSchema = z.object({
+  journalId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  commitKind: z.enum(['chapter_commit', 'codex_controlled_commit']),
+  provider: z.string(),
+  status: z.enum(['in_progress', 'completed', 'failed']),
+  runId: z.string().optional(),
+  journalPath: z.string(),
+  canonPatchPath: z.string().optional(),
+  storyStatePath: z.string().default('state/story_state.json'),
+  beforeSnapshotId: z.string().optional(),
+  afterSnapshotId: z.string().optional(),
+  commitReportPath: z.string().optional(),
+  codexCommitReportPath: z.string().optional(),
+  latestCommittedChapterBefore: z.number().int().nonnegative().optional(),
+  latestCommittedChapterAfter: z.number().int().nonnegative().optional(),
+  stateWriteCompleted: z.boolean(),
+  queueCommitted: z.boolean(),
+  phases: z.array(CommitJournalEntrySchema).min(1),
+  generatedAt: z.string(),
+  updatedAt: z.string()
+});
+
 export type CommitReport = z.infer<typeof CommitReportSchema>;
 export type CodexCommitReport = z.infer<typeof CodexCommitReportSchema>;
 export type CodexCommitConsistencyReport = z.infer<typeof CodexCommitConsistencyReportSchema>;
+export type CommitJournal = z.infer<typeof CommitJournalSchema>;
+export type CommitJournalPhase = z.infer<typeof CommitJournalPhaseSchema>;

@@ -5,10 +5,21 @@ import {
   ArtifactIndexSchema,
   CanonPatchSchema,
   ChapterQueueSchema,
+  ChapterContextSummarySchema,
+  CodexCallReductionReportSchema,
   CodexChapterQualityReportSchema,
+  CodexBudgetReportSchema,
   CodexCommitConsistencyReportSchema,
+  CodexCrossChapterContinuityReportSchema,
+  CodexCrossChapterDriftReportSchema,
+  CodexMultiChapterPilotReportSchema,
   CodexPatchFailureReportSchema,
+  CodexRuntimeBenchmarkReportSchema,
+  CodexRuntimeFailureReportSchema,
+  CodexRuntimeOptimizationReportSchema,
   CodexSingleChapterSmokeReportSchema,
+  CodexStageRuntimeProfileReportSchema,
+  CommitJournalSchema,
   CommitReportSchema,
   ConfigSchema,
   ProjectAuditReportSchema,
@@ -21,6 +32,7 @@ import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { refreshArtifactIndex } from './artifactIndex.js';
+import { isCompletedCommitJournal } from './commitJournal.js';
 import { readFileMetadata } from './fileHash.js';
 import { validateChapterQueueConsistency } from './chapterQueue.js';
 import { verifySnapshots } from './snapshotBrowser.js';
@@ -86,6 +98,7 @@ export async function auditProject(input: ProjectAuditInput, fileStore = new Fil
 
   await checkRunManifests(issues, paths, fileStore);
   await checkArchives(issues, paths, fileStore);
+  await checkCommitJournals(issues, paths, fileStore);
   await checkCodexM25Artifacts(issues, paths, fileStore);
   const snapshotAudit = await verifySnapshots({ projectId: paths.projectId, projectsRoot: paths.projectsRoot }, fileStore);
   for (const snapshotIssue of snapshotAudit.report.issues) {
@@ -153,6 +166,27 @@ async function hasDownstreamInvalidationFor(paths: ProjectPaths, fileStore: File
     }
   }
   return false;
+}
+
+async function checkCommitJournals(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
+  if (!(await fileStore.exists(paths.chaptersDir()))) return;
+  for (const chapterDirName of await fileStore.list(paths.chaptersDir())) {
+    if (!/^chapter_\d{3}$/.test(chapterDirName)) continue;
+    const chapterDir = path.join(paths.chaptersDir(), chapterDirName);
+    for (const fileName of await fileStore.list(chapterDir)) {
+      if (!/^commit_journal_v\d+\.json$/.test(fileName)) continue;
+      const absolutePath = path.join(chapterDir, fileName);
+      const relativePath = path.join('chapters', chapterDirName, fileName);
+      try {
+        const journal = await fileStore.readJson(absolutePath, CommitJournalSchema);
+        if (!isCompletedCommitJournal(journal)) {
+          issues.push(issue(`commit_journal_incomplete_${chapterDirName}_${fileName}`, 'critical', 'commit_journal', relativePath, 'Commit journal is not complete; Story State may have been partially committed.', 'Inspect the journal, snapshots, commit report, and queue before rerunning commit.', true));
+        }
+      } catch (error) {
+        issues.push(issue(`commit_journal_invalid_${chapterDirName}_${fileName}`, 'error', 'commit_journal', relativePath, `Commit journal failed schema validation: ${String(error)}`, 'Repair or preserve the journal before recommitting.', true));
+      }
+    }
+  }
 }
 
 async function checkRunManifests(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
@@ -319,6 +353,33 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^codex_single_chapter_smoke_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_smoke', path.join('audit', fileName), CodexSingleChapterSmokeReportSchema);
       }
+      if (/^codex_multi_chapter_pilot_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_pilot', path.join('audit', fileName), CodexMultiChapterPilotReportSchema);
+      }
+      if (/^codex_cross_chapter_drift_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_drift', path.join('audit', fileName), CodexCrossChapterDriftReportSchema);
+      }
+      if (/^codex_cross_chapter_continuity_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_continuity', path.join('audit', fileName), CodexCrossChapterContinuityReportSchema);
+      }
+      if (/^codex_budget_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_budget', path.join('audit', fileName), CodexBudgetReportSchema);
+      }
+      if (/^codex_call_reduction_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_call_reduction', path.join('audit', fileName), CodexCallReductionReportSchema);
+      }
+      if (/^codex_stage_runtime_profile_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_stage_profile', path.join('audit', fileName), CodexStageRuntimeProfileReportSchema);
+      }
+      if (/^codex_runtime_benchmark_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_benchmark', path.join('audit', fileName), CodexRuntimeBenchmarkReportSchema);
+      }
+      if (/^codex_runtime_optimization_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_optimization', path.join('audit', fileName), CodexRuntimeOptimizationReportSchema);
+      }
+      if (/^codex_runtime_failure_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_failure', path.join('audit', fileName), CodexRuntimeFailureReportSchema);
+      }
     }
   }
   if (!(await fileStore.exists(paths.chaptersDir()))) return;
@@ -330,6 +391,9 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       const relativePath = path.join('chapters', chapterDirName, fileName);
       if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_quality', relativePath, CodexChapterQualityReportSchema);
+      }
+      if (fileName === 'chapter_summary_for_context.json') {
+        await checkJson(issues, fileStore, absolutePath, 'codex_context_summary', relativePath, ChapterContextSummarySchema);
       }
       if (/^codex_patch_failure_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_failure', relativePath, CodexPatchFailureReportSchema);

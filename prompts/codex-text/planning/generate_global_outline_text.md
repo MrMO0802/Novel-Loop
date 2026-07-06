@@ -1,3 +1,10 @@
+---
+promptId: planning.generate_global_outline_text
+task: concise global outline
+expectedOutput: markdown
+contextBudget: compact
+qualityRisks: filler, unfocused premise
+---
 Write a concise global outline for the novel.
 
 Rules:

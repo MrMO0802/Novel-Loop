@@ -1,3 +1,10 @@
+---
+promptId: revision.final_chapter
+task: final chapter assembly
+expectedOutput: markdown
+contextBudget: compact
+qualityRisks: missing ending hook, explanatory filler
+---
 Return final markdown only.
 
 Task:

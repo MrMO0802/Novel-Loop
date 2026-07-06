@@ -23,6 +23,7 @@ export interface BuildBibleInput {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
 }
 
 export interface BuildBibleResult {
@@ -92,6 +93,7 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
       ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
       ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
       ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+      ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
       fixturesRoot: input.fixturesRoot ?? DEFAULT_FIXTURES_ROOT,
       telemetry: {
         paths,

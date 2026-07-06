@@ -25,6 +25,7 @@ export interface ProviderFactoryOptions {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
 }
 
 export class ProviderFactory {
@@ -60,6 +61,7 @@ export class ProviderFactory {
         ...(options.codexJsonRetries === undefined ? {} : { codexJsonRetries: options.codexJsonRetries }),
         ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
         ...(options.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: options.codexJsonRepairRetries }),
+        ...(options.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: options.codexTimeoutMs }),
         ...(options.telemetry === undefined ? {} : { telemetry: options.telemetry })
       });
     } else {

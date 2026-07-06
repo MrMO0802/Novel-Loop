@@ -1,7 +1,10 @@
 import path from 'node:path';
 
 import { ChapterQueueStore } from './chapterQueue.js';
+import { generateChapterContextSummary } from './chapterContextSummary.js';
 import { evaluateCodexChapterQuality } from './codexChapterQuality.js';
+import { recordCommitJournalPhase, startCommitJournal } from './commitJournal.js';
+import type { CommitJournalHandle } from './commitJournal.js';
 import { applyCanonPatchToStoryState, checkPatchConflicts, detectPatchConflictItems } from './chapterCommit.js';
 import { qualityGate } from './chapterRevisionLoop.js';
 import { writePatchPreviewDiff } from './stateDiff.js';
@@ -55,6 +58,7 @@ export interface CodexControlledCommitInput {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
   maxRevisions?: number;
   commit?: boolean;
   confirmCodexCommit?: boolean;
@@ -144,6 +148,7 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
   const generatedArtifacts: string[] = [];
   const reusedArtifacts: string[] = [];
   let activeStage: ChapterQueueStage = 'diagnostics';
+  let commitJournal: CommitJournalHandle | undefined;
 
   await ensureCodexPrerequisites(paths, fileStore, input.chapterNumber);
   const storyStateBefore = await fileStore.readJson(paths.storyState(), StoryStateSchema);
@@ -393,6 +398,19 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
 
     activeStage = 'commit';
     await queueStore.markStageStart(input.chapterNumber, 'committing', 'commit', runId);
+    commitJournal = await startCommitJournal({
+      paths,
+      fileStore,
+      chapterNumber: input.chapterNumber,
+      commitKind: 'codex_controlled_commit',
+      provider: 'codex-text',
+      runId,
+      canonPatchPath: patchResult.artifact,
+      latestCommittedChapterBefore: storyStateBefore.latestCommittedChapter,
+      latestCommittedChapterAfter: patchResult.value.latestCommittedChapter ?? patchResult.value.chapterNumber
+    });
+    recordArtifact(artifacts, commitJournal.relativePath, generatedArtifacts);
+
     const approvalRecord = await writeCodexApprovalRecord(paths, fileStore, input.chapterNumber, patchResult.artifact, diff.relativeJsonPath);
     recordArtifact(artifacts, approvalRecord.path, generatedArtifacts);
     await runLogger.recordArtifact(runId, approvalRecord.path, 'generated');
@@ -400,8 +418,9 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       stage: 'commit',
       chapterNumber: input.chapterNumber,
       relatedArtifactPaths: [approvalRecord.path, patchResult.artifact, diff.relativeJsonPath],
-      payload: approvalRecord.record
-    });
+        payload: approvalRecord.record
+      });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'approval_recorded');
 
     const canonicalPatchPath = relativeChapterArtifact(input.chapterNumber, 'canon_patch.json');
     await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'canon_patch.json'), patchResult.value, CanonPatchSchema);
@@ -412,6 +431,9 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       stage: 'commit',
       provenanceNote: 'accepted local copy of codex patch proposal'
     });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'canonical_patch_written', {
+      canonPatchPath: canonicalPatchPath
+    });
 
     const snapshotStore = new SnapshotStore(paths, fileStore);
     const beforeSnapshot = await snapshotStore.createSnapshot(storyStateBefore, {
@@ -421,6 +443,9 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     });
     await runLogger.recordSnapshot(runId, beforeSnapshot, storyStateBefore);
     recordArtifact(artifacts, relativeSnapshotArtifact(beforeSnapshot.path), generatedArtifacts);
+    await recordCommitJournalPhase(commitJournal, fileStore, 'before_snapshot_created', {
+      beforeSnapshotId: beforeSnapshot.snapshotId
+    });
 
     const applied = applyCanonPatchToStoryState(storyStateBefore, patchResult.value);
     await fileStore.writeJson(paths.storyState(), applied.storyState, StoryStateSchema);
@@ -431,6 +456,10 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       stage: 'commit',
       provenanceNote: 'Story State updated by local controlled commit apply'
     });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'story_state_written', {
+      stateWriteCompleted: true,
+      latestCommittedChapterAfter: applied.storyState.latestCommittedChapter
+    });
 
     const afterSnapshot = await snapshotStore.createSnapshot(applied.storyState, {
       reason: `after_chapter_${formatChapterNumber(input.chapterNumber)}_codex_controlled_commit`,
@@ -439,6 +468,9 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     });
     await runLogger.recordSnapshot(runId, afterSnapshot, applied.storyState);
     recordArtifact(artifacts, relativeSnapshotArtifact(afterSnapshot.path), generatedArtifacts);
+    await recordCommitJournalPhase(commitJournal, fileStore, 'after_snapshot_created', {
+      afterSnapshotId: afterSnapshot.snapshotId
+    });
 
     await runLogger.recordStateMutation(runId, {
       mutationType: 'codex_controlled_commit',
@@ -455,10 +487,14 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       applied: true,
       stateDiffPath: diff.relativeJsonPath
     });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'state_mutation_recorded');
 
     const commitReport = await writeCompatibleCommitReport(paths, fileStore, input.chapterNumber, canonicalPatchPath, beforeSnapshot, afterSnapshot, conflicts, applied.appliedChanges);
     recordArtifact(artifacts, commitReport.path, generatedArtifacts);
     await runLogger.recordArtifact(runId, commitReport.path, 'generated');
+    await recordCommitJournalPhase(commitJournal, fileStore, 'commit_report_written', {
+      commitReportPath: commitReport.path
+    });
 
     const codexCommitReport = await writeCodexCommitReport(paths, fileStore, input.chapterNumber, {
       canonPatchPath: patchResult.artifact,
@@ -474,12 +510,15 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     });
     recordArtifact(artifacts, codexCommitReport.path, generatedArtifacts);
     await runLogger.recordArtifact(runId, codexCommitReport.path, 'generated');
+    await recordCommitJournalPhase(commitJournal, fileStore, 'codex_commit_report_written', {
+      codexCommitReportPath: codexCommitReport.path
+    });
 
     const updatedConsistencyReportPath = await updateCodexCommitConsistencyReport(paths, fileStore, input.chapterNumber, consistencyReportPath, {
       confirmedPatchPath: patchResult.artifact,
       confirmedStateDiffPath: diff.relativeJsonPath,
       confirmedStoryStateHash: hashJson(storyStateBefore),
-      patchesEquivalent: await patchesEquivalent(paths, fileStore, consistencyReportPath, patchResult.value),
+      patchesEquivalent: reusedPreviewArtifacts ? true : await patchesEquivalent(paths, fileStore, consistencyReportPath, patchResult.value),
       stateDiffsEquivalent: await stateDiffsEquivalent(paths, fileStore, consistencyReportPath, diff.relativeJsonPath),
       reusedPreviewArtifacts
     });
@@ -488,8 +527,46 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     }
     await runLogger.recordArtifact(runId, updatedConsistencyReportPath, 'generated');
 
+    try {
+      const summary = await generateChapterContextSummary(
+        {
+          projectId: paths.projectId,
+          projectsRoot: paths.projectsRoot,
+          chapterNumber: input.chapterNumber
+        },
+        fileStore
+      );
+      recordArtifact(artifacts, summary.jsonPath, generatedArtifacts);
+      recordArtifact(artifacts, summary.markdownPath, generatedArtifacts);
+      await runLogger.recordArtifact(runId, summary.jsonPath, {
+        action: 'generated',
+        stage: 'context',
+        derivedFrom: [final.artifact, canonicalPatchPath],
+        provenanceNote: 'local deterministic chapter summary for future Codex context'
+      });
+      await runLogger.recordArtifact(runId, summary.markdownPath, {
+        action: 'generated',
+        stage: 'context',
+        derivedFrom: [summary.jsonPath],
+        provenanceNote: 'markdown summary for future Codex context'
+      });
+    } catch (error) {
+      await runLogger.recordError(runId, {
+        code: 'CODEX_CONTEXT_SUMMARY_FAILED',
+        message: getErrorMessage(error),
+        recoverable: true
+      });
+    }
+
     await queueStore.markStageComplete(input.chapterNumber, 'patch_extracted', 'canon_patch', runId);
     await queueStore.markCommitted(input.chapterNumber, runId);
+    await recordCommitJournalPhase(commitJournal, fileStore, 'queue_committed', { queueCommitted: true });
+    await recordCommitJournalPhase(commitJournal, fileStore, 'completed');
+    await runLogger.recordArtifact(runId, commitJournal.relativePath, {
+      action: 'generated',
+      stage: 'commit',
+      provenanceNote: 'completed controlled commit safety journal'
+    });
     await runLogger.endRun(runId, 'completed');
     const finalQueueItem = await queueStore.getRequiredChapter(input.chapterNumber);
     return {
@@ -521,6 +598,18 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       afterSnapshotId: afterSnapshot.snapshotId
     };
   } catch (error) {
+    if (commitJournal !== undefined) {
+      await recordCommitJournalPhase(commitJournal, fileStore, 'failed', {}, getErrorMessage(error));
+      try {
+        await runLogger.recordArtifact(runId, commitJournal.relativePath, {
+          action: 'generated',
+          stage: 'commit',
+          provenanceNote: 'failed controlled commit safety journal'
+        });
+      } catch {
+        // Preserve the original failure if journal lineage recording fails.
+      }
+    }
     const patchFailureReportPath = shouldWriteCodexPatchFailureReport(error, activeStage)
       ? await writeCodexPatchFailureReport(paths, fileStore, input, runId, activeStage, error)
       : undefined;
@@ -678,6 +767,17 @@ async function generateCodexDiagnostics(
     chapterNumber: input.chapterNumber
   });
   const artifact = relativeChapterArtifact(input.chapterNumber, 'diagnostics_v1.json');
+  if (
+    typeof normalized === 'object' &&
+    normalized !== null &&
+    'normalizationWarnings' in normalized &&
+    Array.isArray((normalized as DiagnosticsReport).normalizationWarnings)
+  ) {
+    (normalized as DiagnosticsReport).normalizationWarnings = (normalized as DiagnosticsReport).normalizationWarnings.map((warning) => ({
+      ...warning,
+      artifactPath: artifact
+    }));
+  }
   const value = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'diagnostics_v1.json'), normalized, DiagnosticsReportSchema);
   return { artifact, value };
 }
@@ -946,6 +1046,7 @@ function createCodexLlmClient(input: CodexControlledCommitInput, paths: ProjectP
     ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
     ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
     ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+    ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
     telemetry: {
       paths,
       runId,

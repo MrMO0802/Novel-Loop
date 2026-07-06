@@ -1,3 +1,10 @@
+---
+promptId: planning.generate_plan_candidates_slim
+task: bounded plan candidates
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: duplicate candidates, low tension
+---
 Return only JSON that matches the provided output schema.
 
 Task:

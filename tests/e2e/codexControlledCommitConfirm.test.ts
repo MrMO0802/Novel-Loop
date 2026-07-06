@@ -9,7 +9,7 @@ import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { runChapterFullProduction } from '../../src/app/chapterPipeline.js';
 import { initProject } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
-import { ApprovalRecordSchema, ChapterQueueSchema, RunEventSchema, RunManifestSchema, StoryStateSchema } from '../../src/schemas/index.js';
+import { ApprovalRecordSchema, ChapterQueueSchema, CommitJournalSchema, RunEventSchema, RunManifestSchema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 import { SnapshotStore } from '../../src/storage/SnapshotStore.js';
@@ -78,6 +78,22 @@ describe('M24 codex controlled commit confirm', () => {
       latestCommittedChapterBefore: 0,
       latestCommittedChapterAfter: 1
     });
+
+    const journal = await store.readJson(paths.chapterArtifact(1, 'commit_journal_v1.json'), CommitJournalSchema);
+    expect(journal).toMatchObject({
+      projectId,
+      chapterNumber: 1,
+      commitKind: 'codex_controlled_commit',
+      provider: 'codex-text',
+      status: 'completed',
+      stateWriteCompleted: true,
+      queueCommitted: true,
+      commitReportPath: 'chapters/chapter_001/commit_report.json',
+      codexCommitReportPath: 'chapters/chapter_001/codex_commit_report_v1.json'
+    });
+    expect(journal.phases.map((phase) => phase.phase)).toEqual(
+      expect.arrayContaining(['approval_recorded', 'canonical_patch_written', 'story_state_written', 'codex_commit_report_written', 'completed'])
+    );
 
     const snapshots = await new SnapshotStore(paths, store).listSnapshots();
     expect(snapshots.some((snapshot) => snapshot.reason === 'before_chapter_001_codex_controlled_commit')).toBe(true);

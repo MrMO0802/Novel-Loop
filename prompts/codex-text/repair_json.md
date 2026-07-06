@@ -1,3 +1,10 @@
+---
+promptId: repair_json
+task: JSON schema repair
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: semantic drift, invented plot content
+---
 Return only corrected JSON matching the output schema.
 
 Rules:

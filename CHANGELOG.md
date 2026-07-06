@@ -1,5 +1,69 @@
 # Changelog
 
+## v2.5.0-rc.1
+
+Release candidate packaging for the accepted M26.5 / v2.4.0 Codex pilot baseline.
+
+- Set package and CLI version to `2.5.0-rc.1`.
+- Added a release-candidate execution plan in `Plan.md`.
+- Added a v2.5.0-rc.1 release checkpoint document.
+- Added operator documentation for the Codex pilot as a P0 deliverable.
+- Added Commit Safety Journal hardening for normal mock commits and confirmed Codex controlled commits, with audit detection for incomplete journals.
+- Kept the supported delivery surface focused on deterministic mock workflows, the read-only Codex execution boundary, `provider=codex-text`, controlled single-chapter commit, Codex single-chapter smoke, Codex multi-chapter pilot for chapters 1-3, and M26.5 progressive Codex runtime benchmarks.
+- Marked internal/experimental CLI surfaces in help and docs so included diagnostic commands are not treated as stable RC APIs.
+- Marked `providers list` entries with RC release status so legacy `real` / `openai` providers remain visible but out of scope.
+- Clarified that real Codex smoke should remain optional/non-required in CI because it depends on a local Codex binary and login state.
+- Clarified that dependency audit noise should be isolated from the required build/test gate.
+
+Known limitations:
+
+- This release candidate does not add DeepSeek, OpenAI API calls, CodexAgentConnector, workspace-write mode, Web UI behavior, Codex historical recommit, Codex stale regeneration commit, or broader real Codex multi-chapter stability guarantees.
+- M27 output/runtime optimization work is intentionally excluded from the release-candidate commitment.
+- Commit Safety Journal is a focused diagnostic record, not a broad filesystem transaction manager.
+- Commit Safety Journal detects incomplete commits through audit; it does not perform automatic recovery.
+- Real Codex pilot behavior still depends on the user's local Codex binary, login state, model behavior, and host performance.
+
+## v2.4.1-codex-runtime-benchmark
+
+Added M26.5 Codex runtime stabilization and progressive benchmark support:
+
+- Added `codex benchmark --level health|bible|plan|draft|preview|confirm|chapter2|chapter3|all`.
+- Added `CodexRuntimeBenchmarkReportSchema` and `CodexRuntimeFailureReportSchema`.
+- Benchmark reports record stage duration, Codex call counts, retry/repair/timeout counts, prompt/schema/output/raw JSONL byte counts, artifact counts, Story State mutation status, and suggested retry commands.
+- Added stage timeout handling with `CODEX_TIMEOUT` failure reports that keep Story State unmutated.
+- Added progressive resume support so confirm can reuse preview artifacts and committed chapters are not repeated.
+- Added `--compare-profiles clean,debug` profile comparison output.
+- Run Manifest v2 prompt calls now include prompt, context, schema, output, and raw JSONL byte counts.
+- Audit, artifact index, and run lineage now recognize Codex runtime benchmark and runtime failure reports.
+- Fake Codex fixtures now support deterministic timeout and missing-output benchmark scenarios.
+
+Known limitations:
+
+- This does not add DeepSeek, OpenAI API calls, CodexAgentConnector, workspace-write mode, Web UI behavior, Codex historical recommit, Codex stale regeneration commit, or conflict recovery for Codex.
+- Long-form quality optimization remains out of scope; reports are runtime/provenance diagnostics.
+- Real Codex benchmark duration depends on the user's local Codex binary, login, model behavior, and host runtime.
+
+## v2.4.0-codex-multi-chapter-pilot
+
+Added M26 Codex multi-chapter pilot:
+
+- Added `codex multi-chapter-pilot` and `pnpm run demo:codex-multi-chapter` for a controlled chapters 1-3 Codex pilot.
+- Each Codex chapter now follows draft, preview-only controlled commit, confirmed commit, local quality report, validate, and audit traceability.
+- Added `CodexMultiChapterPilotReportSchema`, `CodexCrossChapterDriftReportSchema`, and `CodexBudgetReportSchema`.
+- Added `audit/codex_multi_chapter_pilot_report_vN.json/.md`, `audit/codex_cross_chapter_drift_report_vN.json/.md`, and `audit/codex_budget_report_vN.json/.md`.
+- Added deterministic cross-chapter drift checks for latest chapter, queue status, canon facts, timeline, placeholders, reader state, debts, foreshadowing, duplicates, and diagnostics normalization warnings.
+- Added `evaluate-continuity <projectId> --chapters 1-3` for read-only local drift evaluation.
+- Added per-chapter Codex call/runtime/exec timeout controls and budget reports that stop before uncontrolled Story State mutation.
+- Diagnostics score normalization now writes explicit `normalizationWarnings` into diagnostics and Codex quality reports.
+- Fake Codex fixtures now produce chapter-scoped outputs for chapters 1-3.
+- Audit and artifact index now recognize M26 Codex pilot, drift, and budget reports.
+
+Known limitations:
+
+- M26 does not add DeepSeek, OpenAI API calls, CodexAgentConnector, workspace-write mode, Web UI behavior, Codex historical recommit, Codex stale regeneration commit, or Codex conflict auto-repair commit.
+- The multi-chapter pilot is scoped to normal next chapters 1-3.
+- Cross-chapter drift checks are deterministic engineering checks, not long-form literary quality evaluation.
+
 ## v2.3.0-codex-single-chapter-loop
 
 Added M25 Codex single-chapter full-loop hardening:

@@ -1,3 +1,10 @@
+---
+promptId: planning.plan_chapter_mission_slim
+task: compact chapter mission
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: ignoring open debts, overloading mission
+---
 Return only JSON that matches the provided output schema.
 
 Task:

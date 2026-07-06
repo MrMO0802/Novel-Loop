@@ -44,12 +44,13 @@ export type { SceneCard, SceneCards } from './sceneCard.js';
 
 export {
   DiagnosticsHardChecksSchema,
+  DiagnosticsNormalizationWarningSchema,
   DiagnosticsReportSchema,
   DiagnosticsScoreSchema,
   DiagnosticsSoftScoresSchema,
   HardCheckResultSchema
 } from './diagnostics.js';
-export type { DiagnosticsHardChecks, DiagnosticsReport, DiagnosticsSoftScores } from './diagnostics.js';
+export type { DiagnosticsHardChecks, DiagnosticsNormalizationWarning, DiagnosticsReport, DiagnosticsSoftScores } from './diagnostics.js';
 
 export { RevisionOperationSchema, RevisionPlanSchema, RevisionStrategySchema, RevisionTargetSchema } from './revisionPlan.js';
 export type { RevisionOperation, RevisionPlan, RevisionStrategy, RevisionTarget } from './revisionPlan.js';
@@ -60,8 +61,16 @@ export type { FailureReport } from './failureReport.js';
 export { CanonPatchSchema, PatchConflictReportSchema, ReaderStatePatchSchema } from './canonPatch.js';
 export type { CanonPatch, PatchConflictReport, ReaderStatePatch } from './canonPatch.js';
 
-export { CodexCommitConsistencyReportSchema, CodexCommitReportSchema, CommitReportSchema } from './commitReport.js';
-export type { CodexCommitConsistencyReport, CodexCommitReport, CommitReport } from './commitReport.js';
+export {
+  CodexCommitConsistencyReportSchema,
+  CodexCommitReportSchema,
+  CommitJournalEntrySchema,
+  CommitJournalPhaseSchema,
+  CommitJournalPhaseStatusSchema,
+  CommitJournalSchema,
+  CommitReportSchema
+} from './commitReport.js';
+export type { CodexCommitConsistencyReport, CodexCommitReport, CommitJournal, CommitJournalPhase, CommitReport } from './commitReport.js';
 
 export {
   ArchiveManifestSchema,
@@ -201,25 +210,62 @@ export type { Snapshot, SnapshotMeta } from './snapshot.js';
 
 export {
   CodexChapterQualityReportSchema,
+  ChapterContextSummarySchema,
+  CodexCallReductionReportSchema,
   CodexContextArtifactSchema,
   CodexContextManifestSchema,
+  CodexBudgetReportSchema,
+  CodexBenchmarkLevelSchema,
+  CodexCrossChapterContinuityReportSchema,
+  CodexCrossChapterLinkSchema,
+  CodexCrossChapterDriftIssueSchema,
+  CodexCrossChapterDriftReportSchema,
   CodexErrorTypeSchema,
   CodexJsonFailureAttemptSchema,
   CodexJsonFailureReportSchema,
+  CodexMultiChapterPilotChapterSchema,
+  CodexMultiChapterPilotReportSchema,
   CodexPatchFailureReportSchema,
+  CodexPromptAuditIssueSchema,
+  CodexPromptAuditReportSchema,
+  CodexProfileComparisonItemSchema,
+  CodexRuntimeBenchmarkReportSchema,
+  CodexRuntimeBenchmarkStageSchema,
+  CodexRuntimeFailureReportSchema,
+  CodexRuntimeOptimizationReportSchema,
   CodexSingleChapterSmokeReportSchema,
-  CodexSingleChapterSmokeStageSchema
+  CodexSingleChapterSmokeStageSchema,
+  CodexStageRuntimeOptimizationCandidateSchema,
+  CodexStageRuntimeProfileReportSchema
 } from './codexHardening.js';
 export type {
+  CodexBudgetReport,
+  CodexBenchmarkLevel,
   CodexChapterQualityReport,
+  ChapterContextSummary,
+  CodexCallReductionReport,
   CodexContextArtifact,
   CodexContextManifest,
+  CodexCrossChapterContinuityReport,
+  CodexCrossChapterLink,
+  CodexCrossChapterDriftIssue,
+  CodexCrossChapterDriftReport,
   CodexErrorType,
   CodexJsonFailureAttempt,
   CodexJsonFailureReport,
+  CodexMultiChapterPilotChapter,
+  CodexMultiChapterPilotReport,
   CodexPatchFailureReport,
+  CodexPromptAuditIssue,
+  CodexPromptAuditReport,
+  CodexProfileComparisonItem,
+  CodexRuntimeBenchmarkReport,
+  CodexRuntimeBenchmarkStage,
+  CodexRuntimeFailureReport,
+  CodexRuntimeOptimizationReport,
   CodexSingleChapterSmokeReport,
-  CodexSingleChapterSmokeStage
+  CodexSingleChapterSmokeStage,
+  CodexStageRuntimeProfileReport
 } from './codexHardening.js';
 
 export { ArcMapSchema, ChapterQueueSchema, ChapterQueueStageSchema, ChapterQueueStatusSchema } from './planningArtifacts.js';

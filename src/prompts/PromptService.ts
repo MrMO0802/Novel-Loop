@@ -1,5 +1,6 @@
 import path from 'node:path';
 
+import { resolveBundledAssetPath } from '../runtime/packageAssets.js';
 import { FileStore } from '../storage/FileStore.js';
 import { TemplateRenderer, type TemplateValues } from './TemplateRenderer.js';
 
@@ -11,7 +12,7 @@ export class PromptService {
     private readonly fileStore = new FileStore(),
     private readonly renderer = new TemplateRenderer()
   ) {
-    this.promptRoot = path.resolve(promptRoot);
+    this.promptRoot = resolveBundledAssetPath(promptRoot, 'prompts');
   }
 
   async loadTemplate(promptId: string): Promise<string> {

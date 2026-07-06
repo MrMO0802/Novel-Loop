@@ -91,6 +91,7 @@ interface CodexCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number;
+  timedOut?: boolean;
 }
 
 interface ExecPromptInput extends CodexBoundaryInput {
@@ -290,6 +291,11 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
     const rawResponseRedacted = redactSensitive(commandResult.stdout);
     const stderrExcerpt = redactSensitive(commandResult.stderr).slice(0, 4000);
     await fileStore.writeText(paths.projectArtifact(rawOutputPath), rawResponseRedacted);
+    if (commandResult.timedOut === true) {
+      throw new AppError('CODEX_TIMEOUT', `Codex CLI command timed out after ${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms: ${stderrExcerpt || 'no stderr'}`, 1, {
+        reason: `timeoutMs=${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}`
+      });
+    }
     if (!(await fileStore.exists(paths.projectArtifact(finalOutputPath)))) {
       const extracted = extractFinalMessage(commandResult.stdout);
       if (extracted.trim().length === 0) {
@@ -309,6 +315,7 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
     }
     const finalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
     const latencyMs = Math.max(0, Date.now() - startedAtMs);
+    const schemaBytes = input.schemaPath === undefined ? 0 : await safeFileSize(input.schemaPath, fileStore);
     await runLogger.recordLlmCall(runId, {
       promptId: `codex.${input.operation}`,
       provider: 'codex-cli',
@@ -318,6 +325,11 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
       startedAt,
       endedAt,
       latencyMs,
+      promptInputBytes: byteLength(input.promptText),
+      contextBytes: byteLength(input.promptText),
+      schemaBytes,
+      outputBytes: byteLength(finalText),
+      rawJsonlBytes: byteLength(rawResponseRedacted),
       inputArtifactPath: promptArtifactPath,
       outputArtifactPath: finalOutputPath,
       inputHash: sha256(input.promptText),
@@ -400,11 +412,12 @@ async function runCodexCommand(binaryPath: string, args: string[], input: CodexB
       },
       (error, stdout, stderr) => {
         if (error !== null) {
-          const childError = error as Error & { code?: unknown; signal?: unknown };
+          const childError = error as Error & { code?: unknown; signal?: unknown; killed?: unknown };
           const redactedStderr = redactSensitive(String(stderr ?? ''));
           const redactedStdout = redactSensitive(String(stdout ?? ''));
+          const timedOut = childError.signal === 'SIGTERM' || childError.killed === true || /timed out|timeout/i.test(childError.message);
           reject(
-            new AppError('CODEX_EXEC_FAILED', `Codex CLI command failed: ${redactedStderr || redactedStdout || childError.message}`, 1, {
+            new AppError(timedOut ? 'CODEX_TIMEOUT' : 'CODEX_EXEC_FAILED', `Codex CLI command failed: ${redactedStderr || redactedStdout || childError.message}`, 1, {
               reason: `exit=${String(childError.code ?? 'unknown')} signal=${String(childError.signal ?? 'none')}`
             })
           );
@@ -477,11 +490,13 @@ async function runCodexExecCommand(binaryPath: string, args: string[], input: Co
         env: process.env
       },
       (error, stdout, stderr) => {
-        const childError = error as (Error & { code?: unknown; signal?: unknown }) | null;
+        const childError = error as (Error & { code?: unknown; signal?: unknown; killed?: unknown }) | null;
+        const timedOut = childError !== null && (childError.signal === 'SIGTERM' || childError.killed === true || /timed out|timeout/i.test(childError.message));
         resolve({
           stdout: typeof stdout === 'string' ? stdout : String(stdout ?? ''),
           stderr: typeof stderr === 'string' ? stderr : String(stderr ?? childError?.message ?? ''),
-          exitCode: error === null ? 0 : typeof childError?.code === 'number' ? childError.code : 1
+          exitCode: error === null ? 0 : typeof childError?.code === 'number' ? childError.code : 1,
+          ...(timedOut ? { timedOut: true } : {})
         });
       }
     );
@@ -617,6 +632,18 @@ function createRunId(operation: string): string {
 
 function safePromptPath(filePath: string): string {
   return path.resolve(filePath);
+}
+
+async function safeFileSize(filePath: string, fileStore: FileStore): Promise<number> {
+  try {
+    return byteLength(await fileStore.readText(filePath));
+  } catch {
+    return 0;
+  }
+}
+
+function byteLength(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
 }
 
 function posixJoin(...segments: string[]): string {

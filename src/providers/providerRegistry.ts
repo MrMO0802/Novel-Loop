@@ -3,7 +3,7 @@ import path from 'node:path';
 import { execCodexJsonPrompt, runCodexSmoke, checkCodexStatus } from '../app/codexBoundary.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { CODEX_TEXT_CAPABILITIES, STATIC_PROVIDER_CAPABILITIES } from './providerCapabilities.js';
-import type { ProviderHealth, ProviderId, ProviderInspectResult, ProviderListItem } from './providerTypes.js';
+import type { ProviderHealth, ProviderId, ProviderInspectResult, ProviderListItem, ProviderReleaseStatus } from './providerTypes.js';
 
 export interface ProviderRegistryOptions {
   codexBin?: string;
@@ -17,8 +17,15 @@ const DEFAULT_PROJECT_ID = 'codex-boundary';
 export function listProviders(): ProviderListItem[] {
   return STATIC_PROVIDER_CAPABILITIES.map((capabilities) => ({
     providerId: capabilities.providerId,
-    capabilities
+    capabilities,
+    releaseStatus: providerReleaseStatus(capabilities.providerId)
   }));
+}
+
+function providerReleaseStatus(providerId: ProviderId): ProviderReleaseStatus {
+  if (providerId === 'mock') return 'stable-rc';
+  if (providerId === 'codex-text') return 'pilot-rc';
+  return 'legacy-out-of-scope';
 }
 
 export async function inspectProvider(providerId: ProviderId, options: ProviderRegistryOptions = {}): Promise<ProviderInspectResult> {

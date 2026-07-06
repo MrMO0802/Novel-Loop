@@ -28,6 +28,7 @@ export interface RunCodexSingleChapterSmokeInput {
   codexProfile?: CodexProfile;
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
+  codexTimeoutMs?: number;
   clean?: boolean;
 }
 
@@ -340,7 +341,8 @@ function codexOptions(input: RunCodexSingleChapterSmokeInput) {
     ...(input.codexBin === undefined ? {} : { codexBin: input.codexBin }),
     codexProfile: input.codexProfile ?? 'clean',
     codexJsonRetries: input.codexJsonRetries ?? 2,
-    codexJsonRepair: input.codexJsonRepair ?? true
+    codexJsonRepair: input.codexJsonRepair ?? true,
+    codexTimeoutMs: input.codexTimeoutMs ?? 180_000
   };
 }
 

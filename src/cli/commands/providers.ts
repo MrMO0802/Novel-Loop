@@ -26,7 +26,10 @@ export function registerProvidersCommand(program: Command): void {
       }
       process.stdout.write(
         result
-          .map((provider) => `${provider.providerId}\ttransport=${provider.capabilities.transport}\tcommitDefault=${provider.capabilities.allowCommitByDefault}`)
+          .map(
+            (provider) =>
+              `${provider.providerId}\ttransport=${provider.capabilities.transport}\tcommitDefault=${provider.capabilities.allowCommitByDefault}\tstatus=${provider.releaseStatus}`
+          )
           .join('\n') + '\n'
       );
     });

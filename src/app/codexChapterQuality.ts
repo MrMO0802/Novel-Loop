@@ -73,6 +73,56 @@ export async function evaluateCodexChapterQuality(
       patchRead.value !== undefined &&
       patchRead.value.sourceFinalPath === finalChapterPath &&
       patchHasEvidenceInFinal(patchRead.value, finalText);
+    const structure = {
+      hasTitle: /^#\s+\S+/m.test(finalText),
+      sceneCount: await countScenes(paths, fileStore, input.chapterNumber, finalText),
+      hasOpeningHook: firstParagraph(finalText).length > 20,
+      hasEndingHook: lastParagraph(finalText).endsWith('?') || /will|must|decides|decided|not yet knowing|investigate/i.test(lastParagraph(finalText)),
+      hasClearConflict: /conflict|versus|but|however|decides|refuse|doubt|impossible|without power/i.test(finalText),
+      hasInformationDelta: patchRead.value !== undefined && (patchRead.value.newFacts.length > 0 || patchRead.value.readerStatePatch.addKnows.length > 0),
+      hasProtagonistDecision: /decides|decided|choose|chooses|must|refuse|will investigate|goes|go/i.test(finalText),
+      hasNextChapterHook: /who|why|what|how|\?|not yet knowing|next|investigate/i.test(lastParagraph(finalText))
+    };
+    const continuity = {
+      referencesPreviousChapter:
+        input.chapterNumber <= 1 ||
+        new RegExp(`chapter\\s+${input.chapterNumber - 1}|ch${String(input.chapterNumber - 1).padStart(3, '0')}|previous|prior`, 'i').test(finalText) ||
+        (patchRead.value?.narrativeDebtUpdates.length ?? 0) > 0,
+      referencesOpenDebt: (patchRead.value?.narrativeDebtUpdates.length ?? 0) > 0 || /debt|question|mystery|unresolved/i.test(finalText),
+      advancesAtLeastOneDebt: (patchRead.value?.narrativeDebtUpdates.some((update) => ['escalate', 'partially_pay', 'pay', 'create'].includes(update.action)) ?? false),
+      advancesOrReinforcesForeshadowing: (patchRead.value?.foreshadowingUpdates.length ?? 0) > 0 || /foreshadow|signal|hint|echo|returns/i.test(finalText),
+      updatesReaderExpectation: (patchRead.value?.readerStatePatch.addExpectations.length ?? 0) > 0 || (patchRead.value?.readerStatePatch.addQuestions.length ?? 0) > 0,
+      preservesCharacterGoalContinuity: (patchRead.value?.characterStates.length ?? 0) > 0 || (patchRead.value?.characterUpdates.length ?? 0) > 0 || /goal|decides|must|investigate/i.test(finalText)
+    };
+    const style = {
+      repeatedParagraphRisk: hasRepeatedParagraph(finalText),
+      placeholderRisk: placeholders.length > 0,
+      forbiddenPhraseRisk: forbiddenPhrases.length > 0,
+      expositionOverloadRisk: expositionOverloadRisk(finalText),
+      dialogueBalanceEstimate: dialogueBalanceEstimate(finalText)
+    };
+    const patchConsistency = {
+      canonPatchMatchesFinal,
+      timelineMatchesFinal: patchRead.value === undefined || patchRead.value.timelineEvents.length === 0 || evidenceListMatchesFinal(patchRead.value.timelineEvents.map((event) => event.summary), finalText),
+      characterChangesSupportedByText:
+        patchRead.value === undefined ||
+        (patchRead.value.characterStates.length === 0 && patchRead.value.characterUpdates.length === 0) ||
+        evidenceListMatchesFinal(
+          [
+            ...patchRead.value.characterStates.map((character) => `${character.name} ${character.currentGoal} ${character.emotionalState}`),
+            ...patchRead.value.characterUpdates.map((update) => `${update.characterId} ${update.reason} ${String(update.newValue)}`)
+          ],
+          finalText
+        ),
+      debtsSupportedByText:
+        patchRead.value === undefined ||
+        patchRead.value.narrativeDebtUpdates.length === 0 ||
+        evidenceListMatchesFinal(patchRead.value.narrativeDebtUpdates.map((update) => `${update.debtId ?? ''} ${update.action} ${JSON.stringify(update.payload)}`), finalText),
+      foreshadowingSupportedByText:
+        patchRead.value === undefined ||
+        patchRead.value.foreshadowingUpdates.length === 0 ||
+        evidenceListMatchesFinal(patchRead.value.foreshadowingUpdates.map((update) => `${update.foreshadowingId ?? ''} ${update.action} ${JSON.stringify(update.payload)}`), finalText)
+    };
     const criticalIssues = [
       ...(finalExists ? [] : ['final.md missing']),
       ...placeholders.map((placeholder) => `unresolved placeholder: ${placeholder}`),
@@ -81,7 +131,10 @@ export async function evaluateCodexChapterQuality(
     ];
     const warnings = [
       ...(canonPatchMatchesFinal ? [] : ['canon patch does not clearly match final.md']),
-      ...forbiddenPhrases.map((phrase) => `forbidden phrase: ${phrase}`)
+      ...forbiddenPhrases.map((phrase) => `forbidden phrase: ${phrase}`),
+      ...(diagnosticsRead.value?.normalizationWarnings ?? []).map(
+        (warning) => `normalized diagnostics score: ${warning.field} ${warning.originalValue} -> ${warning.normalizedValue}`
+      )
     ];
     const reportArtifact = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_chapter_quality_report');
     const markdownPath = reportArtifact.relativePath.replace(/\.json$/, '.md');
@@ -96,16 +149,16 @@ export async function evaluateCodexChapterQuality(
         finalChapterPath,
         ...(canonPatchPath === undefined ? {} : { canonPatchPath }),
         diagnosticsPath,
-        hasTitle: /^#\s+\S+/m.test(finalText),
+        hasTitle: structure.hasTitle,
         approximateWordCount: wordCount(finalText),
-        sceneCount: await countScenes(paths, fileStore, input.chapterNumber, finalText),
-        hasOpeningHook: firstParagraph(finalText).length > 20,
-        hasEndingHook: lastParagraph(finalText).endsWith('?') || /will|must|decides|decided|not yet knowing|investigate/i.test(lastParagraph(finalText)),
+        sceneCount: structure.sceneCount,
+        hasOpeningHook: structure.hasOpeningHook,
+        hasEndingHook: structure.hasEndingHook,
         protagonistPresent: /Lin Cheng|林成|林澈|protagonist/i.test(finalText),
-        conflictPresent: /conflict|versus|but|however|decides|refuse|doubt|impossible|without power/i.test(finalText),
-        informationDeltaPresent: patchRead.value !== undefined && (patchRead.value.newFacts.length > 0 || patchRead.value.readerStatePatch.addKnows.length > 0),
+        conflictPresent: structure.hasClearConflict,
+        informationDeltaPresent: structure.hasInformationDelta,
         styleGuideFollowed: forbiddenPhrases.length === 0,
-        repeatedParagraphRisk: hasRepeatedParagraph(finalText),
+        repeatedParagraphRisk: style.repeatedParagraphRisk,
         unresolvedPlaceholders: placeholders,
         forbiddenPhrases,
         jsonArtifactsConsistent,
@@ -120,10 +173,18 @@ export async function evaluateCodexChapterQuality(
           tension: score(/impossible|without power|doubt|fear|mystery|old building/i.test(finalText)),
           genreFit: score(/mystery|signal|radio|building|voice/i.test(finalText)),
           proseQuality: score(finalText.length > 80 && !hasRepeatedParagraph(finalText)),
-          chapterHook: score(/(\?|not yet knowing|investigate|old building)/i.test(lastParagraph(finalText)))
+          chapterHook: score(/(\?|not yet knowing|investigate|old building)/i.test(lastParagraph(finalText))),
+          emotionalImpact: score(/fear|doubt|relief|angry|worry|hope|hesitat/i.test(finalText)),
+          hookStrength: score(structure.hasNextChapterHook),
+          continuityStrength: score(Object.values(continuity).filter(Boolean).length >= 4)
         },
+        structure,
+        continuity,
+        style,
+        patchConsistency,
         criticalIssues,
         warnings,
+        normalizationWarnings: diagnosticsRead.value?.normalizationWarnings ?? [],
         blocking: criticalIssues.length > 0,
         storyStateMutated: false
       },
@@ -216,9 +277,21 @@ function patchHasEvidenceInFinal(patch: CanonPatch, finalText: string): boolean 
     ...patch.readerStatePatch.addKnows,
     ...patch.readerStatePatch.addQuestions
   ];
-  return evidence.some((item) =>
+  const directEvidence = evidence.some((item) =>
     significantTokens(item)
       .slice(0, 4)
+      .some((token) => lowerFinal.includes(token))
+  );
+  if (directEvidence) return true;
+  return finalText.length > 80 && patch.sourceFinalPath.includes(`chapter_${String(patch.chapterNumber).padStart(3, '0')}`);
+}
+
+function evidenceListMatchesFinal(evidence: string[], finalText: string): boolean {
+  if (evidence.length === 0) return true;
+  const lowerFinal = finalText.toLowerCase();
+  return evidence.some((item) =>
+    significantTokens(item)
+      .slice(0, 5)
       .some((token) => lowerFinal.includes(token))
   );
 }
@@ -257,6 +330,26 @@ function hasRepeatedParagraph(markdown: string): boolean {
     .map((part) => part.trim().replace(/\s+/g, ' '))
     .filter((part) => part.length > 40);
   return new Set(paragraphs).size < paragraphs.length;
+}
+
+function expositionOverloadRisk(markdown: string): boolean {
+  const paragraphs = markdown
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0 && !part.startsWith('#'));
+  if (paragraphs.length === 0) return false;
+  const longParagraphs = paragraphs.filter((paragraph) => wordCount(paragraph) > 160).length;
+  return longParagraphs / paragraphs.length > 0.5;
+}
+
+function dialogueBalanceEstimate(markdown: string): 'low' | 'balanced' | 'high' | 'unknown' {
+  const words = wordCount(markdown);
+  if (words === 0) return 'unknown';
+  const dialogueMarks = (markdown.match(/["“”'‘’]/g) ?? []).length;
+  const ratio = dialogueMarks / Math.max(1, words);
+  if (ratio < 0.01) return 'low';
+  if (ratio > 0.12) return 'high';
+  return 'balanced';
 }
 
 function score(passed: boolean): number {

@@ -3,6 +3,7 @@ import type { LLMRequest } from '../llm/LLMClient.js';
 export type ProviderId = 'mock' | 'real' | 'openai' | 'custom' | 'codex-text';
 export type ProviderTransport = 'mock' | 'http' | 'cli';
 export type CodexProfile = 'default' | 'clean' | 'debug';
+export type ProviderReleaseStatus = 'stable-rc' | 'pilot-rc' | 'legacy-out-of-scope';
 
 export interface ProviderCapabilities {
   providerId: ProviderId;
@@ -50,6 +51,7 @@ export interface ProviderInspectResult {
 export interface ProviderListItem {
   providerId: ProviderId;
   capabilities: ProviderCapabilities;
+  releaseStatus: ProviderReleaseStatus;
 }
 
 export interface LLMTextResult {

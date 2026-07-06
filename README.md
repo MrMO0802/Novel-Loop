@@ -2,7 +2,7 @@
 
 Novel Loop Engine is a local-first TypeScript CLI for building an AI-assisted long-form novel production loop.
 
-This repository is currently at M25: project skeleton, core Zod schemas, local file-system infrastructure, `init`/`validate`, prompt loading/rendering, deterministic mock LLM provider, mock-backed strategy/planning, multi-chapter chapter production through commit, chapter queue lifecycle/resume/idempotency controls, mock canon patch conflict recovery, human review, state diff previews, controlled recommit, historical recommit rebase, downstream invalidation, stale regeneration, full verifiable archive, artifact index, run browser, snapshot browser, snapshot verification, project audit, explicit stale reuse policy, Run Manifest v2 provenance, append-only event logs, artifact lineage, queue/state mutation provenance, prompt provenance, legacy run compatibility, stress fixtures, retention, provenance compaction, large-project audit/index hardening, clean scripts, release checklist, a read-only local Codex CLI execution boundary, hardened `provider=codex-text` dry-run generation through draft, Codex controlled commit for the normal next uncommitted chapter, single-chapter Codex smoke reports, local Codex chapter quality reports, preview/confirm consistency checks, and hardened Codex patch failure reports. Web UI is intentionally not implemented.
+This repository is currently packaged as `v2.5.0-rc.1` from the accepted M26.5 / v2.4.0 Codex pilot baseline: project skeleton, core Zod schemas, local file-system infrastructure, deterministic mock provider, multi-chapter mock production through commit, observability/audit hardening, a read-only local Codex CLI execution boundary, `provider=codex-text` dry-run generation through draft, Codex controlled commit for the normal next uncommitted chapter, single-chapter Codex smoke reports, a controlled Codex multi-chapter pilot for chapters 1-3, and progressive Codex runtime benchmarks. Web UI, DeepSeek, OpenAI API work, CodexAgentConnector, Codex historical recommit, Codex stale-regeneration commit, and M27 output/runtime optimization commitments remain intentionally out of scope for this release candidate.
 
 ## Requirements
 
@@ -69,7 +69,31 @@ For release-audit style verification from a clean generated demo project, run:
 
 ## Release Candidate Usage
 
-M20 adds release-candidate maintenance commands and scripts for long-running mock projects.
+`v2.5.0-rc.1` is a release-candidate packaging pass over the M26.5 / v2.4.0 Codex single- and multi-chapter pilot baseline.
+
+Stable RC delivery surface:
+
+- Mock three-chapter closed loop through Story State commit.
+- Fake Codex regression suite for local CI and release validation.
+- Codex read-only execution boundary and `provider=codex-text` pilot workflows.
+- Real local Codex single-chapter smoke as a verified pilot workflow when the operator has a working local Codex login.
+
+Experimental or internal commands included in the build but not promoted to stable RC APIs:
+
+- `novel-loop codex multi-chapter-pilot`: experimental pilot only; no production stability guarantee.
+- `novel-loop codex benchmark`: pilot diagnostic tooling.
+- `novel-loop codex profile-runtime`, `novel-loop codex call-reduction`, `novel-loop codex optimize-runtime`: internal/experimental reports.
+- `novel-loop evaluate-continuity`: internal/experimental local drift check.
+- `novel-loop prompts audit`: internal prompt-pack inspection.
+- `novel-loop providers list` includes legacy `real` / `openai` entries marked `status=legacy-out-of-scope`; they are not part of the RC acceptance surface.
+
+Release checkpoint:
+
+- `docs/releases/v2.5.0-rc.1-release-checkpoint.md`
+
+Codex pilot operator runbook:
+
+- `docs/operations/codex-pilot-runbook.md`
 
 Required release verification:
 
@@ -82,6 +106,22 @@ corepack pnpm novel-loop runs demo-novel
 corepack pnpm novel-loop verify-snapshots demo-novel
 ```
 
+## CI Gate
+
+The required CI job is `.github/workflows/ci.yml` job `build-and-test`.
+
+It runs:
+
+- `corepack pnpm install --frozen-lockfile`
+- `corepack pnpm check`
+- `corepack pnpm check:diff`
+- `corepack pnpm build`
+- `corepack pnpm test`
+- `corepack pnpm novel-loop --version`
+- `corepack pnpm novel-loop --help`
+
+Real Codex smoke, real Codex benchmark, DeepSeek, OpenAI API, and Web UI checks are not required CI jobs. The `dependency-audit` job runs `corepack pnpm audit --audit-level high` with `continue-on-error: true`, so transient registry or transitive dependency noise does not block the main release path.
+
 Clean generated local artifacts:
 
 ```bash
@@ -90,6 +130,27 @@ corepack pnpm clean:test
 corepack pnpm clean:generated
 corepack pnpm release:checklist
 ```
+
+## Package Release
+
+The package uses a `files` whitelist in `package.json`. Runtime package contents are limited to built CLI output, prompts, provider output schemas, examples, mock fixtures, benchmark baseline data, release/operator docs, and maintenance scripts.
+
+Before publishing a release candidate, verify package contents:
+
+```bash
+corepack pnpm build
+npm pack --dry-run --json
+node dist/cli/index.js --help
+node dist/cli/index.js --version
+```
+
+The package must include `dist/cli/index.js` and must not include `projects/`, local audit outputs, snapshots, run artifacts, tests, `.env`, token files, or raw Codex outputs.
+
+## Commit Safety Journal
+
+Normal mock commits and confirmed Codex controlled commits write `chapters/chapter_XXX/commit_journal_vN.json` before Story State mutation. The journal records commit phases such as prepared, before snapshot, Story State write, after snapshot, commit report, queue commit, and completion.
+
+`novel-loop audit <projectId> --strict` validates existing commit journals. An incomplete or invalid journal is reported as a blocking `commit_journal` issue so an operator can inspect the journal, snapshots, commit report, and queue before retrying. The journal is a focused safety record, not a full transaction manager; Codex historical recommit and Codex stale-regeneration commit remain outside this release-candidate scope.
 
 Generate a long-project stress fixture without provider calls:
 
@@ -230,6 +291,66 @@ corepack pnpm novel-loop codex single-chapter-smoke --project-id codex-single --
 
 The smoke initializes a clean project, runs Codex build-bible, plan-global, chapter planning/draft, preview commit, confirmed commit, quality report, validate, audit, and inspect. It writes `audit/codex_single_chapter_smoke_report_vN.json` and `.md`.
 
+Multi-chapter Codex pilot:
+
+```bash
+corepack pnpm build
+corepack pnpm run demo:codex-multi-chapter
+```
+
+Equivalent CLI:
+
+```bash
+corepack pnpm novel-loop codex multi-chapter-pilot \
+  --project-id codex-multi \
+  --brief ./examples/brief.md \
+  --chapters 3 \
+  --codex-profile clean \
+  --codex-json-retries 2 \
+  --codex-json-repair
+```
+
+The pilot initializes a clean project, runs Codex strategy/planning, then advances chapters 1-3 one at a time. Each chapter writes a draft, creates a preview-only controlled commit, confirms by reusing the preview artifacts, evaluates local quality, validates, and commits Story State only through local `applyCanonPatchToStoryState`. It writes `audit/codex_multi_chapter_pilot_report_vN.json` and `audit/codex_cross_chapter_drift_report_vN.json`.
+
+M26 safety model:
+
+- `chapter next` for Codex remains normal-next only: `latestCommittedChapter + 1`.
+- Preview-only Codex commit must not mutate `state/story_state.json`.
+- Confirm requires the preview Story State hash to still match current Story State.
+- `--confirm` on the multi-chapter pilot is blocked with `CODEX_BATCH_CONFIRM_BLOCKED`; the pilot always uses per-chapter preview/confirm checkpoints.
+- Per-chapter budgets default to `--codex-max-calls-per-chapter 20`, `--codex-max-runtime-ms-per-chapter 900000`, and `--codex-timeout-ms 180000`.
+- Budget exhaustion writes `audit/codex_budget_report_vN.json` and stops before uncontrolled Story State mutation.
+- Diagnostics score normalization is traceable in `diagnostics_vN.json`, `codex_chapter_quality_report_vN.json`, and drift warnings.
+- Resume is available with `corepack pnpm run demo:codex-multi-chapter -- --resume`; committed chapters are not repeated.
+
+Codex runtime benchmark:
+
+```bash
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --brief ./examples/brief.md --level health --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --brief ./examples/brief.md --level bible --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --brief ./examples/brief.md --level plan --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --brief ./examples/brief.md --level draft --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --brief ./examples/brief.md --level preview --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --brief ./examples/brief.md --level confirm --codex-profile clean --timeout-ms 180000
+```
+
+Only after those levels pass, continue with:
+
+```bash
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --level chapter2 --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop codex benchmark --project-id codex-bench --level chapter3 --codex-profile clean --timeout-ms 180000
+corepack pnpm novel-loop validate codex-bench
+corepack pnpm novel-loop audit codex-bench --strict --fix-index
+```
+
+`codex benchmark` writes `audit/codex_runtime_benchmark_report_vN.json/.md` and, on failures, `audit/codex_runtime_failure_report_vN.json`. Each stage records duration, Codex call counts, retry/repair/timeout counts, prompt/schema/output/raw JSONL byte counts, artifact counts, Story State mutation status, and suggested retry commands. Use `--resume` to continue from existing preview or committed artifacts, `--continue-on-failure` for diagnostic sweeps, `--compare-profiles clean,debug` to compare runtime profiles, and `--profile-stages` to also write `audit/codex_stage_runtime_profile_vN.json/.md`.
+
+Continuity drift and v2 continuity check only:
+
+```bash
+corepack pnpm novel-loop evaluate-continuity codex-multi --chapters 1-3
+```
+
 Local quality check only:
 
 ```bash
@@ -287,6 +408,8 @@ pnpm novel-loop chapter demo-novel next --provider mock --regenerate-stale --max
 pnpm novel-loop chapter demo-novel next --provider mock --regenerate-stale --reuse-policy reference_only --max-revisions 2 --commit
 pnpm novel-loop evaluate-chapter codex-novel 1
 pnpm novel-loop codex single-chapter-smoke --project-id codex-single --brief ./examples/brief.md
+pnpm novel-loop codex multi-chapter-pilot --project-id codex-multi --brief ./examples/brief.md --chapters 3
+pnpm novel-loop evaluate-continuity codex-multi --chapters 1-3
 pnpm novel-loop artifacts demo-novel --refresh
 pnpm novel-loop artifacts demo-novel --chapter 3
 pnpm novel-loop runs demo-novel
@@ -315,10 +438,9 @@ pnpm novel-loop chapter codex-novel 1 --provider codex-text --until draft --code
 pnpm novel-loop inspect demo-novel --debts --reader --characters --timeline --foreshadowing
 pnpm novel-loop rollback demo-novel --snapshot <snapshotId>
 pnpm novel-loop commit-chapter demo-novel 1 --provider mock
-pnpm novel-loop build-bible demo-novel --provider real
 ```
 
-The CLI currently supports help/version plus project `init`, `validate`, `build-bible`, `plan-global`, `providers`, `chapter --dry-run`, `chapter --until draft`, `chapter --max-revisions`, `chapter --commit`, `chapter next`, `chapter --resume`, `chapter --repair-conflicts`, `chapter --regenerate-stale`, `review`, `diff-state`, `recommit`, `stale`, `regeneration-plan`, `artifacts`, `runs`, `run`, `snapshots`, `snapshot`, `verify-snapshots`, `audit`, `stress-fixture`, `retention`, `compact-provenance`, `codex`, `inspect`, `rollback`, and `commit-chapter`. Web UI is intentionally not implemented in M23.
+The CLI currently supports help/version plus project `init`, `validate`, `build-bible`, `plan-global`, `providers`, `chapter --dry-run`, `chapter --until draft`, `chapter --max-revisions`, `chapter --commit`, `chapter next`, `chapter --resume`, `chapter --repair-conflicts`, `chapter --regenerate-stale`, `review`, `diff-state`, `recommit`, `stale`, `regeneration-plan`, `artifacts`, `runs`, `run`, `snapshots`, `snapshot`, `verify-snapshots`, `audit`, `stress-fixture`, `retention`, `compact-provenance`, `codex`, `evaluate-continuity`, `inspect`, `rollback`, and `commit-chapter`. Web UI is intentionally not implemented.
 
 ## Project Layout
 
@@ -378,9 +500,9 @@ File-system infrastructure lives in `src/storage/` and `src/logging/`:
 - Codex raw output, final output, and parsed JSON artifacts are stored under `codex/runs/<runId>/` with Run Manifest v2 provenance.
 - `CodexTextProvider` selects the same boundary with `--provider codex-text` for strategy, global planning, chapter dry-run, and chapter draft generation.
 - Provider registry commands expose capabilities and health checks without changing Story State.
-- `RealLLMClient` is an OpenAI-compatible adapter selected with `--provider real` or `--provider openai`.
-- Real provider config is read from `.env` / environment: `NLE_REAL_API_KEY`, `NLE_REAL_MODEL`, optional `NLE_REAL_BASE_URL`, timeout, retry, and cost fields.
-- Usage metadata is appended to each run manifest under `llmCalls`.
+- Legacy `RealLLMClient` support exists in the codebase but is outside the `v2.5.0-rc.1` acceptance surface.
+- Legacy real provider config is read from `.env` / environment: `NLE_REAL_API_KEY`, `NLE_REAL_MODEL`, optional `NLE_REAL_BASE_URL`, timeout, retry, and cost fields.
+- Provider usage metadata is appended to each run manifest under `llmCalls`.
 - Set `NLE_REDACT_PROMPT_ARTIFACTS=true` to store redacted prompt request/response artifacts.
 
 ## Strategy And Planning
@@ -584,8 +706,9 @@ corepack pnpm novel-loop validate demo-novel
 - `novel-loop rollback <projectId> --snapshot <snapshotId>` restores `state/story_state.json` from a snapshot and writes `state/rollback_report.json`; chapter artifacts, runs, and snapshots are preserved.
 - `novel-loop commit-chapter <projectId> <chapterNumber> --provider mock` recommits an existing `final.md`, useful after a human manually edits the final chapter.
 
-## Real Provider
+## Legacy Real Provider
 
+- The legacy `real` provider is not part of the `v2.5.0-rc.1` acceptance surface.
 - Real provider requests use the existing `LLMClient` interface, so business services do not call provider-specific APIs.
 - Retry/backoff handles retryable network, timeout, rate limit, and server failures.
 - Provider errors are classified as `auth`, `rate_limit`, `timeout`, `network`, `server`, `invalid_json`, `provider_response`, or `unknown`.
@@ -594,4 +717,4 @@ corepack pnpm novel-loop validate demo-novel
 
 ## Next Milestone
 
-M23 should focus on Codex novel dry-run quality pass: prompt shaping, schema-output robustness, retryable Codex formatting failures, and human-readable diagnostics for Codex draft artifacts while keeping Story State commits disabled for Codex-generated text.
+Post-RC work should first address the P1 high-risk hardening items in `Plan.md`, especially the Commit Safety Journal, while keeping mock and Codex pilot regressions green. DeepSeek, OpenAI API integration, Web UI, CodexAgentConnector, and broader real Codex multi-chapter stability guarantees remain outside this release-candidate scope.

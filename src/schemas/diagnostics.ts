@@ -27,6 +27,15 @@ export const DiagnosticsSoftScoresSchema = z.object({
   reader_curiosity: DiagnosticsScoreSchema
 });
 
+export const DiagnosticsNormalizationWarningSchema = z.object({
+  field: z.string(),
+  originalValue: z.number(),
+  normalizedValue: z.number(),
+  reason: z.string(),
+  promptId: z.string(),
+  artifactPath: z.string()
+});
+
 export const DiagnosticsReportSchema = z.object({
   chapterNumber: z.number().int().positive(),
   draftVersion: z.number().int().positive(),
@@ -76,9 +85,11 @@ export const DiagnosticsReportSchema = z.object({
         recommendation: z.string().optional()
       })
     )
-    .default([])
+    .default([]),
+  normalizationWarnings: z.array(DiagnosticsNormalizationWarningSchema).default([])
 });
 
 export type DiagnosticsHardChecks = z.infer<typeof DiagnosticsHardChecksSchema>;
+export type DiagnosticsNormalizationWarning = z.infer<typeof DiagnosticsNormalizationWarningSchema>;
 export type DiagnosticsSoftScores = z.infer<typeof DiagnosticsSoftScoresSchema>;
 export type DiagnosticsReport = z.infer<typeof DiagnosticsReportSchema>;

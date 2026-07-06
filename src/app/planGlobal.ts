@@ -26,6 +26,10 @@ export interface PlanGlobalInput {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
+  codexContextBudgetBytes?: number;
+  codexMaxArtifactsInContext?: number;
+  codexContextMode?: 'compact' | 'balanced' | 'rich';
 }
 
 export interface PlanGlobalResult {
@@ -69,6 +73,7 @@ export async function planGlobal(input: PlanGlobalInput, fileStore = new FileSto
       ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
       ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
       ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+      ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
       fixturesRoot: input.fixturesRoot ?? DEFAULT_FIXTURES_ROOT,
       telemetry: {
         paths,
@@ -172,6 +177,7 @@ async function planGlobalWithCodexText(
     ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
     ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
     ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+    ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
     fixturesRoot: input.fixturesRoot ?? DEFAULT_FIXTURES_ROOT,
     telemetry: {
       paths,
@@ -186,6 +192,9 @@ async function planGlobalWithCodexText(
   const artifacts: string[] = [];
   const context = await writeCodexContextManifest(paths, fileStore, {
     task: 'plan-global',
+    requestedMode: input.codexContextMode ?? 'compact',
+    ...(input.codexContextBudgetBytes === undefined ? {} : { budgetBytes: input.codexContextBudgetBytes }),
+    ...(input.codexMaxArtifactsInContext === undefined ? {} : { maxArtifacts: input.codexMaxArtifactsInContext }),
     includedArtifacts: [
       { path: 'brief.md', reason: 'brief is required for global planning', summary: summarize(brief) },
       { path: 'strategy/story_bible.md', reason: 'story bible summary anchors the plan', summary: summarize(storyBible) },

@@ -1,7 +1,7 @@
 import type { ChapterQueueStage } from '../schemas/index.js';
 import { AppError } from '../utils/AppError.js';
 
-export type FailureInjectionPoint = ChapterQueueStage | 'write_scene_002' | 'extract_canon_patch';
+export type FailureInjectionPoint = ChapterQueueStage | 'write_scene_002' | 'extract_canon_patch' | 'post_state_write';
 
 export interface FailureInjectionInput {
   projectId?: string;

@@ -30,6 +30,7 @@ export interface ChapterDraftingInput {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
   runId?: string;
   forceStage?: ChapterQueueStage;
   failAt?: FailureInjectionPoint;
@@ -411,7 +412,15 @@ function createPromptService(input: Pick<ChapterDraftingInput, 'promptRoot' | 'p
 function createLlmClient(
   input: Pick<
     ChapterDraftingInput,
-    'provider' | 'fixturesRoot' | 'runId' | 'codexBin' | 'codexProfile' | 'codexJsonRetries' | 'codexJsonRepair' | 'codexJsonRepairRetries'
+    | 'provider'
+    | 'fixturesRoot'
+    | 'runId'
+    | 'codexBin'
+    | 'codexProfile'
+    | 'codexJsonRetries'
+    | 'codexJsonRepair'
+    | 'codexJsonRepairRetries'
+    | 'codexTimeoutMs'
   >,
   paths: ProjectPaths,
   fileStore: FileStore
@@ -426,6 +435,7 @@ function createLlmClient(
     ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
     ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
     ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+    ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
     ...(input.runId === undefined
       ? {}
       : {

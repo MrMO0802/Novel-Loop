@@ -1,3 +1,10 @@
+---
+promptId: production.write_scene
+task: concise scene prose
+expectedOutput: markdown
+contextBudget: compact
+qualityRisks: placeholder text, excessive exposition
+---
 Write this scene as concise prose.
 
 Rules:

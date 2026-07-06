@@ -12,6 +12,9 @@ export interface WriteCodexContextInput {
   task: string;
   includedArtifacts: Array<{ path: string; reason: string; summary?: string }>;
   excludedArtifacts?: Array<{ path: string; reason: string; summary?: string }>;
+  requestedMode?: 'compact' | 'balanced' | 'rich';
+  budgetBytes?: number;
+  maxArtifacts?: number;
   maxContextChars?: number;
 }
 
@@ -22,20 +25,86 @@ export async function writeCodexContextManifest(
 ): Promise<{ manifest: CodexContextManifest; relativePath: string }> {
   const version = await nextContextManifestVersion(paths, fileStore);
   const relativePath = path.posix.join('codex', 'context', `context_manifest_v${version}.json`);
-  const includedArtifacts = await enrichArtifacts(paths, fileStore, input.includedArtifacts);
-  const excludedArtifacts = await enrichArtifacts(paths, fileStore, input.excludedArtifacts ?? defaultExcludedArtifacts());
+  const requestedMode = input.requestedMode ?? 'compact';
+  const budgetBytes = input.budgetBytes ?? budgetBytesForMode(requestedMode);
+  const candidateArtifacts = await enrichArtifacts(paths, fileStore, input.includedArtifacts);
+  const defaultExcluded = await enrichArtifacts(paths, fileStore, [...(input.excludedArtifacts ?? []), ...defaultExcludedArtifacts()]);
+  const budgeted = applyContextBudget(candidateArtifacts, {
+    budgetBytes,
+    ...(input.maxArtifacts === undefined ? {} : { maxArtifacts: input.maxArtifacts })
+  });
+  const includedArtifacts = budgeted.includedArtifacts;
+  const excludedArtifacts = [...budgeted.excludedArtifacts, ...defaultExcluded];
   const manifest = CodexContextManifestSchema.parse({
     manifestId: `context_manifest_v${version}`,
     projectId: paths.projectId,
     task: input.task,
     generatedAt: new Date().toISOString(),
+    requestedMode,
+    budgetBytes,
+    actualBytes: budgeted.actualBytes,
+    ...(input.maxArtifacts === undefined ? {} : { maxArtifacts: input.maxArtifacts }),
     includedArtifacts,
     excludedArtifacts,
+    truncationApplied: budgeted.truncationApplied,
+    reason: budgeted.truncationApplied
+      ? `Applied ${requestedMode} Codex context budget (${budgetBytes} bytes).`
+      : `Context fits within ${requestedMode} Codex context budget (${budgetBytes} bytes).`,
     maxContextChars: input.maxContextChars ?? 8000,
     contextHash: sha256(JSON.stringify({ includedArtifacts, excludedArtifacts, task: input.task }))
   });
   await fileStore.writeJson(paths.projectArtifact(relativePath), manifest, CodexContextManifestSchema);
   return { manifest, relativePath };
+}
+
+function applyContextBudget(
+  artifacts: CodexContextArtifact[],
+  options: { budgetBytes: number; maxArtifacts?: number }
+): { includedArtifacts: CodexContextArtifact[]; excludedArtifacts: CodexContextArtifact[]; actualBytes: number; truncationApplied: boolean } {
+  const includedArtifacts: CodexContextArtifact[] = [];
+  const excludedArtifacts: CodexContextArtifact[] = [];
+  let actualBytes = 0;
+  for (const artifact of artifacts) {
+    const artifactBytes = contextArtifactBytes(artifact);
+    if (options.maxArtifacts !== undefined && includedArtifacts.length >= options.maxArtifacts) {
+      excludedArtifacts.push(withReason(artifact, `${artifact.reason}; excluded by max artifact limit ${options.maxArtifacts}.`));
+      continue;
+    }
+    if (actualBytes + artifactBytes > options.budgetBytes) {
+      excludedArtifacts.push(withReason(artifact, `${artifact.reason}; excluded by context budget ${options.budgetBytes} bytes.`));
+      continue;
+    }
+    includedArtifacts.push(artifact);
+    actualBytes += artifactBytes;
+  }
+  return {
+    includedArtifacts,
+    excludedArtifacts,
+    actualBytes,
+    truncationApplied: excludedArtifacts.length > 0
+  };
+}
+
+function contextArtifactBytes(artifact: CodexContextArtifact): number {
+  if (artifact.summary !== undefined) return byteLength(artifact.summary);
+  return artifact.sizeBytes ?? byteLength(artifact.path) + byteLength(artifact.reason);
+}
+
+function withReason(artifact: CodexContextArtifact, reason: string): CodexContextArtifact {
+  return {
+    ...artifact,
+    reason
+  };
+}
+
+function budgetBytesForMode(mode: 'compact' | 'balanced' | 'rich'): number {
+  if (mode === 'rich') return 48_000;
+  if (mode === 'balanced') return 24_000;
+  return 12_000;
+}
+
+function byteLength(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
 }
 
 async function nextContextManifestVersion(paths: ProjectPaths, fileStore: FileStore): Promise<number> {

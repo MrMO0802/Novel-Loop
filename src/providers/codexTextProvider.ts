@@ -28,6 +28,7 @@ export interface CodexTextProviderOptions {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
   telemetry?: {
     paths: ProjectPaths;
     runId: string;
@@ -284,6 +285,11 @@ export class CodexTextProvider implements LLMClient {
       startedAt: metadata.startedAt,
       endedAt: new Date().toISOString(),
       latencyMs: result.latencyMs,
+      promptInputBytes: byteLength(`${request.system}\n${request.user}`),
+      contextBytes: byteLength(request.user),
+      schemaBytes: metadata.outputSchemaPath === undefined ? 0 : await this.safeProjectOrWorkspaceFileBytes(paths, metadata.outputSchemaPath),
+      outputBytes: byteLength(finalText),
+      rawJsonlBytes: await this.safeProjectArtifactBytes(paths, result.rawOutputPath),
       inputHash: sha256(`${request.system}\n${request.user}`),
       outputHash: sha256(finalText),
       redacted: true,
@@ -346,7 +352,8 @@ export class CodexTextProvider implements LLMClient {
       ...(this.options.codexBin === undefined ? process.env.NLE_CODEX_BIN === undefined ? {} : { codexBin: process.env.NLE_CODEX_BIN } : { codexBin: this.options.codexBin }),
       projectsRoot: this.options.projectsRoot ?? this.options.telemetry?.paths.projectsRoot ?? './projects',
       projectId: this.options.projectId ?? this.options.telemetry?.paths.projectId ?? 'codex-boundary',
-      codexProfile: this.codexProfile()
+      codexProfile: this.codexProfile(),
+      ...(this.options.codexTimeoutMs === undefined ? {} : { timeoutMs: this.options.codexTimeoutMs })
     };
   }
 
@@ -396,6 +403,23 @@ export class CodexTextProvider implements LLMClient {
       errorType: classifyCodexError(error),
       message: redactFailureMessage(getErrorMessage(error))
     };
+  }
+
+  private async safeProjectArtifactBytes(paths: ProjectPaths, relativePath: string): Promise<number> {
+    try {
+      return byteLength(await this.fileStore.readText(paths.projectArtifact(relativePath)));
+    } catch {
+      return 0;
+    }
+  }
+
+  private async safeProjectOrWorkspaceFileBytes(paths: ProjectPaths, filePath: string): Promise<number> {
+    try {
+      const absolutePath = filePath.startsWith(paths.projectRoot) ? filePath : filePath.startsWith('/') ? filePath : paths.projectArtifact(filePath);
+      return byteLength(await this.fileStore.readText(absolutePath));
+    } catch {
+      return 0;
+    }
   }
 
   private async writeFailureReport(
@@ -465,6 +489,9 @@ function normalizeProviderError(error: unknown): ProviderError {
     return new ProviderError('INVALID_JSON', error.message);
   }
   if (error instanceof AppError) {
+    if (error.code === 'CODEX_TIMEOUT') {
+      return new ProviderError('CODEX_TIMEOUT', error.message);
+    }
     if (error.code === 'CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED') {
       return new ProviderError('SCHEMA_VALIDATION_FAILED', error.message);
     }
@@ -491,6 +518,7 @@ function classifyCodexError(error: unknown): CodexErrorType {
   if (error instanceof JsonResponseParseError) return 'CODEX_INVALID_JSON';
   if (error instanceof AppError) {
     if (error.code === 'CODEX_BINARY_NOT_FOUND') return 'CODEX_BINARY_MISSING';
+    if (error.code === 'CODEX_TIMEOUT') return 'CODEX_TIMEOUT';
     if (error.code === 'CODEX_OUTPUT_MISSING') return 'CODEX_OUTPUT_MISSING';
     if (error.code === 'CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED') return 'CODEX_SCHEMA_VALIDATION_FAILED';
     if (error.code === 'CODEX_EXEC_FAILED') {
@@ -513,4 +541,8 @@ function redactFailureMessage(message: string): string {
 
 function sha256(text: string): string {
   return createHash('sha256').update(text).digest('hex');
+}
+
+function byteLength(text: string): number {
+  return Buffer.byteLength(text, 'utf8');
 }

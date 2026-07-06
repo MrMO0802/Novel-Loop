@@ -25,6 +25,7 @@ describe('CodexTextProvider', () => {
     const codex = providers.find((provider) => provider.providerId === 'codex-text');
 
     expect(codex).toBeDefined();
+    expect(codex?.releaseStatus).toBe('pilot-rc');
     expect(codex?.capabilities).toMatchObject({
       supportsText: true,
       supportsJsonMode: true,

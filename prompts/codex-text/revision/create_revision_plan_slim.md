@@ -1,3 +1,10 @@
+---
+promptId: revision.create_revision_plan_slim
+task: minimal revision plan
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: vague operations, unsupported changes
+---
 Return only JSON that matches the provided output schema.
 
 Task:

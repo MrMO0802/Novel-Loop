@@ -1,3 +1,10 @@
+---
+promptId: diagnostics.diagnose_chapter_slim
+task: structured chapter diagnostics
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: false positives, vague issues
+---
 Return only JSON that matches the provided output schema.
 
 Task:

@@ -22,6 +22,7 @@ interface ChapterCommandOptions {
   codexJsonRetries?: string;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: string;
+  codexTimeoutMs?: string;
   dryRun?: boolean;
   candidates?: string;
   until?: string;

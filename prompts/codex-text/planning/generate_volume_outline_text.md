@@ -1,3 +1,10 @@
+---
+promptId: planning.generate_volume_outline_text
+task: concise volume outline
+expectedOutput: markdown
+contextBudget: compact
+qualityRisks: chapter drift, oversized outline
+---
 Write a concise volume 1 outline.
 
 Rules:

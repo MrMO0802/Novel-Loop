@@ -1,3 +1,10 @@
+---
+promptId: planning.rank_plan_candidates_slim
+task: rank candidate plans
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: inconsistent scoring, hidden preferences
+---
 Return only JSON that matches the provided output schema.
 
 Task:

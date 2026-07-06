@@ -1,15 +1,26 @@
 import { z } from 'zod';
 
+import { DiagnosticsNormalizationWarningSchema } from './diagnostics.js';
+
 export const CodexErrorTypeSchema = z.enum([
   'CODEX_BINARY_MISSING',
   'CODEX_NOT_LOGGED_IN',
   'CODEX_DOCTOR_UNHEALTHY_NON_BLOCKING',
   'CODEX_EXEC_FAILED',
+  'CODEX_HUNG',
   'CODEX_OUTPUT_MISSING',
+  'CODEX_NO_FINAL_MESSAGE',
+  'CODEX_JSONL_STREAM_INCOMPLETE',
+  'CODEX_STALLED_AFTER_EVENTS',
   'CODEX_INVALID_JSON',
   'CODEX_SCHEMA_VALIDATION_FAILED',
+  'CODEX_SCHEMA_TOO_COMPLEX',
+  'CODEX_PROMPT_TOO_LARGE',
   'CODEX_REPAIR_FAILED',
+  'CODEX_REPAIR_LOOP_EXHAUSTED',
   'CODEX_TIMEOUT',
+  'CODEX_STAGE_BUDGET_EXCEEDED',
+  'CODEX_TOTAL_RUNTIME_EXCEEDED',
   'CODEX_PLUGIN_WARNING',
   'CODEX_SKILL_MANIFEST_WARNING',
   'CODEX_UNKNOWN_ERROR'
@@ -76,6 +87,44 @@ export const CodexPatchFailureReportSchema = z.object({
 });
 
 const QualityScoreSchema = z.number().min(0).max(10);
+const StageMetricMapSchema = z.record(z.string(), z.number().int().nonnegative());
+const CodexContextModeSchema = z.enum(['compact', 'balanced', 'rich']);
+
+export const CodexQualityStructureSchema = z.object({
+  hasTitle: z.boolean(),
+  sceneCount: z.number().int().nonnegative(),
+  hasOpeningHook: z.boolean(),
+  hasEndingHook: z.boolean(),
+  hasClearConflict: z.boolean(),
+  hasInformationDelta: z.boolean(),
+  hasProtagonistDecision: z.boolean(),
+  hasNextChapterHook: z.boolean()
+});
+
+export const CodexQualityContinuitySchema = z.object({
+  referencesPreviousChapter: z.boolean(),
+  referencesOpenDebt: z.boolean(),
+  advancesAtLeastOneDebt: z.boolean(),
+  advancesOrReinforcesForeshadowing: z.boolean(),
+  updatesReaderExpectation: z.boolean(),
+  preservesCharacterGoalContinuity: z.boolean()
+});
+
+export const CodexQualityStyleSchema = z.object({
+  repeatedParagraphRisk: z.boolean(),
+  placeholderRisk: z.boolean(),
+  forbiddenPhraseRisk: z.boolean(),
+  expositionOverloadRisk: z.boolean(),
+  dialogueBalanceEstimate: z.enum(['low', 'balanced', 'high', 'unknown'])
+});
+
+export const CodexQualityPatchConsistencySchema = z.object({
+  canonPatchMatchesFinal: z.boolean(),
+  timelineMatchesFinal: z.boolean(),
+  characterChangesSupportedByText: z.boolean(),
+  debtsSupportedByText: z.boolean(),
+  foreshadowingSupportedByText: z.boolean()
+});
 
 export const CodexChapterQualityReportSchema = z.object({
   reportId: z.string(),
@@ -110,10 +159,18 @@ export const CodexChapterQualityReportSchema = z.object({
     tension: QualityScoreSchema,
     genreFit: QualityScoreSchema,
     proseQuality: QualityScoreSchema,
-    chapterHook: QualityScoreSchema
+    chapterHook: QualityScoreSchema,
+    emotionalImpact: QualityScoreSchema.optional(),
+    hookStrength: QualityScoreSchema.optional(),
+    continuityStrength: QualityScoreSchema.optional()
   }),
+  structure: CodexQualityStructureSchema,
+  continuity: CodexQualityContinuitySchema,
+  style: CodexQualityStyleSchema,
+  patchConsistency: CodexQualityPatchConsistencySchema,
   criticalIssues: z.array(z.string()).default([]),
   warnings: z.array(z.string()).default([]),
+  normalizationWarnings: z.array(DiagnosticsNormalizationWarningSchema).default([]),
   blocking: z.boolean(),
   storyStateMutated: z.literal(false)
 });
@@ -155,6 +212,158 @@ export const CodexSingleChapterSmokeReportSchema = z.object({
   success: z.boolean()
 });
 
+export const CodexMultiChapterPilotChapterSchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  draftRunId: z.string().optional(),
+  previewRunId: z.string().optional(),
+  confirmedRunId: z.string().optional(),
+  finalPath: z.string().optional(),
+  canonPatchPath: z.string().optional(),
+  qualityReportPath: z.string().optional(),
+  stateDiffPath: z.string().optional(),
+  approvalRecordPath: z.string().optional(),
+  commitReportPath: z.string().optional(),
+  beforeSnapshotId: z.string().optional(),
+  afterSnapshotId: z.string().optional(),
+  latestCommittedChapterBefore: z.number().int().nonnegative(),
+  latestCommittedChapterAfter: z.number().int().nonnegative(),
+  previewStateHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  confirmedStateHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  previewReusedForConfirm: z.boolean().default(false),
+  qualityCriticalIssues: z.array(z.string()).default([]),
+  warnings: z.array(z.string()).default([])
+});
+
+export const CodexMultiChapterPilotReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  targetChapterCount: z.number().int().positive(),
+  completedChapterCount: z.number().int().nonnegative(),
+  latestCommittedChapterBefore: z.number().int().nonnegative(),
+  latestCommittedChapterAfter: z.number().int().nonnegative(),
+  success: z.boolean(),
+  codexStatus: z.record(z.string(), z.unknown()),
+  chapters: z.array(CodexMultiChapterPilotChapterSchema),
+  validatePassed: z.boolean(),
+  auditPassed: z.boolean(),
+  crossChapterDriftReportPath: z.string().optional(),
+  crossChapterContinuityReportPath: z.string().optional(),
+  failureReportPath: z.string().optional()
+});
+
+export const CodexCrossChapterDriftIssueSchema = z.object({
+  issueId: z.string(),
+  chapterNumber: z.number().int().positive().optional(),
+  severity: z.enum(['warning', 'error', 'critical']),
+  message: z.string(),
+  path: z.string().optional()
+});
+
+export const CodexCrossChapterDriftReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  chapters: z.array(z.number().int().positive()),
+  latestCommittedChapter: z.number().int().nonnegative(),
+  queueCommittedChapters: z.array(z.number().int().positive()),
+  blockingIssues: z.array(CodexCrossChapterDriftIssueSchema),
+  warnings: z.array(CodexCrossChapterDriftIssueSchema),
+  recommendations: z.array(z.string()).default([]),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexBudgetReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  generatedAt: z.string(),
+  exceeded: z.boolean(),
+  reason: z.string(),
+  budget: z.object({
+    maxCallsPerChapter: z.number().int().nonnegative(),
+    maxRuntimeMsPerChapter: z.number().int().positive(),
+    timeoutMs: z.number().int().positive()
+  }),
+  usage: z.object({
+    callsUsed: z.number().int().nonnegative(),
+    runtimeMs: z.number().int().nonnegative()
+  }),
+  storyStateMutated: z.literal(false),
+  suggestedRetryCommand: z.string()
+});
+
+export const CodexBenchmarkLevelSchema = z.enum(['health', 'bible', 'plan', 'draft', 'preview', 'confirm', 'chapter2', 'chapter3', 'all']);
+
+export const CodexRuntimeBenchmarkStageSchema = z.object({
+  level: CodexBenchmarkLevelSchema.exclude(['all']),
+  stageName: z.string(),
+  command: z.string(),
+  runId: z.string().optional(),
+  status: z.enum(['success', 'failed', 'skipped']),
+  startedAt: z.string(),
+  endedAt: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  codexCallCount: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  timeoutCount: z.number().int().nonnegative(),
+  promptInputBytes: z.number().int().nonnegative(),
+  contextBytes: z.number().int().nonnegative(),
+  schemaBytes: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative(),
+  rawJsonlBytes: z.number().int().nonnegative(),
+  artifactCount: z.number().int().nonnegative(),
+  stateMutationApplied: z.boolean(),
+  latestCommittedChapterBefore: z.number().int().nonnegative(),
+  latestCommittedChapterAfter: z.number().int().nonnegative(),
+  failureReportPath: z.string().optional(),
+  errorCode: CodexErrorTypeSchema.optional(),
+  suggestedRetryCommand: z.string()
+});
+
+export const CodexProfileComparisonItemSchema = z.object({
+  profile: z.enum(['default', 'clean', 'debug']),
+  durationMs: z.number().int().nonnegative(),
+  success: z.boolean(),
+  failureType: CodexErrorTypeSchema.optional(),
+  warningCount: z.number().int().nonnegative(),
+  outputValid: z.boolean(),
+  schemaRetryCount: z.number().int().nonnegative()
+});
+
+export const CodexRuntimeFailureReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  level: CodexBenchmarkLevelSchema.exclude(['all']),
+  stageName: z.string(),
+  errorType: CodexErrorTypeSchema,
+  message: z.string(),
+  lastEventType: z.string().optional(),
+  elapsedMs: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative(),
+  stderrExcerptRedacted: z.string().default(''),
+  storyStateMutated: z.literal(false),
+  suggestedRetryCommand: z.string(),
+  generatedAt: z.string(),
+  redacted: z.literal(true)
+});
+
+export const CodexRuntimeBenchmarkReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  codexStatus: z.record(z.string(), z.unknown()),
+  profile: z.union([z.enum(['default', 'clean', 'debug']), z.literal('comparison')]),
+  totalDurationMs: z.number().int().nonnegative(),
+  success: z.boolean(),
+  completedLevels: z.array(CodexBenchmarkLevelSchema.exclude(['all'])),
+  failedLevel: CodexBenchmarkLevelSchema.exclude(['all']).optional(),
+  stages: z.array(CodexRuntimeBenchmarkStageSchema),
+  failureReportPath: z.string().optional(),
+  profileComparisons: z.array(CodexProfileComparisonItemSchema).default([])
+});
+
 export const CodexContextArtifactSchema = z.object({
   path: z.string(),
   reason: z.string(),
@@ -168,10 +377,148 @@ export const CodexContextManifestSchema = z.object({
   projectId: z.string(),
   task: z.string(),
   generatedAt: z.string(),
+  requestedMode: CodexContextModeSchema.default('compact'),
+  budgetBytes: z.number().int().positive().default(12000),
+  actualBytes: z.number().int().nonnegative().default(0),
+  maxArtifacts: z.number().int().positive().optional(),
   includedArtifacts: z.array(CodexContextArtifactSchema),
   excludedArtifacts: z.array(CodexContextArtifactSchema),
+  truncationApplied: z.boolean().default(false),
+  reason: z.string().default('context budget applied'),
   maxContextChars: z.number().int().positive(),
   contextHash: z.string().regex(/^[a-f0-9]{64}$/)
+});
+
+export const ChapterContextSummarySchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  title: z.string(),
+  shortSummary: z.string(),
+  keyEvents: z.array(z.string()),
+  characterStateChanges: z.array(z.string()),
+  readerKnowledgeChanges: z.array(z.string()),
+  debtsAdvanced: z.array(z.string()),
+  foreshadowingAddedOrUpdated: z.array(z.string()),
+  nextChapterHooks: z.array(z.string()),
+  canonFactIds: z.array(z.string()),
+  timelineEventIds: z.array(z.string()),
+  generatedAt: z.string()
+});
+
+export const CodexStageRuntimeOptimizationCandidateSchema = z.object({
+  stage: z.string(),
+  reason: z.string(),
+  suggestedAction: z.string(),
+  estimatedImpact: z.enum(['low', 'medium', 'high'])
+});
+
+export const CodexStageRuntimeProfileReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  sourceRunCount: z.number().int().nonnegative(),
+  sourceBenchmarkReportPaths: z.array(z.string()),
+  totalDurationMs: z.number().int().nonnegative(),
+  durationByChapter: StageMetricMapSchema,
+  durationByStage: StageMetricMapSchema,
+  codexCallsByStage: StageMetricMapSchema,
+  retriesByStage: StageMetricMapSchema,
+  repairsByStage: StageMetricMapSchema,
+  timeoutByStage: StageMetricMapSchema,
+  promptBytesByStage: StageMetricMapSchema,
+  outputBytesByStage: StageMetricMapSchema,
+  schemaBytesByStage: StageMetricMapSchema,
+  slowestStages: z.array(
+    z.object({
+      stage: z.string(),
+      durationMs: z.number().int().nonnegative(),
+      codexCallCount: z.number().int().nonnegative()
+    })
+  ),
+  optimizationCandidates: z.array(CodexStageRuntimeOptimizationCandidateSchema),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexCrossChapterLinkSchema = z.object({
+  fromChapter: z.number().int().positive(),
+  toChapter: z.number().int().positive(),
+  linkedFactIds: z.array(z.string()).default([]),
+  linkedDebtIds: z.array(z.string()).default([]),
+  linkedForeshadowingIds: z.array(z.string()).default([]),
+  linkedReaderExpectations: z.array(z.string()).default([]),
+  evidence: z.array(z.string()).default([]),
+  strength: z.enum(['weak', 'medium', 'strong'])
+});
+
+export const CodexCrossChapterContinuityReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  chapters: z.array(z.number().int().positive()),
+  continuityScore: QualityScoreSchema,
+  blockingIssues: z.array(CodexCrossChapterDriftIssueSchema),
+  warnings: z.array(CodexCrossChapterDriftIssueSchema),
+  recommendations: z.array(z.string()),
+  chapterLinks: z.array(CodexCrossChapterLinkSchema),
+  summariesMissing: z.array(z.number().int().positive()).default([]),
+  duplicateHookRisk: z.boolean(),
+  repeatedScenePatternRisk: z.boolean(),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexPromptAuditIssueSchema = z.object({
+  code: z.string(),
+  path: z.string(),
+  message: z.string(),
+  severity: z.enum(['warning', 'error'])
+});
+
+export const CodexPromptAuditReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string().default('prompt-pack'),
+  promptRoot: z.string(),
+  generatedAt: z.string(),
+  ok: z.boolean(),
+  promptCount: z.number().int().nonnegative(),
+  maxPromptBytes: z.number().int().positive(),
+  issues: z.array(CodexPromptAuditIssueSchema),
+  auditedPrompts: z.array(
+    z.object({
+      path: z.string(),
+      promptId: z.string().optional(),
+      task: z.string().optional(),
+      expectedOutput: z.string().optional(),
+      contextBudget: z.string().optional(),
+      qualityRisks: z.string().optional(),
+      sizeBytes: z.number().int().nonnegative()
+    })
+  )
+});
+
+export const CodexCallReductionReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  beforeCallCount: z.number().int().nonnegative(),
+  afterCallCount: z.number().int().nonnegative(),
+  reducedCallCount: z.number().int().nonnegative(),
+  localDeterministicTasks: z.array(z.string()),
+  preservedCodexTasks: z.array(z.string()),
+  schemaSafetyChecksPreserved: z.literal(true),
+  storyStateSafetyPreserved: z.literal(true),
+  notes: z.array(z.string())
+});
+
+export const CodexRuntimeOptimizationReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  realBenchmark: z.boolean(),
+  baseline: z.record(z.string(), z.number().int().nonnegative()),
+  current: z.record(z.string(), z.number().int().nonnegative()),
+  deltaPercent: z.record(z.string(), z.number()),
+  improvedStages: z.array(z.string()),
+  regressedStages: z.array(z.string()),
+  notes: z.array(z.string())
 });
 
 export type CodexErrorType = z.infer<typeof CodexErrorTypeSchema>;
@@ -179,7 +526,25 @@ export type CodexJsonFailureAttempt = z.infer<typeof CodexJsonFailureAttemptSche
 export type CodexJsonFailureReport = z.infer<typeof CodexJsonFailureReportSchema>;
 export type CodexPatchFailureReport = z.infer<typeof CodexPatchFailureReportSchema>;
 export type CodexChapterQualityReport = z.infer<typeof CodexChapterQualityReportSchema>;
+export type CodexMultiChapterPilotChapter = z.infer<typeof CodexMultiChapterPilotChapterSchema>;
+export type CodexMultiChapterPilotReport = z.infer<typeof CodexMultiChapterPilotReportSchema>;
+export type CodexCrossChapterDriftIssue = z.infer<typeof CodexCrossChapterDriftIssueSchema>;
+export type CodexCrossChapterDriftReport = z.infer<typeof CodexCrossChapterDriftReportSchema>;
+export type CodexBudgetReport = z.infer<typeof CodexBudgetReportSchema>;
+export type CodexBenchmarkLevel = z.infer<typeof CodexBenchmarkLevelSchema>;
+export type CodexRuntimeBenchmarkStage = z.infer<typeof CodexRuntimeBenchmarkStageSchema>;
+export type CodexProfileComparisonItem = z.infer<typeof CodexProfileComparisonItemSchema>;
+export type CodexRuntimeFailureReport = z.infer<typeof CodexRuntimeFailureReportSchema>;
+export type CodexRuntimeBenchmarkReport = z.infer<typeof CodexRuntimeBenchmarkReportSchema>;
 export type CodexSingleChapterSmokeStage = z.infer<typeof CodexSingleChapterSmokeStageSchema>;
 export type CodexSingleChapterSmokeReport = z.infer<typeof CodexSingleChapterSmokeReportSchema>;
 export type CodexContextArtifact = z.infer<typeof CodexContextArtifactSchema>;
 export type CodexContextManifest = z.infer<typeof CodexContextManifestSchema>;
+export type ChapterContextSummary = z.infer<typeof ChapterContextSummarySchema>;
+export type CodexStageRuntimeProfileReport = z.infer<typeof CodexStageRuntimeProfileReportSchema>;
+export type CodexCrossChapterLink = z.infer<typeof CodexCrossChapterLinkSchema>;
+export type CodexCrossChapterContinuityReport = z.infer<typeof CodexCrossChapterContinuityReportSchema>;
+export type CodexPromptAuditIssue = z.infer<typeof CodexPromptAuditIssueSchema>;
+export type CodexPromptAuditReport = z.infer<typeof CodexPromptAuditReportSchema>;
+export type CodexCallReductionReport = z.infer<typeof CodexCallReductionReportSchema>;
+export type CodexRuntimeOptimizationReport = z.infer<typeof CodexRuntimeOptimizationReportSchema>;

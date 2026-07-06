@@ -1,3 +1,10 @@
+---
+promptId: planning.generate_arc_map_minimal_json
+task: minimal arc map
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: overbroad arcs, missing summaries
+---
 Return only JSON that matches the provided output schema.
 
 Task:

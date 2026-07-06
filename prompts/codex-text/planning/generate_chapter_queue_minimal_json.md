@@ -1,3 +1,10 @@
+---
+promptId: planning.generate_chapter_queue_minimal_json
+task: minimal chapter queue
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: nonsequential chapters, vague missions
+---
 Return only JSON that matches the provided output schema.
 
 Task:

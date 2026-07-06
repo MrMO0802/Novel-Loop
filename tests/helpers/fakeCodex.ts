@@ -12,10 +12,12 @@ export type FakeCodexMode =
   | 'repair-fails'
   | 'plugin-warning'
   | 'missing-output'
+  | 'slow-timeout'
   | 'codex-controlled-valid'
   | 'codex-controlled-invalid-patch'
   | 'codex-controlled-conflict'
-  | 'codex-controlled-diagnostics-fail';
+  | 'codex-controlled-diagnostics-fail'
+  | 'codex-controlled-normalization-warning';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
@@ -49,6 +51,14 @@ if (args.includes('exec')) {
   const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || 'unknown';
   const repairMode = stdin.includes('REPAIR_JSON_ONLY');
   const callNumber = incrementCall(promptId, schemaMode, repairMode);
+  if (mode === 'slow-timeout') {
+    setTimeout(() => {
+      if (outputFile) fs.writeFileSync(outputFile, schemaMode ? JSON.stringify({ ok: true }) : 'too late\\n');
+      process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: 'too late' } }) + '\\n');
+      process.exit(0);
+    }, 2000);
+    return;
+  }
   if (mode === 'plugin-warning') {
     process.stderr.write('warning: codex_core_plugins::manifest interface.defaultPrompt contains /home/user/.codex/auth.json and sk-SECRET\\n');
   }
@@ -56,7 +66,7 @@ if (args.includes('exec')) {
     process.stderr.write('warning: final output was empty; token sk-SECRET auth /home/user/.codex/auth.json\\n');
     process.exit(0);
   }
-  let finalText = schemaMode ? JSON.stringify(jsonFor(promptId, mode, repairMode)) : textFor(promptId);
+  let finalText = schemaMode ? JSON.stringify(jsonFor(promptId, mode, repairMode, stdin)) : textFor(promptId, stdin);
   if (mode === 'invalid-json' && schemaMode) finalText = '{"broken":';
   if (mode === 'retry-invalid-first' && schemaMode && !repairMode && callNumber === 1) finalText = '{"broken":';
   if (mode === 'repair-fails' && schemaMode) finalText = JSON.stringify({ unexpected: true });
@@ -82,7 +92,16 @@ function incrementCall(promptId, schemaMode, repairMode) {
   return state[key];
 }
 
-function textFor(promptId) {
+function textFor(promptId, stdin) {
+  const chapterNumber = chapterFromPrompt(stdin);
+  const nnn = formatChapter(chapterNumber);
+  const chapterTitle = chapterNumber === 1 ? 'The Radio Wakes' : chapterNumber === 2 ? 'The Elevator Log' : 'The Missing Floor';
+  const chapterBody =
+    chapterNumber === 1
+      ? 'Lin Cheng listened as the powerless radio clicked once and named the old building. He wrote the address down, not yet knowing who had called.'
+      : chapterNumber === 2
+        ? 'After the powerless radio named the old building, Lin Cheng found the elevator log marking a stop that did not exist. The old question about the caller sharpened into a route upward.'
+        : 'After the elevator log exposed the impossible stop, Lin Cheng reached the missing floor and understood the building had been answering the radio all along.';
   const text = {
     'strategy.build_story_bible': '# Codex Story Bible\\n\\nA safe local Codex generated bible.\\n',
     'strategy.build_genre_contract': '# Codex Genre Contract\\n\\nMystery promises and boundaries.\\n',
@@ -93,15 +112,25 @@ function textFor(promptId) {
     'planning.generate_global_outline_text': '# Codex Global Outline\\n\\nA three chapter opening arc around the radio signal.\\n',
     'planning.generate_volume_outline_text': '# Codex Volume 01 Outline\\n\\nChapter 1 wakes the radio, chapter 2 follows the elevator log, chapter 3 reaches the missing floor.\\n',
     'planning.validate_and_assemble': '# Codex Planning Validation\\n\\nArc map and chapter queue are consistent.\\n',
-    'production.write_scene': 'Codex scene draft for the selected scene. The radio clicks once, then the old building answers.\\n'
+    'production.write_scene': 'Codex scene draft for chapter ' + chapterNumber + '. The radio clue and building record advance together.\\n'
     ,
-    'revision.rewrite_chapter': '# The Radio Wakes\\n\\nLin Cheng listened as the powerless radio clicked once and named the old building. He wrote the address down, not yet knowing who had called.\\n',
-    'revision.final_chapter': '# The Radio Wakes\\n\\nLin Cheng listened as the powerless radio clicked once and named the old building. He wrote the address down, not yet knowing who had called.\\n'
+    'revision.rewrite_chapter': '# ' + chapterTitle + '\\n\\n' + chapterBody + '\\n',
+    'revision.final_chapter': '# ' + chapterTitle + '\\n\\n' + chapterBody + '\\n'
   };
   return text[promptId] || 'Codex text final\\n';
 }
 
-function jsonFor(promptId, mode, repairMode) {
+function jsonFor(promptId, mode, repairMode, stdin) {
+  const chapterNumber = chapterFromPrompt(stdin);
+  const nnn = formatChapter(chapterNumber);
+  const previousNnn = formatChapter(Math.max(1, chapterNumber - 1));
+  const chapterTitle = chapterNumber === 1 ? 'The Radio Wakes' : chapterNumber === 2 ? 'The Elevator Log' : 'The Missing Floor';
+  const chapterFact =
+    chapterNumber === 1
+      ? 'Lin Cheng hears a powerless radio name the old building.'
+      : chapterNumber === 2
+        ? 'Lin Cheng follows the elevator log after the powerless radio names the old building.'
+        : 'Lin Cheng reaches the missing floor after the elevator log exposes the impossible stop.';
   if (mode === 'schema-invalid') {
     return { unexpected: true };
   }
@@ -125,23 +154,23 @@ function jsonFor(promptId, mode, repairMode) {
       ]
     },
     'planning.plan_chapter_mission_slim': {
-      chapterNumber: 1,
-      chapterFunction: 'Open the mystery through the old radio.',
-      objectives: ['Introduce the impossible broadcast.', 'Point the reader toward the old building.'],
-      readerKnowledge: ['The radio can speak without power.'],
-      readerQuestions: ['Who is calling through the radio?'],
-      forbiddenMoves: ['Do not reveal the caller identity.']
+      chapterNumber,
+      chapterFunction: chapterNumber === 1 ? 'Open the mystery through the old radio.' : 'Advance the radio-building mystery using committed continuity.',
+      objectives: ['Advance chapter ' + chapterNumber + ' using prior committed Story State.', chapterFact],
+      readerKnowledge: ['Chapter ' + chapterNumber + ' reveals: ' + chapterFact],
+      readerQuestions: ['What does chapter ' + chapterNumber + ' imply for the building?'],
+      forbiddenMoves: ['Do not reveal the final caller identity.']
     },
     'planning.generate_plan_candidates_slim': {
-      chapterNumber: 1,
+      chapterNumber,
       candidates: [
-        { id: 'plan_001', title: 'Signal First', summary: 'Start with the impossible broadcast.', markdown: '# Plan 001\\n\\nThe radio speaks and points to the old building.' },
+        { id: 'plan_001', title: 'Continuity First', summary: 'Use the prior clue to advance chapter ' + chapterNumber + '.', markdown: '# Plan 001\\n\\nChapter ' + chapterNumber + ' advances from prior Codex facts.' },
         { id: 'plan_002', title: 'Building First', summary: 'Open at the old building.', markdown: '# Plan 002\\n\\nThe building hints before the radio.' },
         { id: 'plan_003', title: 'Memory First', summary: 'Open with a family memory.', markdown: '# Plan 003\\n\\nThe memory frames the radio.' }
       ]
     },
     'planning.rank_plan_candidates_slim': {
-      chapterNumber: 1,
+      chapterNumber,
       selectedCandidateId: 'plan_001',
       rationale: 'Signal First gives the strongest hook with the lowest continuity risk.'
     },
@@ -152,14 +181,14 @@ function jsonFor(promptId, mode, repairMode) {
       ]
     },
     'diagnostics.diagnose_chapter_slim': {
-      chapterNumber: 1,
+      chapterNumber,
       draftVersion: 1,
       passed: mode !== 'codex-controlled-diagnostics-fail',
-      averageScore: mode === 'codex-controlled-diagnostics-fail' ? 5 : 8.6,
+      averageScore: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
       issues: mode === 'codex-controlled-diagnostics-fail' ? ['timeline hard check failed'] : []
     },
     'revision.create_revision_plan_slim': {
-      chapterNumber: 1,
+      chapterNumber,
       fromDraftVersion: 1,
       strategy: 'local_patch',
       operations: [
@@ -174,14 +203,14 @@ function jsonFor(promptId, mode, repairMode) {
       riskNotes: []
     },
     'memory.extract_canon_patch_proposal_slim': {
-      chapterNumber: 1,
-      sourceFinalPath: 'chapters/chapter_001/final.md',
-      latestCommittedChapter: 1,
+      chapterNumber,
+      sourceFinalPath: 'chapters/chapter_' + nnn + '/final.md',
+      latestCommittedChapter: chapterNumber,
       newFacts: [
         {
-          id: mode === 'codex-controlled-conflict' ? 'fact_ch001_radio_signal' : 'fact_codex_ch001_radio_signal',
-          text: 'Lin Cheng hears a powerless radio name the old building.',
-          sourceChapter: mode === 'codex-controlled-conflict' ? 2 : 1,
+          id: mode === 'codex-controlled-conflict' ? 'fact_ch001_radio_signal' : 'fact_codex_ch' + nnn + '_radio_signal',
+          text: chapterFact,
+          sourceChapter: mode === 'codex-controlled-conflict' ? chapterNumber + 1 : chapterNumber,
           type: 'event',
           readerVisible: true,
           authorVisible: true,
@@ -190,28 +219,28 @@ function jsonFor(promptId, mode, repairMode) {
           createdAt: '2026-01-01T00:00:00.000Z'
         }
       ],
-      characterStates: [],
-      characterUpdates: [],
+      characterStates: [{ characterId: 'char_lincheng', summary: 'Lin Cheng is tracking the chapter ' + chapterNumber + ' building clue.' }],
+      characterUpdates: [{ characterId: 'char_lincheng', field: 'currentGoal', oldValueSummary: '', newValue: 'Follow the chapter ' + chapterNumber + ' building clue.', reason: 'Chapter ' + chapterNumber + ' advances the investigation.' }],
       timelineEvents: [
         {
-          id: 'event_codex_ch001_radio_signal',
-          chapter: mode === 'codex-controlled-conflict' ? 2 : 1,
+          id: 'event_codex_ch' + nnn + '_radio_signal',
+          chapter: mode === 'codex-controlled-conflict' ? chapterNumber + 1 : chapterNumber,
           sceneId: 'scene_001',
           order: 1,
-          summary: 'The powerless radio names the old building.',
+          summary: chapterFact,
           participants: ['char_lincheng'],
-          location: 'Apartment',
-          timestampLabel: 'chapter 1 night'
+          location: chapterNumber === 1 ? 'Apartment' : 'Old Building',
+          timestampLabel: 'chapter ' + chapterNumber + ' night'
         }
       ],
-      narrativeDebtUpdates: [],
-      foreshadowingUpdates: [],
+      narrativeDebtUpdates: chapterNumber === 1 ? [{ debtId: 'debt_codex_ch001_radio_signal', action: 'create', text: 'Who is calling through the radio?' }] : [{ debtId: 'debt_codex_ch001_radio_signal', action: chapterNumber === 2 ? 'partially_pay' : 'pay', text: 'The chapter ' + chapterNumber + ' clue advances the prior mystery from chapter ' + previousNnn + '.' }],
+      foreshadowingUpdates: chapterNumber === 1 ? [{ foreshadowingId: 'foreshadow_codex_ch001_building', action: 'create', text: 'The old building answers the powerless radio.' }] : [{ foreshadowingId: 'foreshadow_codex_ch001_building', action: chapterNumber === 2 ? 'reinforce' : 'partially_pay', text: 'The building clue returns in chapter ' + chapterNumber + '.' }],
       readerStatePatch: {
-        addKnows: ['The radio can speak without power.'],
-        addSuspects: ['The old building is tied to the broadcast.'],
-        addQuestions: ['Who is calling through the radio?'],
+        addKnows: ['Chapter ' + chapterNumber + ': ' + chapterFact],
+        addSuspects: ['The old building clue from chapter ' + chapterNumber + ' is connected to the broadcast.'],
+        addQuestions: ['What does chapter ' + chapterNumber + ' reveal about the caller?'],
         removeQuestions: [],
-        addExpectations: ['Lin Cheng will investigate the old building.'],
+        addExpectations: ['Chapter ' + (chapterNumber + 1) + ' will build on chapter ' + chapterNumber + '.'],
         addDoesNotKnow: []
       },
       relationshipUpdates: [],
@@ -292,7 +321,19 @@ function jsonFor(promptId, mode, repairMode) {
     'provider.test_json': { title: 'Codex JSON', ok: true, items: ['alpha', 'beta'] },
     'provider.health': { ok: true }
   };
-  return json[promptId] || { title: 'Codex JSON', ok: true, items: ['alpha', 'beta'] };
+  return json[promptId] || { title: 'Codex Boundary Smoke', ok: true, summary: 'Fake Codex returned schema-constrained JSON.' };
+}
+
+function chapterFromPrompt(stdin) {
+  const tagged = /<chapter_number>\\s*(\\d+)\\s*<\\/chapter_number>/i.exec(stdin);
+  if (tagged) return Number.parseInt(tagged[1], 10);
+  const plain = /CHAPTER_NUMBER:\\s*(\\d+)/i.exec(stdin);
+  if (plain) return Number.parseInt(plain[1], 10);
+  return 1;
+}
+
+function formatChapter(chapterNumber) {
+  return String(chapterNumber).padStart(3, '0');
 }
 `,
     'utf8'

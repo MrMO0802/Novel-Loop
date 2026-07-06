@@ -1,3 +1,10 @@
+---
+promptId: memory.extract_canon_patch_proposal_slim
+task: conservative canon patch proposal
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: unsupported facts, direct state mutation
+---
 Return only JSON that matches the provided output schema.
 
 Task:

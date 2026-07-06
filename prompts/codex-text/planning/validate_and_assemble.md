@@ -1,3 +1,10 @@
+---
+promptId: planning.validate_and_assemble
+task: planning coherence summary
+expectedOutput: markdown
+contextBudget: compact
+qualityRisks: explanatory filler, schema drift
+---
 Review the normalized planning artifacts and return a short markdown confirmation.
 
 Rules:

@@ -13,6 +13,7 @@ import type { CodexProfile } from '../providers/providerTypes.js';
 import { normalizeMission, normalizePlanCandidates, normalizeRanking } from '../providers/codex/normalizers.js';
 import {
   ChapterMissionSchema,
+  ChapterContextSummarySchema,
   ChapterPlanRankingSchema,
   ChapterQueueSchema,
   PlanCandidatesSchema,
@@ -36,6 +37,7 @@ export interface ChapterPlanningInput {
   codexJsonRetries?: number;
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
+  codexTimeoutMs?: number;
   runId?: string;
   forceStage?: ChapterQueueStage;
   failAt?: FailureInjectionPoint;
@@ -91,6 +93,10 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
   const llmClient = createLlmClient(input, paths, fileStore);
   const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
   const chapterQueue = await fileStore.readJson(path.join(paths.planningDir(), 'chapter_queue.json'), ChapterQueueSchema);
+  const previousChapterSummary =
+    input.provider === 'codex-text' && input.chapterNumber > 1
+      ? await readPreviousChapterSummary(paths, fileStore, input.chapterNumber - 1)
+      : undefined;
   const promptId = input.provider === 'codex-text' ? 'planning.plan_chapter_mission_slim' : 'planning.plan_chapter_mission';
   const queueItem = chapterQueue.chapters.find((chapter) => chapter.chapterNumber === input.chapterNumber);
   const renderedPrompt =
@@ -100,7 +106,8 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
           STORY_STATE_SUMMARY: summarizeJson({
             latestCommittedChapter: storyState.latestCommittedChapter,
             openDebts: storyState.narrativeDebts.filter((debt) => debt.status !== 'resolved').slice(0, 8),
-            readerExpectations: storyState.readerState.readerExpectations.slice(0, 8)
+            readerExpectations: storyState.readerState.readerExpectations.slice(0, 8),
+            ...(previousChapterSummary === undefined ? {} : { previousChapterSummary })
           }),
           CHAPTER_QUEUE_ITEM: JSON.stringify(queueItem ?? {}, null, 2)
         })
@@ -138,6 +145,16 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
     artifact: relativeChapterArtifact(input.chapterNumber, 'mission.json'),
     value: mission
   };
+}
+
+async function readPreviousChapterSummary(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<unknown | undefined> {
+  const summaryPath = paths.chapterArtifact(chapterNumber, 'chapter_summary_for_context.json');
+  if (!(await fileStore.exists(summaryPath))) return undefined;
+  try {
+    return await fileStore.readJson(summaryPath, ChapterContextSummarySchema);
+  } catch {
+    return undefined;
+  }
 }
 
 export async function generatePlanCandidates(
@@ -491,7 +508,15 @@ function createPromptService(input: Pick<ChapterPlanningInput, 'promptRoot' | 'p
 function createLlmClient(
   input: Pick<
     ChapterPlanningInput,
-    'provider' | 'fixturesRoot' | 'runId' | 'codexBin' | 'codexProfile' | 'codexJsonRetries' | 'codexJsonRepair' | 'codexJsonRepairRetries'
+    | 'provider'
+    | 'fixturesRoot'
+    | 'runId'
+    | 'codexBin'
+    | 'codexProfile'
+    | 'codexJsonRetries'
+    | 'codexJsonRepair'
+    | 'codexJsonRepairRetries'
+    | 'codexTimeoutMs'
   >,
   paths: ProjectPaths,
   fileStore: FileStore
@@ -506,6 +531,7 @@ function createLlmClient(
     ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
     ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
     ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+    ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
     ...(input.runId === undefined
       ? {}
       : {

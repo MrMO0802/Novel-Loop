@@ -26,6 +26,7 @@ export const ArtifactTypeSchema = z.enum([
   'final',
   'canon_patch',
   'commit_report',
+  'commit_journal',
   'conflict_report',
   'repair_plan',
   'repaired_patch',
@@ -48,7 +49,18 @@ export const ArtifactTypeSchema = z.enum([
   'codex_parsed_json',
   'codex_patch_failure_report',
   'codex_chapter_quality_report',
-  'codex_single_chapter_smoke_report'
+  'codex_chapter_context_summary',
+  'codex_single_chapter_smoke_report',
+  'codex_multi_chapter_pilot_report',
+  'codex_cross_chapter_drift_report',
+  'codex_cross_chapter_continuity_report',
+  'codex_budget_report',
+  'codex_call_reduction_report',
+  'codex_prompt_audit_report',
+  'codex_stage_runtime_profile_report',
+  'codex_runtime_benchmark_report',
+  'codex_runtime_optimization_report',
+  'codex_runtime_failure_report'
 ]);
 
 export const CodexSafetyPolicySchema = z.object({

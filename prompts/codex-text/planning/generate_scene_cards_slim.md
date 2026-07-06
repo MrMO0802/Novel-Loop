@@ -1,3 +1,10 @@
+---
+promptId: planning.generate_scene_cards_slim
+task: bounded scene cards
+expectedOutput: JSON matching output schema
+contextBudget: compact
+qualityRisks: too many scenes, weak conflict
+---
 Return only JSON that matches the provided output schema.
 
 Task:

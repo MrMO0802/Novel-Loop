@@ -38,10 +38,14 @@ export interface ChapterRevisionLoopInput {
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
   codexTimeoutMs?: number;
+  codexContextBudgetBytes?: number;
+  codexMaxArtifactsInContext?: number;
+  codexContextMode?: 'compact' | 'balanced' | 'rich';
   maxRevisions?: number;
   commit?: boolean;
   confirmCodexCommit?: boolean;
   rerunCodexOnConfirm?: boolean;
+  codexFinalMode?: 'codex' | 'local-assemble' | 'light-polish';
   runId?: string;
   forceStage?: ChapterQueueStage;
   failAt?: FailureInjectionPoint;

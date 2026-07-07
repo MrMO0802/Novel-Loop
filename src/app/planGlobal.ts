@@ -282,19 +282,14 @@ async function planGlobalWithCodexText(
   await runLogger.recordArtifact(runId, 'planning/chapter_queue.json');
   artifacts.push('planning/chapter_queue.json');
 
-  const assemblePrompt = await promptService.renderPrompt('planning.validate_and_assemble', {
-    ARC_MAP_JSON: JSON.stringify(arcMap, null, 2),
-    CHAPTER_QUEUE_JSON: JSON.stringify(chapterQueue, null, 2)
+  const validationSummary = renderLocalPlanningValidationSummary(arcMap, chapterQueue);
+  await fileStore.writeText(path.join(paths.planningDir(), 'validation_summary.md'), validationSummary);
+  await runLogger.recordArtifact(runId, 'planning/validation_summary.md', {
+    action: 'generated',
+    stage: 'planning',
+    derivedFrom: ['planning/arc_map.json', 'planning/chapter_queue.json'],
+    provenanceNote: 'local deterministic planning validation assembly'
   });
-  const assembleResponse = await llmClient.complete({
-    promptId: 'planning.validate_and_assemble',
-    system: 'Novel Loop Engine codex-text planning module',
-    user: assemblePrompt,
-    responseFormat: 'markdown'
-  });
-  await writePromptRunArtifacts(fileStore, paths, runId, 'planning.validate_and_assemble', assemblePrompt, assembleResponse.text);
-  await fileStore.writeText(path.join(paths.planningDir(), 'validation_summary.md'), assembleResponse.text);
-  await runLogger.recordArtifact(runId, 'planning/validation_summary.md');
 
   await runLogger.endRun(runId, 'completed');
   return {
@@ -307,6 +302,24 @@ async function planGlobalWithCodexText(
 function summarize(text: string, maxLength = 1800): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}...`;
+}
+
+function renderLocalPlanningValidationSummary(arcMap: unknown, chapterQueue: unknown): string {
+  const arcCount = typeof arcMap === 'object' && arcMap !== null && 'arcs' in arcMap && Array.isArray((arcMap as { arcs?: unknown }).arcs)
+    ? (arcMap as { arcs: unknown[] }).arcs.length
+    : 0;
+  const chapterCount = typeof chapterQueue === 'object' && chapterQueue !== null && 'chapters' in chapterQueue && Array.isArray((chapterQueue as { chapters?: unknown }).chapters)
+    ? (chapterQueue as { chapters: unknown[] }).chapters.length
+    : 0;
+  return [
+    '# Local planning assembly validation',
+    '',
+    'Local planning assembly completed without a Codex validation call.',
+    `Arc count: ${arcCount}`,
+    `Chapter queue count: ${chapterCount}`,
+    '',
+    'Arc map and chapter queue were schema-validated before this summary was written.'
+  ].join('\n') + '\n';
 }
 
 async function ensureProjectReady(paths: ProjectPaths, fileStore: FileStore): Promise<void> {

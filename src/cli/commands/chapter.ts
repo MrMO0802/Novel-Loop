@@ -30,6 +30,7 @@ interface ChapterCommandOptions {
   commit?: boolean;
   confirmCodexCommit?: boolean;
   rerunCodexOnConfirm?: boolean;
+  codexFinalMode?: string;
   resume?: boolean;
   forceStage?: string;
   failAt?: string;
@@ -57,6 +58,7 @@ export function registerChapterCommand(program: Command): void {
     .option('--commit', 'commit final chapter canon patch into Story State', false)
     .option('--confirm-codex-commit', 'confirm codex-text controlled commit after preview', false)
     .option('--rerun-codex-on-confirm', 'rerun Codex during confirmed codex-text commit instead of reusing preview artifacts', false)
+    .option('--codex-final-mode <mode>', 'codex final mode: codex, local-assemble, or light-polish', 'codex')
     .option('--resume', 'resume the first failed or in-progress chapter from chapter_queue.json', false)
     .option('--force-stage <stage>', 'regenerate one non-committed stage explicitly')
     .option('--fail-at <point>', 'test hook: inject a failure at a pipeline point')
@@ -74,6 +76,7 @@ export function registerChapterCommand(program: Command): void {
       const failAt = options.failAt === undefined ? undefined : parseFailurePoint(options.failAt);
       const maxConflictRepairs = parseNonNegativeInteger(options.maxConflictRepairs ?? '2', 'maxConflictRepairs');
       const reusePolicy = parseReusePolicy(options.reusePolicy ?? 'reference_only');
+      const codexFinalMode = parseCodexFinalMode(options.codexFinalMode ?? 'codex');
       const codexOptions = resolveCodexCliOptionsIfNeeded(options);
 
       if (options.dryRun && (options.until !== undefined || maxRevisions !== undefined || options.commit === true)) {
@@ -103,6 +106,7 @@ export function registerChapterCommand(program: Command): void {
           commit: options.commit === true,
           confirmCodexCommit: options.confirmCodexCommit === true,
           rerunCodexOnConfirm: options.rerunCodexOnConfirm === true,
+          codexFinalMode,
           repairConflicts: options.repairConflicts === true,
           maxConflictRepairs,
           reusePolicy,
@@ -158,6 +162,7 @@ export function registerChapterCommand(program: Command): void {
           commit: options.commit === true,
           confirmCodexCommit: options.confirmCodexCommit === true,
           rerunCodexOnConfirm: options.rerunCodexOnConfirm === true,
+          codexFinalMode,
           repairConflicts: options.repairConflicts === true,
           maxConflictRepairs,
           regenerateStale: options.regenerateStale === true,
@@ -349,4 +354,11 @@ function parseFailurePoint(value: string): FailureInjectionPoint {
 
 function parseReusePolicy(value: string): ReusePolicy {
   return ReusePolicySchema.parse(value);
+}
+
+function parseCodexFinalMode(value: string): 'codex' | 'local-assemble' | 'light-polish' {
+  if (value === 'codex' || value === 'local-assemble' || value === 'light-polish') {
+    return value;
+  }
+  throw new AppError('INVALID_CODEX_FINAL_MODE', 'codexFinalMode must be one of: codex, local-assemble, light-polish', 2);
 }

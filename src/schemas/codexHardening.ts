@@ -459,6 +459,33 @@ export const ChapterContextSummarySchema = z.object({
   generatedAt: z.string()
 });
 
+export const FinalAssemblyReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  mode: z.enum(['local-assemble', 'light-polish']),
+  sourceScenePaths: z.array(z.string()),
+  selectedPlanPath: z.string(),
+  sceneCardsPath: z.string(),
+  outputFinalPath: z.string(),
+  sceneCount: z.number().int().nonnegative(),
+  wordCount: z.number().int().nonnegative(),
+  warnings: z.array(z.string()),
+  generatedAt: z.string()
+});
+
+export const BuildBibleCacheReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  briefHash: z.string().regex(/^[a-f0-9]{64}$/),
+  cacheKey: z.string(),
+  cacheHit: z.boolean(),
+  reusedArtifacts: z.array(z.string()),
+  regeneratedArtifacts: z.array(z.string()),
+  reason: z.string(),
+  generatedAt: z.string()
+});
+
 const CodexProfilingSuggestedActionSchema = z.enum([
   'reduce_context',
   'slim_schema',
@@ -938,8 +965,28 @@ export const CodexRuntimeOptimizationReportSchema = z.object({
   baseline: z.record(z.string(), z.number().int().nonnegative()),
   current: z.record(z.string(), z.number().int().nonnegative()),
   deltaPercent: z.record(z.string(), z.number()),
+  deltaByPromptId: z.record(z.string(), z.number()).default({}),
+  callCountBefore: z.number().int().nonnegative().default(0),
+  callCountAfter: z.number().int().nonnegative().default(0),
+  cacheHits: z.number().int().nonnegative().default(0),
+  localAssembleUsage: z.number().int().nonnegative().default(0),
+  contextBudgetStats: z
+    .object({
+      manifestCount: z.number().int().nonnegative(),
+      overBudgetCount: z.number().int().nonnegative(),
+      averageActualBytes: z.number().nonnegative(),
+      averageBudgetBytes: z.number().nonnegative()
+    })
+    .default({
+      manifestCount: 0,
+      overBudgetCount: 0,
+      averageActualBytes: 0,
+      averageBudgetBytes: 0
+    }),
+  warnings: z.array(z.string()).default([]),
   improvedStages: z.array(z.string()),
   regressedStages: z.array(z.string()),
+  nextRecommendations: z.array(z.string()).default([]),
   notes: z.array(z.string())
 });
 
@@ -963,6 +1010,8 @@ export type CodexSingleChapterSmokeReport = z.infer<typeof CodexSingleChapterSmo
 export type CodexContextArtifact = z.infer<typeof CodexContextArtifactSchema>;
 export type CodexContextManifest = z.infer<typeof CodexContextManifestSchema>;
 export type ChapterContextSummary = z.infer<typeof ChapterContextSummarySchema>;
+export type FinalAssemblyReport = z.infer<typeof FinalAssemblyReportSchema>;
+export type BuildBibleCacheReport = z.infer<typeof BuildBibleCacheReportSchema>;
 export type CodexStageRuntimeProfileReport = z.infer<typeof CodexStageRuntimeProfileReportSchema>;
 export type CodexCrossChapterLink = z.infer<typeof CodexCrossChapterLinkSchema>;
 export type CodexCrossChapterContinuityReport = z.infer<typeof CodexCrossChapterContinuityReportSchema>;

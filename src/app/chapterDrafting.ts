@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { z } from 'zod';
 
 import { ChapterQueueStore } from './chapterQueue.js';
+import { writeCodexContextManifest } from './codexMinimalContext.js';
 import { normalizeCodexOutput } from './codexNormalization.js';
 import { injectFailure } from './pipelineFailure.js';
 import type { FailureInjectionPoint } from './pipelineFailure.js';
@@ -12,7 +13,7 @@ import { PromptService } from '../prompts/PromptService.js';
 import type { CodexProfile } from '../providers/providerTypes.js';
 import { normalizeSceneCards } from '../providers/codex/normalizers.js';
 import { ChapterMissionSchema, SceneCardsSchema, StoryStateSchema } from '../schemas/index.js';
-import type { ChapterQueueStage, SceneCard, SceneCards } from '../schemas/index.js';
+import type { ChapterQueueStage, SceneCard, SceneCards, StoryState } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
@@ -31,6 +32,9 @@ export interface ChapterDraftingInput {
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
   codexTimeoutMs?: number;
+  codexContextBudgetBytes?: number;
+  codexMaxArtifactsInContext?: number;
+  codexContextMode?: 'compact' | 'balanced' | 'rich';
   runId?: string;
   forceStage?: ChapterQueueStage;
   failAt?: FailureInjectionPoint;
@@ -50,6 +54,7 @@ export interface WriteSceneResult {
   artifact: string;
   sceneId: string;
   content: string;
+  contextManifestPath?: string;
 }
 
 export interface AssembleChapterResult {
@@ -137,6 +142,20 @@ export async function writeScene(input: WriteSceneInput, fileStore = new FileSto
 
   const mission = await fileStore.readJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), ChapterMissionSchema);
   const selectedPlan = await fileStore.readText(paths.chapterArtifact(input.chapterNumber, 'selected_plan.md'));
+  const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+  const contextManifest =
+    input.provider === 'codex-text'
+      ? await writeSceneContextManifest(paths, fileStore, {
+          chapterNumber: input.chapterNumber,
+          sceneCard: input.sceneCard,
+          mission,
+          selectedPlan,
+          storyState,
+          ...(input.codexContextMode === undefined ? {} : { requestedMode: input.codexContextMode }),
+          ...(input.codexContextBudgetBytes === undefined ? {} : { budgetBytes: input.codexContextBudgetBytes }),
+          ...(input.codexMaxArtifactsInContext === undefined ? {} : { maxArtifacts: input.codexMaxArtifactsInContext })
+        })
+      : undefined;
   const promptService = createPromptService(input, fileStore);
   const llmClient = createLlmClient(input, paths, fileStore);
   const renderedPrompt =
@@ -172,7 +191,8 @@ export async function writeScene(input: WriteSceneInput, fileStore = new FileSto
   return {
     artifact,
     sceneId: input.sceneCard.sceneId,
-    content: response.text
+    content: response.text,
+    ...(contextManifest === undefined ? {} : { contextManifestPath: contextManifest.relativePath })
   };
 }
 
@@ -258,6 +278,19 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
       );
       recordArtifact(artifacts, sceneResult.artifact, sceneResult.reused ? reusedArtifacts : generatedArtifacts);
       await runLogger.recordArtifact(runId, sceneResult.artifact, sceneResult.reused ? 'reused' : 'generated');
+      if (!sceneResult.reused && sceneResult.contextManifestPath !== undefined) {
+        recordArtifact(artifacts, sceneResult.contextManifestPath, generatedArtifacts);
+        await runLogger.recordArtifact(runId, sceneResult.contextManifestPath, {
+          action: 'generated',
+          stage: 'context',
+          derivedFrom: [
+            relativeChapterArtifact(input.chapterNumber, 'selected_plan.md'),
+            relativeChapterArtifact(input.chapterNumber, 'scene_cards.json'),
+            'state/story_state.json'
+          ],
+          provenanceNote: `Codex write_scene context budget manifest for ${sceneCard.sceneId}`
+        });
+      }
     }
     await queueStore.markStageComplete(input.chapterNumber, 'drafting', 'scene_drafts', runId);
 
@@ -389,6 +422,115 @@ async function reuseDraftAssembly(
     ...produced,
     reused: false
   };
+}
+
+async function writeSceneContextManifest(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  input: {
+    chapterNumber: number;
+    sceneCard: SceneCard;
+    mission: unknown;
+    selectedPlan: string;
+    storyState: StoryState;
+    requestedMode?: 'compact' | 'balanced' | 'rich';
+    budgetBytes?: number;
+    maxArtifacts?: number;
+  }
+): Promise<{ relativePath: string }> {
+  const previousSummaryPath = previousChapterSummaryPath(input.chapterNumber);
+  const includedArtifacts = [
+    {
+      path: relativeChapterArtifact(input.chapterNumber, 'selected_plan.md'),
+      reason: 'selected plan anchors this scene draft',
+      summary: summarizeText(input.selectedPlan, 180)
+    },
+    {
+      path: relativeChapterArtifact(input.chapterNumber, 'scene_cards.json'),
+      reason: `scene card for ${input.sceneCard.sceneId}`,
+      summary: summarizeJson(input.sceneCard, 260)
+    },
+    {
+      path: 'state/story_state.json',
+      reason: 'bounded Story State summary for continuity; live state is not mutated by drafting',
+      summary: summarizeStoryStateForSceneContext(input.storyState)
+    },
+    {
+      path: relativeChapterArtifact(input.chapterNumber, 'mission.json'),
+      reason: 'chapter mission summary for draft constraints',
+      summary: summarizeJson(input.mission, 160)
+    },
+    ...(previousSummaryPath === undefined
+      ? []
+      : [
+          {
+            path: previousSummaryPath,
+            reason: 'previous committed chapter summary for continuity',
+            summary: await fileStore.exists(paths.projectArtifact(previousSummaryPath))
+              ? summarizeText(await fileStore.readText(paths.projectArtifact(previousSummaryPath)), 160)
+              : 'previous summary not available'
+          }
+        ])
+  ];
+  return writeCodexContextManifest(paths, fileStore, {
+    task: `write-scene:chapter_${formatChapterNumber(input.chapterNumber)}:${input.sceneCard.sceneId}`,
+    includedArtifacts,
+    excludedArtifacts: [
+      {
+        path: 'codex/runs/',
+        reason: 'raw Codex run dumps are provenance-only and must not enter generation context'
+      },
+      {
+        path: 'chapters/',
+        reason: 'full chapter tree is too broad; selected plan, scene cards, and summaries are included instead'
+      },
+      {
+        path: 'chapters/archive/',
+        reason: 'old archived drafts are not prompt context for low-risk write_scene optimization'
+      }
+    ],
+    ...(input.requestedMode === undefined ? {} : { requestedMode: input.requestedMode }),
+    ...(input.budgetBytes === undefined ? {} : { budgetBytes: input.budgetBytes }),
+    ...(input.maxArtifacts === undefined ? {} : { maxArtifacts: input.maxArtifacts })
+  });
+}
+
+function summarizeStoryStateForSceneContext(storyState: StoryState): string {
+  return summarizeJson(
+    {
+      latestCommittedChapter: storyState.latestCommittedChapter,
+      characters: storyState.characters.slice(0, 4).map((character) => ({
+        id: character.id,
+        name: character.name,
+        goal: character.currentGoal,
+        emotionalState: character.emotionalState,
+        knowledge: character.knowledge.slice(0, 3).map((knowledge) => ({
+          text: knowledge.text,
+          status: knowledge.status
+        }))
+      })),
+      openDebts: storyState.narrativeDebts
+        .filter((debt) => debt.status === 'open' || debt.status === 'escalated' || debt.status === 'partially_paid')
+        .slice(0, 4)
+        .map((debt) => ({
+          id: debt.id,
+          status: debt.status,
+          promise: debt.promise,
+          readerQuestion: debt.readerQuestion
+        })),
+      reader: {
+        known: storyState.readerState.readerKnows.slice(0, 4),
+        suspects: storyState.readerState.readerSuspects.slice(0, 4),
+        expectations: storyState.readerState.readerExpectations.slice(0, 4)
+      }
+    },
+    360
+  );
+}
+
+function previousChapterSummaryPath(chapterNumber: number): string | undefined {
+  if (chapterNumber <= 1) return undefined;
+  return relativeChapterArtifact(chapterNumber - 1, 'chapter_summary_for_context.json');
 }
 
 function recordArtifact(allArtifacts: string[], artifact: string, bucket: string[]): void {

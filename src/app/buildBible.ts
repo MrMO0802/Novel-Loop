@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 import { ProviderFactory, type ProviderName } from '../llm/ProviderFactory.js';
@@ -9,6 +10,8 @@ import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
+import { BuildBibleCacheReportSchema } from '../schemas/index.js';
+import type { BuildBibleCacheReport } from '../schemas/index.js';
 
 export interface BuildBibleInput {
   projectId: string;
@@ -24,6 +27,8 @@ export interface BuildBibleInput {
   codexJsonRepair?: boolean;
   codexJsonRepairRetries?: number;
   codexTimeoutMs?: number;
+  useCache?: boolean;
+  forceRegenerate?: boolean;
 }
 
 export interface BuildBibleResult {
@@ -70,19 +75,66 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
   const provider = input.provider ?? 'mock';
   const runId = input.runId ?? createRunId();
   const runLogger = new RunLogger(paths, fileStore);
+  const useCache = input.useCache === true;
+  const forceRegenerate = input.forceRegenerate === true || input.force === true;
 
   await ensureProjectReady(paths, fileStore);
-  await ensureCanWriteOutputs(paths, fileStore, input.force ?? false);
   await runLogger.startRun({
     runId,
     command: 'build-bible',
     args: {
       provider,
-      ...(input.codexProfile === undefined ? {} : { codexProfile: input.codexProfile })
+      ...(input.codexProfile === undefined ? {} : { codexProfile: input.codexProfile }),
+      useCache,
+      forceRegenerate
     }
   });
 
   try {
+    const brief = await fileStore.readText(paths.brief());
+    const briefHash = sha256(brief);
+    const cacheKey = buildBibleCacheKey(provider, briefHash);
+    if (useCache && !forceRegenerate && (await strategyArtifactsExist(paths, fileStore))) {
+      const latestCache = await readLatestCacheReport(paths, fileStore);
+      if (latestCache?.cacheKey === cacheKey) {
+        const artifacts = BUILD_BIBLE_PROMPTS.map((artifact) => artifact.relativeOutputPath);
+        for (const artifact of artifacts) {
+          await runLogger.recordArtifact(runId, artifact, {
+            action: 'reused',
+            provenanceNote: 'build-bible cache hit'
+          });
+        }
+        const cacheReport = await writeCacheReport(paths, fileStore, {
+          provider,
+          briefHash,
+          cacheKey,
+          cacheHit: true,
+          reusedArtifacts: artifacts,
+          regeneratedArtifacts: [],
+          reason: 'cache hit: brief hash and strategy artifacts match'
+        });
+        await runLogger.recordArtifact(runId, cacheReport.relativeJsonPath, {
+          action: 'generated',
+          stage: 'strategy',
+          derivedFrom: artifacts,
+          provenanceNote: 'build-bible cache report'
+        });
+        await runLogger.recordArtifact(runId, cacheReport.relativeMdPath, {
+          action: 'generated',
+          stage: 'strategy',
+          derivedFrom: [cacheReport.relativeJsonPath],
+          provenanceNote: 'build-bible cache markdown report'
+        });
+        await runLogger.endRun(runId, 'completed');
+        return {
+          projectId: paths.projectId,
+          runId,
+          artifacts: [...artifacts, cacheReport.relativeJsonPath, cacheReport.relativeMdPath]
+        };
+      }
+    }
+
+    await ensureCanWriteOutputs(paths, fileStore, forceRegenerate);
     const promptService = new PromptService(input.promptRoot ?? DEFAULT_PROMPT_ROOT, fileStore);
     const llmClient = ProviderFactory.create({
       provider,
@@ -101,7 +153,6 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
         fileStore
       }
     });
-    const brief = await fileStore.readText(paths.brief());
     const artifacts: string[] = [];
 
     for (const promptArtifact of BUILD_BIBLE_PROMPTS) {
@@ -120,6 +171,31 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
       await fileStore.writeText(outputPath, response.text);
       await runLogger.recordArtifact(runId, promptArtifact.relativeOutputPath);
       artifacts.push(promptArtifact.relativeOutputPath);
+    }
+
+    if (useCache) {
+      const cacheReport = await writeCacheReport(paths, fileStore, {
+        provider,
+        briefHash,
+        cacheKey,
+        cacheHit: false,
+        reusedArtifacts: [],
+        regeneratedArtifacts: artifacts,
+        reason: forceRegenerate ? 'cache miss: forceRegenerate requested' : 'cache miss: no matching cache report or missing strategy artifacts'
+      });
+      await runLogger.recordArtifact(runId, cacheReport.relativeJsonPath, {
+        action: 'generated',
+        stage: 'strategy',
+        derivedFrom: artifacts,
+        provenanceNote: 'build-bible cache report'
+      });
+      await runLogger.recordArtifact(runId, cacheReport.relativeMdPath, {
+        action: 'generated',
+        stage: 'strategy',
+        derivedFrom: [cacheReport.relativeJsonPath],
+        provenanceNote: 'build-bible cache markdown report'
+      });
+      artifacts.push(cacheReport.relativeJsonPath, cacheReport.relativeMdPath);
     }
 
     await runLogger.endRun(runId, 'completed');
@@ -159,4 +235,99 @@ async function ensureCanWriteOutputs(paths: ProjectPaths, fileStore: FileStore, 
       throw new AppError('ARTIFACT_ALREADY_EXISTS', `Artifact already exists: ${outputPath}`, 2);
     }
   }
+}
+
+async function strategyArtifactsExist(paths: ProjectPaths, fileStore: FileStore): Promise<boolean> {
+  for (const promptArtifact of BUILD_BIBLE_PROMPTS) {
+    if (!(await fileStore.exists(path.join(paths.strategyDir(), promptArtifact.outputPath)))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function buildBibleCacheKey(provider: ProviderName, briefHash: string): string {
+  return sha256(JSON.stringify({ provider, briefHash, prompts: BUILD_BIBLE_PROMPTS.map((prompt) => prompt.promptId) }));
+}
+
+async function readLatestCacheReport(paths: ProjectPaths, fileStore: FileStore): Promise<BuildBibleCacheReport | undefined> {
+  if (!(await fileStore.exists(paths.strategyDir()))) return undefined;
+  const files = (await fileStore.list(paths.strategyDir()))
+    .filter((fileName) => /^build_bible_cache_report_v\d+\.json$/.test(fileName))
+    .sort((left, right) => cacheReportVersion(right) - cacheReportVersion(left));
+  if (files[0] === undefined) return undefined;
+  try {
+    return await fileStore.readJson(path.join(paths.strategyDir(), files[0]), BuildBibleCacheReportSchema);
+  } catch {
+    return undefined;
+  }
+}
+
+async function writeCacheReport(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  input: {
+    provider: ProviderName;
+    briefHash: string;
+    cacheKey: string;
+    cacheHit: boolean;
+    reusedArtifacts: string[];
+    regeneratedArtifacts: string[];
+    reason: string;
+  }
+): Promise<{ relativeJsonPath: string; relativeMdPath: string }> {
+  const version = await nextCacheReportVersion(paths, fileStore);
+  const jsonFileName = `build_bible_cache_report_v${version}.json`;
+  const mdFileName = `build_bible_cache_report_v${version}.md`;
+  const relativeJsonPath = path.posix.join('strategy', jsonFileName);
+  const relativeMdPath = path.posix.join('strategy', mdFileName);
+  const report = await fileStore.writeJson(
+    paths.projectArtifact(relativeJsonPath),
+    {
+      reportId: `build_bible_cache_report_v${version}`,
+      projectId: paths.projectId,
+      briefHash: input.briefHash,
+      cacheKey: input.cacheKey,
+      cacheHit: input.cacheHit,
+      reusedArtifacts: input.reusedArtifacts,
+      regeneratedArtifacts: input.regeneratedArtifacts,
+      reason: input.reason,
+      generatedAt: new Date().toISOString()
+    },
+    BuildBibleCacheReportSchema
+  );
+  await fileStore.writeText(
+    paths.projectArtifact(relativeMdPath),
+    [
+      `# Build Bible Cache ${report.reportId}`,
+      '',
+      `cacheHit: ${String(report.cacheHit)}`,
+      `reason: ${report.reason}`,
+      `provider: ${input.provider}`,
+      '',
+      '## Reused Artifacts',
+      ...(report.reusedArtifacts.length === 0 ? ['none'] : report.reusedArtifacts.map((artifact) => `- ${artifact}`)),
+      '',
+      '## Regenerated Artifacts',
+      ...(report.regeneratedArtifacts.length === 0 ? ['none'] : report.regeneratedArtifacts.map((artifact) => `- ${artifact}`))
+    ].join('\n') + '\n'
+  );
+  return { relativeJsonPath, relativeMdPath };
+}
+
+async function nextCacheReportVersion(paths: ProjectPaths, fileStore: FileStore): Promise<number> {
+  if (!(await fileStore.exists(paths.strategyDir()))) return 1;
+  const versions = (await fileStore.list(paths.strategyDir()))
+    .map((fileName) => /^build_bible_cache_report_v(\d+)\.json$/.exec(fileName)?.[1])
+    .filter((version): version is string => version !== undefined)
+    .map((version) => Number.parseInt(version, 10));
+  return versions.length === 0 ? 1 : Math.max(...versions) + 1;
+}
+
+function cacheReportVersion(fileName: string): number {
+  return Number.parseInt(/^build_bible_cache_report_v(\d+)\.json$/.exec(fileName)?.[1] ?? '0', 10);
+}
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
 }

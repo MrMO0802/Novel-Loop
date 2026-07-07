@@ -341,6 +341,10 @@ function createStageInput(input: ChapterFullProductionInput) {
     ...(input.codexJsonRetries === undefined ? {} : { codexJsonRetries: input.codexJsonRetries }),
     ...(input.codexJsonRepair === undefined ? {} : { codexJsonRepair: input.codexJsonRepair }),
     ...(input.codexJsonRepairRetries === undefined ? {} : { codexJsonRepairRetries: input.codexJsonRepairRetries }),
+    ...(input.codexTimeoutMs === undefined ? {} : { codexTimeoutMs: input.codexTimeoutMs }),
+    ...(input.codexContextBudgetBytes === undefined ? {} : { codexContextBudgetBytes: input.codexContextBudgetBytes }),
+    ...(input.codexMaxArtifactsInContext === undefined ? {} : { codexMaxArtifactsInContext: input.codexMaxArtifactsInContext }),
+    ...(input.codexContextMode === undefined ? {} : { codexContextMode: input.codexContextMode }),
     ...(input.forceStage === undefined ? {} : { forceStage: input.forceStage }),
     ...(input.failAt === undefined ? {} : { failAt: input.failAt }),
     ...(input.regenerateStale === undefined ? {} : { regenerateStale: input.regenerateStale })

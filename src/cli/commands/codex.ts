@@ -49,6 +49,8 @@ interface CodexCommandOptions {
   afterCallCount?: string;
   realBenchmark?: boolean;
   sourceProfile?: string;
+  optimizationMode?: string;
+  codexFinalMode?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -245,6 +247,8 @@ export function registerCodexCommand(program: Command): void {
         codexJsonRepairRetries: parseNonNegativeInteger(options.codexJsonRepairRetries ?? '1', 'codexJsonRepairRetries'),
         codexTimeoutMs: parsePositiveInteger(options.codexTimeoutMs ?? options.timeoutMs ?? '180000', 'codexTimeoutMs'),
         codexContextMode: parseCodexContextMode(options.codexContextMode ?? 'compact'),
+        codexFinalMode: parseCodexFinalMode(options.codexFinalMode ?? 'codex'),
+        ...(options.optimizationMode === undefined ? {} : { optimizationMode: parseOptimizationMode(options.optimizationMode) }),
         ...(options.codexContextBudgetBytes === undefined ? {} : { codexContextBudgetBytes: parsePositiveInteger(options.codexContextBudgetBytes, 'codexContextBudgetBytes') }),
         ...(options.codexMaxArtifactsInContext === undefined ? {} : { codexMaxArtifactsInContext: parsePositiveInteger(options.codexMaxArtifactsInContext, 'codexMaxArtifactsInContext') }),
         codexStageTimeoutMs: parsePositiveInteger(options.codexStageTimeoutMs ?? options.timeoutMs ?? '180000', 'codexStageTimeoutMs'),
@@ -467,6 +471,8 @@ function addCodexBenchmarkOptions(command: Command): Command {
     .option('--continue-on-failure', 'continue subsequent levels after a failed level', false)
     .option('--resume', 'resume from existing preview or committed artifacts', false)
     .option('--compare-profiles <profiles>', 'comma-separated profiles to compare, e.g. clean,debug')
+    .option('--optimization-mode <mode>', 'runtime optimization mode: low-risk-v1')
+    .option('--codex-final-mode <mode>', 'codex final mode: codex, local-assemble, or light-polish', 'codex')
     .option('--profile-stages', 'write codex_stage_runtime_profile_vN after the benchmark', false);
 }
 
@@ -523,6 +529,21 @@ function parseCodexContextMode(value: string): 'compact' | 'balanced' | 'rich' {
     throw new AppError('INVALID_CODEX_CONTEXT_MODE', `Invalid codex context mode: ${value}`, 2);
   }
   return value as (typeof allowed)[number];
+}
+
+function parseCodexFinalMode(value: string): 'codex' | 'local-assemble' | 'light-polish' {
+  const allowed = ['codex', 'local-assemble', 'light-polish'] as const;
+  if (!allowed.includes(value as (typeof allowed)[number])) {
+    throw new AppError('INVALID_CODEX_FINAL_MODE', `Invalid codex final mode: ${value}`, 2);
+  }
+  return value as (typeof allowed)[number];
+}
+
+function parseOptimizationMode(value: string): 'low-risk-v1' {
+  if (value !== 'low-risk-v1') {
+    throw new AppError('INVALID_CODEX_OPTIMIZATION_MODE', `Invalid codex optimization mode: ${value}`, 2);
+  }
+  return value;
 }
 
 function parseProfiles(value: string): Array<'default' | 'clean' | 'debug'> {

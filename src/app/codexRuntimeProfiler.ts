@@ -394,6 +394,7 @@ function toPromptCallProfile(manifest: RunManifestV2, call: RunManifestV2['promp
   const durationMs = Math.round(call.latencyMs);
   const wrapperCallType = call.wrapperCallType ?? detectWrapperCallType(call.promptId);
   const wrapper = wrapperCallType !== undefined;
+  const boundarySmoke = wrapper && isBoundarySmokeWrapper(manifest, call, wrapperCallType);
   const repairCount = call.finishReason === 'repaired' || mapping.stage === 'json_repair' || wrapperCallType === 'repair' ? 1 : 0;
   const artifactPaths = uniqueStrings([
     call.rawOutputPath,
@@ -411,16 +412,16 @@ function toPromptCallProfile(manifest: RunManifestV2, call: RunManifestV2['promp
     promptFamily: mapping.promptFamily,
     inferredStage: mapping.stage,
     likelyCategory: mapping.likelyCategory,
-    classified: wrapper ? wrapperCallType === 'health' || wrapperCallType === 'smoke' : mapping.classified,
+    classified: wrapper ? boundarySmoke : mapping.classified,
     ...(call.requestId === undefined ? {} : { requestId: call.requestId }),
     ...(call.parentPromptCallId === undefined ? {} : { parentPromptCallId: call.parentPromptCallId }),
     ...(call.parentPromptId === undefined ? {} : { parentPromptId: call.parentPromptId }),
     ...(call.parentStage === undefined ? {} : { parentStage: call.parentStage }),
     ...(call.parentRunId === undefined ? {} : { parentRunId: call.parentRunId }),
     ...(wrapperCallType === undefined ? {} : { wrapperCallType }),
-    attributionMode: call.attributionMode ?? (wrapper ? (wrapperCallType === 'health' || wrapperCallType === 'smoke' ? 'direct' : 'unclassified') : 'direct'),
-    attributionConfidence: call.attributionConfidence ?? (wrapperCallType === 'health' || wrapperCallType === 'smoke' || !wrapper ? 'high' : 'low'),
-    attributionReason: call.attributionReason ?? (wrapper ? 'wrapper call awaits parent attribution' : 'direct business call'),
+    attributionMode: call.attributionMode ?? (wrapper ? (boundarySmoke ? 'direct' : 'unclassified') : 'direct'),
+    attributionConfidence: call.attributionConfidence ?? (boundarySmoke || !wrapper ? 'high' : 'low'),
+    attributionReason: call.attributionReason ?? (wrapper ? (boundarySmoke ? `${wrapperCallType} wrapper is standalone boundary smoke` : 'wrapper call awaits parent attribution') : 'direct business call'),
     durationMs,
     latencyMs: call.latencyMs,
     promptInputBytes: call.promptInputBytes ?? 0,
@@ -460,6 +461,14 @@ function detectWrapperCallType(promptId: string): WrapperCallType | undefined {
   return undefined;
 }
 
+function isBoundarySmokeWrapper(manifest: RunManifestV2, call: RunManifestV2['promptCalls'][number], wrapperCallType: WrapperCallType): boolean {
+  if (wrapperCallType === 'health' || wrapperCallType === 'smoke') return true;
+  if (wrapperCallType !== 'exec_json') return false;
+  const command = manifest.command.toLowerCase();
+  const promptId = call.promptId.toLowerCase().replace(/-/g, '_');
+  return promptId === 'codex.exec_json' && (command.includes('exec-json') || command.includes('exec_json') || command.includes('output-schema'));
+}
+
 function isWrapperCall(call: PromptCallProfileDraft): boolean {
   return call.wrapperCallType !== undefined;
 }
@@ -476,11 +485,11 @@ function applyWrapperAttribution(callProfiles: PromptCallProfileDraft[]): void {
     }
   }
   for (const call of callProfiles.filter(isWrapperCall)) {
-    if (call.wrapperCallType === 'health' || call.wrapperCallType === 'smoke') {
+    if (call.classified && call.attributionMode === 'direct') {
       call.classified = true;
       call.attributionMode = 'direct';
       call.attributionConfidence = 'high';
-      call.attributionReason = `${call.wrapperCallType} wrapper is tracked as boundary overhead`;
+      call.attributionReason = call.attributionReason || `${call.wrapperCallType} wrapper is tracked as boundary overhead`;
       continue;
     }
     const explicitParent = findExplicitParent(call, byCallId);

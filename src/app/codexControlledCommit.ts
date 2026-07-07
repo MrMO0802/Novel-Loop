@@ -3,6 +3,7 @@ import path from 'node:path';
 import { ChapterQueueStore } from './chapterQueue.js';
 import { generateChapterContextSummary } from './chapterContextSummary.js';
 import { evaluateCodexChapterQuality } from './codexChapterQuality.js';
+import { assembleFinalLocally } from './finalAssembly.js';
 import { recordCommitJournalPhase, startCommitJournal } from './commitJournal.js';
 import type { CommitJournalHandle } from './commitJournal.js';
 import { applyCanonPatchToStoryState, checkPatchConflicts, detectPatchConflictItems } from './chapterCommit.js';
@@ -63,6 +64,7 @@ export interface CodexControlledCommitInput {
   commit?: boolean;
   confirmCodexCommit?: boolean;
   rerunCodexOnConfirm?: boolean;
+  codexFinalMode?: 'codex' | 'local-assemble' | 'light-polish';
   runId?: string;
   regenerateStale?: boolean;
 }
@@ -177,6 +179,7 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       commit: true,
       confirmCodexCommit: input.confirmCodexCommit === true,
       rerunCodexOnConfirm: input.rerunCodexOnConfirm === true,
+      codexFinalMode: input.codexFinalMode ?? 'codex',
       codexProfile: input.codexProfile ?? 'default'
     }
   });
@@ -231,9 +234,28 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     await runLogger.recordArtifact(runId, revisionPlan.artifact, reusedPreviewArtifacts ? 'reused' : 'generated');
 
     activeStage = 'final';
-    const final = reusablePreview === undefined ? await generateCodexFinal(input, paths, fileStore, runId, revisionPlan.value) : { artifact: reusablePreview.finalArtifact };
+    const final =
+      reusablePreview === undefined
+        ? await generateFinal(input, paths, fileStore, runId, revisionPlan.value)
+        : { artifact: reusablePreview.finalArtifact };
     recordArtifact(artifacts, final.artifact, reusedPreviewArtifacts ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, final.artifact, reusedPreviewArtifacts ? 'reused' : 'generated');
+    if (hasFinalAssemblyReport(final)) {
+      recordArtifact(artifacts, final.reportPath, generatedArtifacts);
+      recordArtifact(artifacts, final.markdownPath, generatedArtifacts);
+      await runLogger.recordArtifact(runId, final.reportPath, {
+        action: 'generated',
+        stage: 'final',
+        derivedFrom: final.sourceScenePaths,
+        provenanceNote: 'local deterministic final chapter assembly report'
+      });
+      await runLogger.recordArtifact(runId, final.markdownPath, {
+        action: 'generated',
+        stage: 'final',
+        derivedFrom: [final.reportPath],
+        provenanceNote: 'local deterministic final chapter assembly markdown report'
+      });
+    }
     await queueStore.markStageComplete(input.chapterNumber, 'final_ready', 'final', runId);
 
     activeStage = 'canon_patch';
@@ -841,6 +863,41 @@ async function generateCodexFinal(
   const artifact = relativeChapterArtifact(input.chapterNumber, 'final.md');
   await fileStore.writeText(paths.chapterArtifact(input.chapterNumber, 'final.md'), response.text);
   return { artifact };
+}
+
+async function generateFinal(
+  input: CodexControlledCommitInput,
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  runId: string,
+  revisionPlan: RevisionPlan
+): Promise<{ artifact: string } | { artifact: string; reportPath: string; markdownPath: string; sourceScenePaths: string[] }> {
+  if (input.codexFinalMode === 'local-assemble' || input.codexFinalMode === 'light-polish') {
+    const assembled = await assembleFinalLocally(
+      {
+        projectId: paths.projectId,
+        projectsRoot: paths.projectsRoot,
+        chapterNumber: input.chapterNumber,
+        mode: input.codexFinalMode
+      },
+      fileStore
+    );
+    void runId;
+    void revisionPlan;
+    return {
+      artifact: assembled.artifact,
+      reportPath: assembled.reportPath,
+      markdownPath: assembled.markdownPath,
+      sourceScenePaths: assembled.report.sourceScenePaths
+    };
+  }
+  return generateCodexFinal(input, paths, fileStore, runId, revisionPlan);
+}
+
+function hasFinalAssemblyReport(
+  result: { artifact: string } | { artifact: string; reportPath: string; markdownPath: string; sourceScenePaths: string[] }
+): result is { artifact: string; reportPath: string; markdownPath: string; sourceScenePaths: string[] } {
+  return 'reportPath' in result;
 }
 
 async function generateCodexCanonPatchProposal(

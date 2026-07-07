@@ -6,11 +6,13 @@ import {
   CanonPatchSchema,
   ChapterQueueSchema,
   ChapterContextSummarySchema,
+  BuildBibleCacheReportSchema,
   CodexCallReductionReportSchema,
   CodexChapterQualityReportSchema,
   CodexBudgetReportSchema,
   CodexBusinessOptimizationPlanSchema,
   CodexCommitConsistencyReportSchema,
+  CodexContextManifestSchema,
   CodexCrossChapterContinuityReportSchema,
   CodexCrossChapterDriftReportSchema,
   CodexMultiChapterPilotReportSchema,
@@ -23,6 +25,7 @@ import {
   CommitJournalSchema,
   CommitReportSchema,
   ConfigSchema,
+  FinalAssemblyReportSchema,
   ProjectAuditReportSchema,
   RunEventSchema,
   RunManifestSchema,
@@ -349,6 +352,8 @@ async function checkStateMutations(
 }
 
 async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
+  await checkBuildBibleCacheReports(issues, paths, fileStore);
+  await checkCodexContextManifests(issues, paths, fileStore);
   if (await fileStore.exists(paths.auditDir())) {
     for (const fileName of await fileStore.list(paths.auditDir())) {
       if (/^codex_single_chapter_smoke_report_v\d+\.json$/.test(fileName)) {
@@ -409,7 +414,91 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^codex_commit_consistency_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_commit', relativePath, CodexCommitConsistencyReportSchema);
       }
+      if (/^final_assembly_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'final_assembly', relativePath, FinalAssemblyReportSchema);
+        await checkFinalAssemblyReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
     }
+  }
+}
+
+async function checkBuildBibleCacheReports(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
+  if (!(await fileStore.exists(paths.strategyDir()))) return;
+  for (const fileName of await fileStore.list(paths.strategyDir())) {
+    if (!/^build_bible_cache_report_v\d+\.json$/.test(fileName)) continue;
+    const absolutePath = path.join(paths.strategyDir(), fileName);
+    const relativePath = path.join('strategy', fileName);
+    await checkJson(issues, fileStore, absolutePath, 'build_bible_cache', relativePath, BuildBibleCacheReportSchema);
+    try {
+      const report = await fileStore.readJson(absolutePath, BuildBibleCacheReportSchema);
+      for (const artifactPath of report.reusedArtifacts) {
+        if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) {
+          issues.push(issue(
+            `build_bible_cache_missing_reused_${sanitizeIssueId(fileName)}_${sanitizeIssueId(artifactPath)}`,
+            'error',
+            'build_bible_cache',
+            relativePath,
+            `Build bible cache report references missing reused artifact ${artifactPath}.`,
+            'Restore the reused strategy artifact or regenerate build-bible with --force-regenerate.',
+            true
+          ));
+        }
+      }
+    } catch {
+      // checkJson already recorded schema problems.
+    }
+  }
+}
+
+async function checkCodexContextManifests(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
+  const contextDir = paths.projectArtifact(path.join('codex', 'context'));
+  if (!(await fileStore.exists(contextDir))) return;
+  for (const fileName of await fileStore.list(contextDir)) {
+    if (!/^context_manifest_v\d+\.json$/.test(fileName)) continue;
+    const absolutePath = path.join(contextDir, fileName);
+    const relativePath = path.join('codex', 'context', fileName);
+    await checkJson(issues, fileStore, absolutePath, 'codex_context', relativePath, CodexContextManifestSchema);
+    try {
+      const manifest = await fileStore.readJson(absolutePath, CodexContextManifestSchema);
+      if (manifest.actualBytes > manifest.budgetBytes) {
+        issues.push(issue(
+          `codex_context_over_budget_${sanitizeIssueId(fileName)}`,
+          'warning',
+          'codex_context',
+          relativePath,
+          `Context manifest actualBytes=${manifest.actualBytes} exceeds budgetBytes=${manifest.budgetBytes}.`,
+          'Reduce included artifacts or increase --codex-context-budget-bytes intentionally.',
+          false
+        ));
+      }
+    } catch {
+      // checkJson already recorded schema problems.
+    }
+  }
+}
+
+async function checkFinalAssemblyReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, FinalAssemblyReportSchema);
+    if (!(await fileStore.exists(paths.projectArtifact(report.outputFinalPath)))) {
+      issues.push(issue(
+        `final_assembly_missing_final_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'final_assembly',
+        relativePath,
+        `Final assembly report references missing final artifact ${report.outputFinalPath}.`,
+        'Restore final.md or rerun the chapter final assembly stage.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema problems.
   }
 }
 

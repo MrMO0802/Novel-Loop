@@ -234,6 +234,7 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (relativePath.startsWith('runs/') && fileName === 'run_manifest.json') return { artifactType: 'run_manifest', phase: 'run', schemaName: 'RunManifestSchema' };
   if (relativePath.startsWith('runs/') && fileName.endsWith('.ndjson')) return { artifactType: 'event_log', phase: 'run', schemaName: 'RunEventSchema' };
   if (relativePath.startsWith('runs/') && relativePath.includes('/prompts/')) return { artifactType: 'prompt_artifact', phase: 'prompt' };
+  if (/^codex\/context\/context_manifest_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_context_manifest', phase: 'context', schemaName: 'CodexContextManifestSchema' };
   if (relativePath.startsWith('snapshots/') && fileName.endsWith('.json')) return { artifactType: 'snapshot', phase: 'snapshot', schemaName: 'SnapshotSchema' };
   if (relativePath.startsWith('diffs/')) {
     return fileName.endsWith('.json')
@@ -261,6 +262,10 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^codex_chapter_quality_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality' };
   if (fileName === 'chapter_summary_for_context.json') return { artifactType: 'codex_chapter_context_summary', phase: 'context', schemaName: 'ChapterContextSummarySchema' };
   if (fileName === 'chapter_summary_for_context.md') return { artifactType: 'codex_chapter_context_summary', phase: 'context' };
+  if (/^final_assembly_report_v\d+\.json$/.test(fileName)) return { artifactType: 'final_assembly_report', phase: 'final', schemaName: 'FinalAssemblyReportSchema' };
+  if (/^final_assembly_report_v\d+\.md$/.test(fileName)) return { artifactType: 'final_assembly_report', phase: 'final' };
+  if (/^strategy\/build_bible_cache_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'build_bible_cache_report', phase: 'strategy', schemaName: 'BuildBibleCacheReportSchema' };
+  if (/^strategy\/build_bible_cache_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'build_bible_cache_report', phase: 'strategy' };
   if (/^audit\/codex_single_chapter_smoke_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_single_chapter_smoke_report', phase: 'audit', schemaName: 'CodexSingleChapterSmokeReportSchema' };
   if (/^audit\/codex_single_chapter_smoke_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_single_chapter_smoke_report', phase: 'audit' };
   if (/^audit\/codex_multi_chapter_pilot_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_multi_chapter_pilot_report', phase: 'audit', schemaName: 'CodexMultiChapterPilotReportSchema' };

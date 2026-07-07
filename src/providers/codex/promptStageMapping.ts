@@ -32,6 +32,7 @@ const PROMPT_STAGE_RULES: Array<{
   { match: (promptId) => promptId.includes('normalization'), stage: 'normalization', likelyCategory: 'normalization' },
   { match: (promptId) => promptId.includes('provider.inspect'), stage: 'provider_inspect', likelyCategory: 'provider_inspect' },
   { match: (promptId) => promptId.startsWith('strategy.') || promptId.includes('build_bible'), stage: 'build_bible', likelyCategory: 'build_bible_subtask' },
+  { match: (promptId) => promptId === 'planning.validate_and_assemble', stage: 'plan_global_outline', likelyCategory: 'plan_global_subtask' },
   { match: (promptId) => promptId.includes('generate_global_outline') || promptId.includes('plan_global_outline'), stage: 'plan_global_outline', likelyCategory: 'plan_global_subtask' },
   { match: (promptId) => promptId.includes('generate_volume_outline') || promptId.includes('plan_volume_outline'), stage: 'plan_volume_outline', likelyCategory: 'plan_global_subtask' },
   { match: (promptId) => promptId.includes('arc_map'), stage: 'plan_arc_map', likelyCategory: 'plan_global_subtask' },

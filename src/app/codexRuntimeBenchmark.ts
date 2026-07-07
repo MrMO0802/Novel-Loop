@@ -46,6 +46,8 @@ export interface RunCodexRuntimeBenchmarkInput {
   codexContextBudgetBytes?: number;
   codexMaxArtifactsInContext?: number;
   codexContextMode?: 'compact' | 'balanced' | 'rich';
+  codexFinalMode?: 'codex' | 'local-assemble' | 'light-polish';
+  optimizationMode?: 'low-risk-v1';
   codexStageTimeoutMs?: number;
   codexMaxTotalRuntimeMs?: number;
   codexMaxCallsPerStage?: number;
@@ -235,7 +237,18 @@ async function runLevel(
     if (await fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md'))) return;
     const runId = createBenchmarkRunId('codex_benchmark_bible');
     await runMeasuredStage(context, level, 'build-bible', `build-bible ${projectId} --provider codex-text`, runId, async () => {
-      const result = await buildBible({ projectId, projectsRoot, provider: 'codex-text', promptRoot, runId, ...codexOptions(input) }, fileStore);
+      const result = await buildBible(
+        {
+          projectId,
+          projectsRoot,
+          provider: 'codex-text',
+          promptRoot,
+          runId,
+          ...(input.optimizationMode === 'low-risk-v1' ? { useCache: true } : {}),
+          ...codexOptions(input)
+        },
+        fileStore
+      );
       return { runId: result.runId, artifacts: result.artifacts };
     });
     return;
@@ -354,6 +367,7 @@ async function ensureChapterPreview(context: StageContext, chapterNumber: number
         runId,
         maxRevisions: 2,
         commit: true,
+        codexFinalMode: codexFinalModeForBenchmark(context.input),
         ...codexOptions(context.input)
       },
       context.fileStore
@@ -392,6 +406,7 @@ async function runChapterConfirmStage(context: StageContext, chapterNumber: numb
         maxRevisions: 2,
         commit: true,
         confirmCodexCommit: true,
+        codexFinalMode: codexFinalModeForBenchmark(context.input),
         ...codexOptions(context.input)
       },
       context.fileStore
@@ -617,6 +632,11 @@ function codexOptions(input: RunCodexRuntimeBenchmarkInput) {
     ...(input.codexMaxArtifactsInContext === undefined ? {} : { codexMaxArtifactsInContext: input.codexMaxArtifactsInContext }),
     codexContextMode: input.codexContextMode ?? 'compact'
   };
+}
+
+function codexFinalModeForBenchmark(input: RunCodexRuntimeBenchmarkInput): 'codex' | 'local-assemble' | 'light-polish' {
+  if (input.optimizationMode === 'low-risk-v1') return 'local-assemble';
+  return input.codexFinalMode ?? 'codex';
 }
 
 function boundaryOptions(input: RunCodexRuntimeBenchmarkInput, projectsRoot: string, projectId: string) {

@@ -9,6 +9,8 @@ interface BuildBibleCommandOptions {
   provider?: ProviderName;
   root?: string;
   force?: boolean;
+  useCache?: boolean;
+  forceRegenerate?: boolean;
   codexBin?: string;
   codexProfile?: string;
   codexJsonRetries?: string;
@@ -26,13 +28,18 @@ export function registerBuildBibleCommand(program: Command): void {
     .option('--root <projectsRoot>', PROJECTS_ROOT_OPTION_HELP, './projects')
   )
     .option('--force', 'overwrite existing strategy artifacts', false)
+    .option('--use-cache', 'reuse existing strategy artifacts when brief hash and cache key match', false)
+    .option('--no-use-cache', 'disable build-bible cache reuse')
+    .option('--force-regenerate', 'bypass build-bible cache and regenerate strategy artifacts', false)
     .action(async (projectId: string, options: BuildBibleCommandOptions) => {
       const result = await buildBible({
         projectId,
         projectsRoot: options.root ?? './projects',
         provider: options.provider ?? 'mock',
         ...resolveCodexCliOptionsIfNeeded(options),
-        force: options.force ?? false
+        force: options.force ?? false,
+        useCache: options.useCache === true,
+        forceRegenerate: options.forceRegenerate === true
       });
 
       console.log(`Built bible artifacts for project: ${result.projectId}`);

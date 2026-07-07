@@ -58,6 +58,7 @@ export const ArtifactTypeSchema = z.enum([
   'codex_call_reduction_report',
   'codex_prompt_audit_report',
   'codex_stage_runtime_profile_report',
+  'codex_business_optimization_plan',
   'codex_runtime_benchmark_report',
   'codex_runtime_optimization_report',
   'codex_runtime_failure_report'

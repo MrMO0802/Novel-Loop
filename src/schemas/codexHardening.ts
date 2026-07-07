@@ -752,6 +752,114 @@ export const CodexStageRuntimeProfileReportSchema = z.object({
   storyStateMutated: z.literal(false)
 });
 
+const CodexBusinessOptimizationCandidateTypeSchema = z.enum([
+  'reduce_context',
+  'add_context_budget',
+  'use_chapter_summary_cache',
+  'slim_schema',
+  'split_task',
+  'merge_task',
+  'localize_task',
+  'cache_artifact',
+  'reuse_preview_artifact',
+  'improve_prompt',
+  'improve_normalizer',
+  'improve_stage_mapping',
+  'classify_orphan_wrapper',
+  'no_action_safety_critical'
+]);
+
+const CodexOptimizationQualityRiskSchema = z.enum(['low', 'medium', 'high']);
+const CodexOptimizationComplexitySchema = z.enum(['low', 'medium', 'high']);
+
+const CodexBusinessOptimizationTargetStageSchema = z.object({
+  stage: z.string(),
+  promptId: z.string(),
+  totalDurationMs: z.number().int().nonnegative(),
+  callCount: z.number().int().positive(),
+  averageDurationMs: z.number().nonnegative(),
+  maxDurationMs: z.number().int().nonnegative(),
+  promptInputBytesTotal: z.number().int().nonnegative(),
+  averagePromptInputBytes: z.number().nonnegative(),
+  schemaBytesTotal: z.number().int().nonnegative(),
+  outputBytesTotal: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  failureCount: z.number().int().nonnegative(),
+  qualityRisk: CodexOptimizationQualityRiskSchema,
+  safetyCritical: z.boolean(),
+  recommendedStrategy: z.string().min(1)
+});
+
+const CodexBusinessOptimizationCandidateSchema = z.object({
+  candidateId: z.string(),
+  stage: z.string(),
+  promptId: z.string(),
+  candidateType: CodexBusinessOptimizationCandidateTypeSchema,
+  reason: z.string().min(1),
+  evidence: z.array(z.string()).default([]),
+  estimatedImpactMs: z.number().int().nonnegative(),
+  estimatedImpactPercent: z.number().nonnegative(),
+  implementationComplexity: CodexOptimizationComplexitySchema,
+  riskLevel: CodexProfilingRiskLevelSchema,
+  safetyImpact: CodexProfilingSafetyImpactSchema,
+  expectedBehaviorChange: z.string().min(1),
+  filesLikelyTouched: z.array(z.string()),
+  testsRequired: z.array(z.string()),
+  rollbackPlan: z.string().min(1),
+  recommendedFirstStep: z.string().min(1)
+});
+
+const CodexWrapperInterpretationSchema = z.object({
+  likelyIncludesProviderExecution: z.literal(true),
+  pureBoundaryOverheadEstimateMs: z.number().int().nonnegative().nullable(),
+  reason: z.string().min(1),
+  childCallsRolledUpToBusiness: z.boolean(),
+  orphanWrapperDurationMs: z.number().int().nonnegative(),
+  recommendedAction: z.string().min(1)
+});
+
+const CodexOptimizationCleanupRecommendationSchema = z.object({
+  promptId: z.string(),
+  stage: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  confidence: z.enum(['low', 'medium', 'high']),
+  recommendedAction: z.string().min(1)
+});
+
+const CodexOptimizationStageSpecificAnalysisSchema = z.object({
+  stage: z.string(),
+  promptId: z.string(),
+  recommendation: z.string().min(1),
+  safetyNote: z.string().min(1)
+});
+
+export const CodexBusinessOptimizationPlanSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  sourceProfilePath: z.string(),
+  sourceProfileVersion: z.number().int().positive(),
+  businessTotalDurationMs: z.number().int().nonnegative(),
+  rawTotalDurationMs: z.number().int().nonnegative(),
+  wrapperDurationMs: z.number().int().nonnegative(),
+  targetStages: z.array(CodexBusinessOptimizationTargetStageSchema),
+  optimizationCandidates: z.array(CodexBusinessOptimizationCandidateSchema),
+  recommendedExecutionOrder: z.array(z.string()),
+  expectedImpactSummary: z.object({
+    totalEstimatedImpactMs: z.number().int().nonnegative(),
+    totalEstimatedImpactPercent: z.number().nonnegative(),
+    topCandidateIds: z.array(z.string()),
+    notes: z.array(z.string())
+  }),
+  safetyNotes: z.array(z.string()),
+  rollbackPlan: z.string().min(1),
+  wrapperInterpretation: CodexWrapperInterpretationSchema,
+  orphanCleanupPlan: z.array(CodexOptimizationCleanupRecommendationSchema),
+  stageSpecificAnalysis: z.array(CodexOptimizationStageSpecificAnalysisSchema),
+  storyStateMutated: z.literal(false)
+});
+
 export const CodexCrossChapterLinkSchema = z.object({
   fromChapter: z.number().int().positive(),
   toChapter: z.number().int().positive(),
@@ -862,3 +970,4 @@ export type CodexPromptAuditIssue = z.infer<typeof CodexPromptAuditIssueSchema>;
 export type CodexPromptAuditReport = z.infer<typeof CodexPromptAuditReportSchema>;
 export type CodexCallReductionReport = z.infer<typeof CodexCallReductionReportSchema>;
 export type CodexRuntimeOptimizationReport = z.infer<typeof CodexRuntimeOptimizationReportSchema>;
+export type CodexBusinessOptimizationPlan = z.infer<typeof CodexBusinessOptimizationPlanSchema>;

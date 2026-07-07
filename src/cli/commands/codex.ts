@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 
 import { checkCodexStatus, execCodexJson, execCodexText, runCodexSmoke } from '../../app/codexBoundary.js';
+import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { evaluateCodexCrossChapterDrift, runCodexMultiChapterPilot } from '../../app/codexMultiChapterPilot.js';
@@ -47,6 +48,7 @@ interface CodexCommandOptions {
   beforeCallCount?: string;
   afterCallCount?: string;
   realBenchmark?: boolean;
+  sourceProfile?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -309,6 +311,35 @@ export function registerCodexCommand(program: Command): void {
           `totalDurationMs: ${result.report.totalDurationMs}`,
           `sourceRunCount: ${result.report.sourceRunCount}`,
           `slowestStages: ${result.report.slowestStages.map((stage) => stage.stage).join(',') || 'none'}`
+        ].join('\n') + '\n'
+      );
+    });
+
+  addBoundaryOptions(codex.command('optimization-plan').description('[experimental/internal] Generate a read-only Codex business optimization plan from the latest runtime profile'))
+    .argument('<projectId>', 'project id')
+    .option('--source-profile <path>', 'relative source codex_stage_runtime_profile_vN.json path')
+    .action(async (projectId: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await generateCodexBusinessOptimizationPlan({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        ...(options.sourceProfile === undefined ? {} : { sourceProfilePath: options.sourceProfile })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          'codexBusinessOptimizationPlan: success',
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `sourceProfilePath: ${result.report.sourceProfilePath}`,
+          `businessTotalDurationMs: ${result.report.businessTotalDurationMs}`,
+          `rawTotalDurationMs: ${result.report.rawTotalDurationMs}`,
+          `wrapperDurationMs: ${result.report.wrapperDurationMs}`,
+          `candidateCount: ${result.report.optimizationCandidates.length}`,
+          `topCandidate: ${result.report.optimizationCandidates[0]?.candidateId ?? 'none'}`
         ].join('\n') + '\n'
       );
     });

@@ -9,6 +9,7 @@ import {
   CodexCallReductionReportSchema,
   CodexChapterQualityReportSchema,
   CodexBudgetReportSchema,
+  CodexBusinessOptimizationPlanSchema,
   CodexCommitConsistencyReportSchema,
   CodexCrossChapterContinuityReportSchema,
   CodexCrossChapterDriftReportSchema,
@@ -27,7 +28,7 @@ import {
   RunManifestSchema,
   StoryStateSchema
 } from '../schemas/index.js';
-import type { CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
+import type { CodexBusinessOptimizationPlan, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -379,6 +380,11 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^codex_runtime_optimization_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_optimization', path.join('audit', fileName), CodexRuntimeOptimizationReportSchema);
       }
+      if (/^codex_business_optimization_plan_v\d+\.json$/.test(fileName)) {
+        const relativePath = path.join('audit', fileName);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_optimization', relativePath, CodexBusinessOptimizationPlanSchema);
+        await checkCodexBusinessOptimizationPlan(issues, paths, fileStore, fileName, relativePath);
+      }
       if (/^codex_runtime_failure_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_failure', path.join('audit', fileName), CodexRuntimeFailureReportSchema);
       }
@@ -404,6 +410,133 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, absolutePath, 'codex_commit', relativePath, CodexCommitConsistencyReportSchema);
       }
     }
+  }
+}
+
+async function checkCodexBusinessOptimizationPlan(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  fileName: string,
+  relativePath: string
+): Promise<void> {
+  let report: CodexBusinessOptimizationPlan;
+  try {
+    report = await fileStore.readJson(paths.auditArtifact(fileName), CodexBusinessOptimizationPlanSchema);
+  } catch {
+    return;
+  }
+  const sourceProfileAbsolutePath = paths.projectArtifact(report.sourceProfilePath);
+  if (!(await fileStore.exists(sourceProfileAbsolutePath))) {
+    issues.push(issue(
+      `codex_optimization_source_missing_${sanitizeIssueId(fileName)}`,
+      'error',
+      'codex_optimization',
+      relativePath,
+      `Business optimization plan references missing source profile ${report.sourceProfilePath}.`,
+      'Regenerate codex profile-runtime and codex optimization-plan.',
+      true
+    ));
+    return;
+  }
+  let sourceProfile: CodexStageRuntimeProfileReport | undefined;
+  try {
+    sourceProfile = await fileStore.readJson(sourceProfileAbsolutePath, CodexStageRuntimeProfileReportSchema);
+  } catch {
+    issues.push(issue(
+      `codex_optimization_source_invalid_${sanitizeIssueId(fileName)}`,
+      'error',
+      'codex_optimization',
+      report.sourceProfilePath,
+      'Business optimization plan source profile is not schema-valid.',
+      'Regenerate codex profile-runtime before regenerating optimization-plan.',
+      true
+    ));
+  }
+  const candidateIds = new Set(report.optimizationCandidates.map((candidate) => candidate.candidateId));
+  for (const candidateId of report.recommendedExecutionOrder) {
+    if (!candidateIds.has(candidateId)) {
+      issues.push(issue(
+        `codex_optimization_bad_order_${sanitizeIssueId(candidateId)}`,
+        'error',
+        'codex_optimization',
+        relativePath,
+        `recommendedExecutionOrder references missing candidate ${candidateId}.`,
+        'Regenerate the business optimization plan.',
+        true
+      ));
+    }
+  }
+  const knownStages = new Set<string>();
+  if (sourceProfile !== undefined) {
+    for (const stage of sourceProfile.slowestBusinessPromptCalls) {
+      knownStages.add(stage.stage);
+    }
+    for (const call of sourceProfile.unclassifiedCalls) {
+      knownStages.add(call.inferredStage);
+      knownStages.add(call.promptId);
+    }
+  }
+  for (const candidate of report.optimizationCandidates) {
+    if (candidate.rollbackPlan.trim() === '' || candidate.safetyImpact.trim() === '') {
+      issues.push(issue(
+        `codex_optimization_candidate_incomplete_${sanitizeIssueId(candidate.candidateId)}`,
+        'error',
+        'codex_optimization',
+        relativePath,
+        `Optimization candidate ${candidate.candidateId} is missing safety or rollback data.`,
+        'Regenerate the business optimization plan from a valid runtime profile.',
+        true
+      ));
+    }
+    if (sourceProfile !== undefined && !knownStages.has(candidate.stage) && candidate.stage !== 'other_codex') {
+      issues.push(issue(
+        `codex_optimization_unknown_stage_${sanitizeIssueId(candidate.candidateId)}`,
+        'warning',
+        'codex_optimization',
+        relativePath,
+        `Optimization candidate ${candidate.candidateId} references stage ${candidate.stage}, which was not found in the source profile.`,
+        'Check stage mapping before acting on this candidate.',
+        false
+      ));
+    }
+  }
+  const markdownPath = relativePath.replace(/\.json$/, '.md');
+  const markdown = (await fileStore.exists(paths.projectArtifact(markdownPath))) ? await fileStore.readText(paths.projectArtifact(markdownPath)) : '';
+  const safetyText = `${report.safetyNotes.join('\n')}\n${markdown}`;
+  const requiredSafetyItems = [
+    'CanonPatchSchema validation',
+    'conflict checks',
+    'quality critical checks',
+    'state diff preview',
+    'approval record',
+    'before/after snapshots',
+    'local applyCanonPatch',
+    'audit provenance'
+  ];
+  for (const requiredItem of requiredSafetyItems) {
+    if (!safetyText.includes(requiredItem)) {
+      issues.push(issue(
+        `codex_optimization_missing_safety_${sanitizeIssueId(requiredItem)}`,
+        'error',
+        'codex_optimization',
+        relativePath,
+        `Business optimization plan is missing Do Not Optimize Away item: ${requiredItem}.`,
+        'Regenerate the business optimization plan with complete safety notes.',
+        true
+      ));
+    }
+  }
+  if (sourceProfile !== undefined && sourceProfile.remainingUnclassifiedCount > 0) {
+    issues.push(issue(
+      `codex_optimization_source_unclassified_${sanitizeIssueId(fileName)}`,
+      'warning',
+      'codex_optimization',
+      relativePath,
+      `Source profile still has ${sourceProfile.remainingUnclassifiedCount} unclassified Codex call(s); optimization estimates may include attribution cleanup work.`,
+      'Run the recommended orphan cleanup plan before treating all other_codex runtime as business runtime.',
+      false
+    ));
   }
 }
 

@@ -212,6 +212,7 @@ export {
   CodexChapterQualityReportSchema,
   ChapterContextSummarySchema,
   CodexCallReductionReportSchema,
+  CodexBusinessOptimizationPlanSchema,
   CodexContextArtifactSchema,
   CodexContextManifestSchema,
   CodexBudgetReportSchema,
@@ -241,6 +242,7 @@ export {
 export type {
   CodexBudgetReport,
   CodexBenchmarkLevel,
+  CodexBusinessOptimizationPlan,
   CodexChapterQualityReport,
   ChapterContextSummary,
   CodexCallReductionReport,

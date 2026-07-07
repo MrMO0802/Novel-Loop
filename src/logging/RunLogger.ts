@@ -689,6 +689,8 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactLineage
   if (/^audit\/codex_call_reduction_report_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_call_reduction_report', phase: 'audit' };
   if (/^audit\/codex_stage_runtime_profile_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_stage_runtime_profile_report', phase: 'audit', schemaName: 'CodexStageRuntimeProfileReportSchema' };
   if (/^audit\/codex_stage_runtime_profile_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_stage_runtime_profile_report', phase: 'audit' };
+  if (/^audit\/codex_business_optimization_plan_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_business_optimization_plan', phase: 'audit', schemaName: 'CodexBusinessOptimizationPlanSchema' };
+  if (/^audit\/codex_business_optimization_plan_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_business_optimization_plan', phase: 'audit' };
   if (/^audit\/codex_runtime_benchmark_report_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_runtime_benchmark_report', phase: 'audit', schemaName: 'CodexRuntimeBenchmarkReportSchema' };
   if (/^audit\/codex_runtime_benchmark_report_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_runtime_benchmark_report', phase: 'audit' };
   if (/^audit\/codex_runtime_optimization_report_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_runtime_optimization_report', phase: 'audit', schemaName: 'CodexRuntimeOptimizationReportSchema' };

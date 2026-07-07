@@ -9,6 +9,7 @@ import { planGlobal } from './planGlobal.js';
 import { runChapterUntilDraft } from './chapterDrafting.js';
 import { runChapterDryRun } from './chapterPlanning.js';
 import { runChapterFullProduction } from './chapterPipeline.js';
+import { generateCodexRealOptimizationBenchmarkReport } from './codexRealOptimizationBenchmark.js';
 import { hashJson } from '../logging/RunLogger.js';
 import type { CodexProfile } from '../providers/providerTypes.js';
 import {
@@ -48,6 +49,8 @@ export interface RunCodexRuntimeBenchmarkInput {
   codexContextMode?: 'compact' | 'balanced' | 'rich';
   codexFinalMode?: 'codex' | 'local-assemble' | 'light-polish';
   optimizationMode?: 'low-risk-v1';
+  useCache?: boolean;
+  warmCache?: boolean;
   codexStageTimeoutMs?: number;
   codexMaxTotalRuntimeMs?: number;
   codexMaxCallsPerStage?: number;
@@ -61,6 +64,8 @@ export interface RunCodexRuntimeBenchmarkResult {
   report: CodexRuntimeBenchmarkReport;
   reportPath: string;
   markdownPath: string;
+  realOptimizationReportPath?: string;
+  realOptimizationMarkdownPath?: string;
 }
 
 export interface RunCodexProfileComparisonInput extends Omit<RunCodexRuntimeBenchmarkInput, 'codexProfile' | 'level'> {
@@ -136,7 +141,7 @@ export async function runCodexRuntimeBenchmark(input: RunCodexRuntimeBenchmarkIn
   }
 
   const success = failedLevel === undefined && stages.every((stage) => stage.status !== 'failed');
-  return writeBenchmarkReport(paths, fileStore, {
+  const benchmark = await writeBenchmarkReport(paths, fileStore, {
     projectId,
     generatedAt: new Date().toISOString(),
     codexStatus,
@@ -149,6 +154,24 @@ export async function runCodexRuntimeBenchmark(input: RunCodexRuntimeBenchmarkIn
     ...(failureReportPath === undefined ? {} : { failureReportPath }),
     profileComparisons: []
   });
+  if (shouldWriteRealOptimizationReport(input)) {
+    const realOptimization = await generateCodexRealOptimizationBenchmarkReport(
+      {
+        projectId,
+        projectsRoot,
+        benchmarkReport: benchmark.report,
+        sourceBenchmarkReportPath: benchmark.reportPath,
+        realBenchmark: true
+      },
+      fileStore
+    );
+    return {
+      ...benchmark,
+      realOptimizationReportPath: realOptimization.reportPath,
+      realOptimizationMarkdownPath: realOptimization.markdownPath
+    };
+  }
+  return benchmark;
 }
 
 export async function runCodexProfileComparison(input: RunCodexProfileComparisonInput, fileStore = new FileStore()): Promise<RunCodexRuntimeBenchmarkResult> {
@@ -234,23 +257,42 @@ async function runLevel(
 
   if (level === 'bible') {
     await ensureProjectInitialized(context);
-    if (await fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md'))) return;
-    const runId = createBenchmarkRunId('codex_benchmark_bible');
-    await runMeasuredStage(context, level, 'build-bible', `build-bible ${projectId} --provider codex-text`, runId, async () => {
-      const result = await buildBible(
-        {
-          projectId,
-          projectsRoot,
-          provider: 'codex-text',
-          promptRoot,
-          runId,
-          ...(input.optimizationMode === 'low-risk-v1' ? { useCache: true } : {}),
-          ...codexOptions(input)
-        },
-        fileStore
-      );
-      return { runId: result.runId, artifacts: result.artifacts };
-    });
+    if (!(await fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md')))) {
+      const runId = createBenchmarkRunId('codex_benchmark_bible');
+      await runMeasuredStage(context, level, 'build-bible', `build-bible ${projectId} --provider codex-text`, runId, async () => {
+        const result = await buildBible(
+          {
+            projectId,
+            projectsRoot,
+            provider: 'codex-text',
+            promptRoot,
+            runId,
+            ...(useBuildBibleCache(input) ? { useCache: true } : {}),
+            ...codexOptions(input)
+          },
+          fileStore
+        );
+        return { runId: result.runId, artifacts: result.artifacts };
+      });
+    }
+    if (useBuildBibleCache(input) && input.warmCache === true && !stages.some((stage) => stage.stageName === 'build-bible-cache-hit')) {
+      const warmRunId = createBenchmarkRunId('codex_benchmark_bible_cache_hit');
+      await runMeasuredStage(context, level, 'build-bible-cache-hit', `build-bible ${projectId} --provider codex-text --use-cache`, warmRunId, async () => {
+        const result = await buildBible(
+          {
+            projectId,
+            projectsRoot,
+            provider: 'codex-text',
+            promptRoot,
+            runId: warmRunId,
+            useCache: true,
+            ...codexOptions(input)
+          },
+          fileStore
+        );
+        return { runId: result.runId, artifacts: result.artifacts };
+      });
+    }
     return;
   }
 
@@ -637,6 +679,14 @@ function codexOptions(input: RunCodexRuntimeBenchmarkInput) {
 function codexFinalModeForBenchmark(input: RunCodexRuntimeBenchmarkInput): 'codex' | 'local-assemble' | 'light-polish' {
   if (input.optimizationMode === 'low-risk-v1') return 'local-assemble';
   return input.codexFinalMode ?? 'codex';
+}
+
+function useBuildBibleCache(input: RunCodexRuntimeBenchmarkInput): boolean {
+  return input.useCache === true || input.optimizationMode === 'low-risk-v1';
+}
+
+function shouldWriteRealOptimizationReport(input: RunCodexRuntimeBenchmarkInput): boolean {
+  return input.useCache === true || input.warmCache === true || input.optimizationMode === 'low-risk-v1' || input.codexFinalMode === 'local-assemble' || input.codexFinalMode === 'light-polish';
 }
 
 function boundaryOptions(input: RunCodexRuntimeBenchmarkInput, projectsRoot: string, projectId: string) {

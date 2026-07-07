@@ -700,6 +700,8 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactLineage
   if (/^audit\/codex_runtime_benchmark_report_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_runtime_benchmark_report', phase: 'audit' };
   if (/^audit\/codex_runtime_optimization_report_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_runtime_optimization_report', phase: 'audit', schemaName: 'CodexRuntimeOptimizationReportSchema' };
   if (/^audit\/codex_runtime_optimization_report_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_runtime_optimization_report', phase: 'audit' };
+  if (/^audit\/codex_real_optimization_benchmark_report_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_real_optimization_benchmark_report', phase: 'audit', schemaName: 'CodexRealOptimizationBenchmarkReportSchema' };
+  if (/^audit\/codex_real_optimization_benchmark_report_v\d+\.md$/.test(normalized)) return { artifactType: 'codex_real_optimization_benchmark_report', phase: 'audit' };
   if (/^audit\/codex_runtime_failure_report_v\d+\.json$/.test(normalized)) return { artifactType: 'codex_runtime_failure_report', phase: 'audit', schemaName: 'CodexRuntimeFailureReportSchema' };
   if (/^conflict_report_v\d+\.json$/.test(fileName)) return { artifactType: 'conflict_report', phase: 'conflict', schemaName: 'ConflictReportSchema' };
   if (/^patch_repair_plan_v\d+\.json$/.test(fileName)) return { artifactType: 'repair_plan', phase: 'conflict', schemaName: 'PatchRepairPlanSchema' };

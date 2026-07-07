@@ -20,6 +20,7 @@ import {
   CodexRuntimeBenchmarkReportSchema,
   CodexRuntimeFailureReportSchema,
   CodexRuntimeOptimizationReportSchema,
+  CodexRealOptimizationBenchmarkReportSchema,
   CodexSingleChapterSmokeReportSchema,
   CodexStageRuntimeProfileReportSchema,
   CommitJournalSchema,
@@ -384,6 +385,9 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       }
       if (/^codex_runtime_optimization_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_optimization', path.join('audit', fileName), CodexRuntimeOptimizationReportSchema);
+      }
+      if (/^codex_real_optimization_benchmark_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_real_optimization', path.join('audit', fileName), CodexRealOptimizationBenchmarkReportSchema);
       }
       if (/^codex_business_optimization_plan_v\d+\.json$/.test(fileName)) {
         const relativePath = path.join('audit', fileName);

@@ -990,6 +990,74 @@ export const CodexRuntimeOptimizationReportSchema = z.object({
   notes: z.array(z.string())
 });
 
+export const CodexRealOptimizationStageDeltaSchema = z.object({
+  stage: z.string(),
+  baselineMs: z.number().int().nonnegative(),
+  currentMs: z.number().int().nonnegative(),
+  deltaMs: z.number().int(),
+  deltaPercent: z.number(),
+  faster: z.boolean(),
+  comparisonConfidence: z.enum(['low', 'medium', 'high']),
+  regressionReason: z.string().optional()
+});
+
+export const CodexRealOptimizationContextBudgetStatsSchema = z.object({
+  manifestCount: z.number().int().nonnegative(),
+  averageContextBytes: z.number().nonnegative(),
+  maxContextBytes: z.number().int().nonnegative(),
+  budgetBytes: z.number().int().nonnegative(),
+  overBudgetCount: z.number().int().nonnegative(),
+  contextBudgetWarnings: z.array(z.string())
+});
+
+export const CodexRealOptimizationSafetyChecksSchema = z.object({
+  previewDidNotMutateStoryState: z.boolean(),
+  confirmMutationsRequireApprovalAndSnapshots: z.boolean(),
+  localAssembleDidNotMutateStoryState: z.boolean(),
+  cacheHitDidNotMutateStoryState: z.boolean(),
+  contextManifestDidNotMutateStoryState: z.boolean(),
+  failurePathsStoryStateMutatedFalse: z.boolean()
+});
+
+export const CodexRealOptimizationBenchmarkReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  realBenchmark: z.literal(true),
+  baselineSource: z.string(),
+  baselineDurations: z.record(z.string(), z.number().int().nonnegative()),
+  currentDurations: z.record(z.string(), z.number().int().nonnegative()),
+  deltaByStage: z.record(z.string(), CodexRealOptimizationStageDeltaSchema),
+  deltaByPromptId: z.record(z.string(), z.number()),
+  callCountBefore: z.number().int().nonnegative(),
+  callCountAfter: z.number().int().nonnegative(),
+  promptBytesBefore: z.number().int().nonnegative(),
+  promptBytesAfter: z.number().int().nonnegative(),
+  schemaBytesBefore: z.number().int().nonnegative(),
+  schemaBytesAfter: z.number().int().nonnegative(),
+  outputBytesBefore: z.number().int().nonnegative(),
+  outputBytesAfter: z.number().int().nonnegative(),
+  retryCountBefore: z.number().int().nonnegative(),
+  retryCountAfter: z.number().int().nonnegative(),
+  repairCountBefore: z.number().int().nonnegative(),
+  repairCountAfter: z.number().int().nonnegative(),
+  cacheHits: z.number().int().nonnegative(),
+  localAssembleUsed: z.boolean(),
+  contextBudgetStats: CodexRealOptimizationContextBudgetStatsSchema,
+  qualityReportPaths: z.array(z.string()),
+  continuityReportPath: z.string().nullable(),
+  validatePassed: z.boolean(),
+  auditPassed: z.boolean(),
+  latestCommittedChapterAfter: z.number().int().nonnegative(),
+  comparisonConfidence: z.enum(['low', 'medium', 'high']),
+  success: z.boolean(),
+  warnings: z.array(z.string()),
+  regressions: z.array(z.string()),
+  recommendedNextOptimizations: z.array(z.string()),
+  safetyChecks: CodexRealOptimizationSafetyChecksSchema,
+  sourceBenchmarkReportPath: z.string().optional()
+});
+
 export type CodexErrorType = z.infer<typeof CodexErrorTypeSchema>;
 export type CodexJsonFailureAttempt = z.infer<typeof CodexJsonFailureAttemptSchema>;
 export type CodexJsonFailureReport = z.infer<typeof CodexJsonFailureReportSchema>;
@@ -1020,3 +1088,5 @@ export type CodexPromptAuditReport = z.infer<typeof CodexPromptAuditReportSchema
 export type CodexCallReductionReport = z.infer<typeof CodexCallReductionReportSchema>;
 export type CodexRuntimeOptimizationReport = z.infer<typeof CodexRuntimeOptimizationReportSchema>;
 export type CodexBusinessOptimizationPlan = z.infer<typeof CodexBusinessOptimizationPlanSchema>;
+export type CodexRealOptimizationStageDelta = z.infer<typeof CodexRealOptimizationStageDeltaSchema>;
+export type CodexRealOptimizationBenchmarkReport = z.infer<typeof CodexRealOptimizationBenchmarkReportSchema>;

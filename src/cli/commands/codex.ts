@@ -51,6 +51,8 @@ interface CodexCommandOptions {
   sourceProfile?: string;
   optimizationMode?: string;
   codexFinalMode?: string;
+  useCache?: boolean;
+  warmCache?: boolean;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -249,6 +251,8 @@ export function registerCodexCommand(program: Command): void {
         codexContextMode: parseCodexContextMode(options.codexContextMode ?? 'compact'),
         codexFinalMode: parseCodexFinalMode(options.codexFinalMode ?? 'codex'),
         ...(options.optimizationMode === undefined ? {} : { optimizationMode: parseOptimizationMode(options.optimizationMode) }),
+        useCache: options.useCache === true,
+        warmCache: options.warmCache === true,
         ...(options.codexContextBudgetBytes === undefined ? {} : { codexContextBudgetBytes: parsePositiveInteger(options.codexContextBudgetBytes, 'codexContextBudgetBytes') }),
         ...(options.codexMaxArtifactsInContext === undefined ? {} : { codexMaxArtifactsInContext: parsePositiveInteger(options.codexMaxArtifactsInContext, 'codexMaxArtifactsInContext') }),
         codexStageTimeoutMs: parsePositiveInteger(options.codexStageTimeoutMs ?? options.timeoutMs ?? '180000', 'codexStageTimeoutMs'),
@@ -286,6 +290,7 @@ export function registerCodexCommand(program: Command): void {
             `totalDurationMs: ${result.report.totalDurationMs}`,
             `stageCount: ${result.report.stages.length}`,
             ...(profile === undefined ? [] : [`stageProfilePath: ${profile.reportPath}`]),
+            `realOptimizationReportPath: ${result.realOptimizationReportPath ?? 'none'}`,
             `failureReportPath: ${result.report.failureReportPath ?? 'none'}`
           ].join('\n') + '\n'
         );
@@ -473,6 +478,8 @@ function addCodexBenchmarkOptions(command: Command): Command {
     .option('--compare-profiles <profiles>', 'comma-separated profiles to compare, e.g. clean,debug')
     .option('--optimization-mode <mode>', 'runtime optimization mode: low-risk-v1')
     .option('--codex-final-mode <mode>', 'codex final mode: codex, local-assemble, or light-polish', 'codex')
+    .option('--use-cache', 'enable build-bible artifact cache during benchmark', false)
+    .option('--warm-cache', 'run a second build-bible cache-hit stage after cold cache warmup', false)
     .option('--profile-stages', 'write codex_stage_runtime_profile_vN after the benchmark', false);
 }
 

@@ -12,6 +12,7 @@ import { FileStore } from '../storage/FileStore.js';
 import type { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { CODEX_TEXT_CAPABILITIES } from './providerCapabilities.js';
+import { inferCodexPromptStage } from './codex/promptStageMapping.js';
 import { resolveCodexOutputSchema } from './codex/schemas.js';
 import type { CodexProfile, LLMJsonResult, LLMTextResult, ProviderCapabilities, ProviderHealth, ProviderJsonRequest, ProviderTextRequest } from './providerTypes.js';
 
@@ -87,7 +88,7 @@ export class CodexTextProvider implements LLMClient {
     try {
       await execCodexTextPrompt({
         ...this.boundaryInput(),
-        runId: this.childRunId('health_smoke'),
+        runId: this.nextCallIdentity('health_smoke').childRunId,
         promptText: 'PROMPT_ID: provider.health_smoke\nReply with CODEX_TEXT_PROVIDER_OK.'
       });
       execSmokeOk = true;
@@ -100,7 +101,7 @@ export class CodexTextProvider implements LLMClient {
       const schemaPath = schema?.schemaPath ?? 'schemas/codex-output/provider.health.schema.json';
       await execCodexJsonPrompt({
         ...this.boundaryInput(),
-        runId: this.childRunId('health_json'),
+        runId: this.nextCallIdentity('health_json').childRunId,
         promptText: 'PROMPT_ID: provider.health\nReturn {"ok": true}.',
         schemaPath
       });
@@ -137,12 +138,18 @@ export class CodexTextProvider implements LLMClient {
     const startedAt = new Date().toISOString();
     try {
       const codexVersion = await this.codexVersion();
+      const identity = this.nextCallIdentity(request.promptId);
       const result = await execCodexTextPrompt({
         ...this.boundaryInput(),
-        runId: this.childRunId(request.promptId),
+        runId: identity.childRunId,
+        parentPromptCallId: identity.parentPromptCallId,
+        parentPromptId: request.promptId,
+        parentStage: inferCodexPromptStage(request.promptId).stage,
+        ...(this.options.telemetry?.runId === undefined ? {} : { parentRunId: this.options.telemetry.runId }),
         promptText: this.renderBoundaryPrompt(request)
       });
       await this.recordProviderProvenance(request, result, {
+        promptCallId: identity.parentPromptCallId,
         startedAt,
         codexVersion,
         jsonParsed: false,
@@ -178,13 +185,19 @@ export class CodexTextProvider implements LLMClient {
     for (let attemptIndex = 0; attemptIndex <= maxRetries; attemptIndex += 1) {
       try {
         const finishReason = attemptIndex === 0 ? 'completed' : 'retry_succeeded';
+        const identity = this.nextCallIdentity(`${request.promptId}_attempt_${attemptIndex + 1}`);
         const result = await execCodexJsonPrompt({
           ...this.boundaryInput(),
-          runId: this.childRunId(`${request.promptId}_attempt_${attemptIndex + 1}`),
+          runId: identity.childRunId,
+          parentPromptCallId: identity.parentPromptCallId,
+          parentPromptId: request.promptId,
+          parentStage: inferCodexPromptStage(request.promptId).stage,
+          ...(this.options.telemetry?.runId === undefined ? {} : { parentRunId: this.options.telemetry.runId }),
           promptText: this.renderBoundaryPrompt(request, attemptIndex),
           schemaPath: outputSchema.schemaPath
         });
         await this.recordProviderProvenance(request, result, {
+          promptCallId: identity.parentPromptCallId,
           startedAt,
           codexVersion,
           jsonParsed: true,
@@ -204,13 +217,19 @@ export class CodexTextProvider implements LLMClient {
     if (repairEnabled && isRepairableJsonError(lastError)) {
       for (let repairIndex = 0; repairIndex < repairRetries; repairIndex += 1) {
         try {
+          const identity = this.nextCallIdentity(`${request.promptId}_repair_${repairIndex + 1}`);
           const result = await execCodexJsonPrompt({
             ...this.boundaryInput(),
-            runId: this.childRunId(`${request.promptId}_repair_${repairIndex + 1}`),
+            runId: identity.childRunId,
+            parentPromptCallId: identity.parentPromptCallId,
+            parentPromptId: request.promptId,
+            parentStage: inferCodexPromptStage(request.promptId).stage,
+            ...(this.options.telemetry?.runId === undefined ? {} : { parentRunId: this.options.telemetry.runId }),
             promptText: this.renderRepairPrompt(request, lastError),
             schemaPath: outputSchema.schemaPath
           });
           await this.recordProviderProvenance(request, result, {
+            promptCallId: identity.parentPromptCallId,
             startedAt,
             codexVersion,
             jsonParsed: true,
@@ -252,6 +271,7 @@ export class CodexTextProvider implements LLMClient {
     request: LLMRequest,
     result: CodexExecResult | CodexExecJsonResult,
     metadata: {
+      promptCallId: string;
       startedAt: string;
       codexVersion: string;
       jsonParsed: boolean;
@@ -268,6 +288,7 @@ export class CodexTextProvider implements LLMClient {
     const runLogger = new RunLogger(paths, this.fileStore);
     const finalText = result.text;
     const call: LLMCallRecord = {
+      promptCallId: metadata.promptCallId,
       promptId: request.promptId,
       provider: 'codex-text',
       model: 'codex-cli',
@@ -361,10 +382,15 @@ export class CodexTextProvider implements LLMClient {
     return this.options.codexProfile ?? 'default';
   }
 
-  private childRunId(promptId: string): string {
+  private nextCallIdentity(promptId: string): { parentPromptCallId: string; childRunId: string } {
     this.callIndex += 1;
+    const safePromptId = promptId.replace(/[^a-zA-Z0-9]+/g, '_');
+    const sequence = String(this.callIndex).padStart(3, '0');
     const parent = this.options.telemetry?.runId ?? 'run_codex_text_provider';
-    return `${parent}_codex_${String(this.callIndex).padStart(3, '0')}_${promptId.replace(/[^a-zA-Z0-9]+/g, '_')}`;
+    return {
+      parentPromptCallId: `prompt_${sequence}_${safePromptId}`,
+      childRunId: `${parent}_codex_${sequence}_${safePromptId}`
+    };
   }
 
   private async codexVersion(): Promise<string> {

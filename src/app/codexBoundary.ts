@@ -36,6 +36,10 @@ export interface CodexBoundaryInput {
   projectId?: string;
   cwd?: string;
   runId?: string;
+  parentPromptCallId?: string;
+  parentPromptId?: string;
+  parentStage?: string;
+  parentRunId?: string;
   timeoutMs?: number;
   codexProfile?: CodexProfile;
 }
@@ -321,6 +325,14 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
       provider: 'codex-cli',
       model: 'local-codex-cli',
       codexProfile: input.codexProfile ?? 'default',
+      wrapperCallType: wrapperCallTypeFor(input.operation),
+      attributionMode: input.parentPromptCallId === undefined ? 'unclassified' : 'parent_child',
+      attributionConfidence: input.parentPromptCallId === undefined ? 'low' : 'high',
+      attributionReason: input.parentPromptCallId === undefined ? 'boundary wrapper call has no parent metadata' : 'boundary wrapper call received parent metadata',
+      ...(input.parentPromptCallId === undefined ? {} : { parentPromptCallId: input.parentPromptCallId }),
+      ...(input.parentPromptId === undefined ? {} : { parentPromptId: input.parentPromptId }),
+      ...(input.parentStage === undefined ? {} : { parentStage: input.parentStage }),
+      ...(input.parentRunId === undefined ? {} : { parentRunId: input.parentRunId }),
       status: 'succeeded',
       startedAt,
       endedAt,
@@ -376,6 +388,12 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
     await runLogger.endRun(runId, 'failed');
     throw error;
   }
+}
+
+function wrapperCallTypeFor(operation: ExecPromptInput['operation']): 'exec_text' | 'exec_json' | 'smoke' {
+  if (operation === 'exec-json') return 'exec_json';
+  if (operation === 'smoke') return 'smoke';
+  return 'exec_text';
 }
 
 async function resolveCodexBinary(codexBin?: string): Promise<string> {

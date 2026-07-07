@@ -493,6 +493,10 @@ const CodexProfileMetricItemSchema = z.object({
   totalDurationMs: z.number().int().nonnegative()
 });
 
+const CodexWrapperCallTypeSchema = z.enum(['exec_text', 'exec_json', 'health', 'smoke', 'repair', 'unknown']);
+const CodexAttributionModeSchema = z.enum(['direct', 'parent_child', 'inferred', 'unclassified']);
+const CodexAttributionConfidenceSchema = z.enum(['high', 'medium', 'low']);
+
 const CodexOtherCategoryMetricItemSchema = z.object({
   category: z.enum([
     'health_check',
@@ -513,13 +517,29 @@ const CodexOtherCategoryMetricItemSchema = z.object({
   totalDurationMs: z.number().int().nonnegative()
 });
 
+const CodexOtherReasonCategoryMetricItemSchema = z.object({
+  category: z.enum([
+    'true_unknown',
+    'wrapper_orphan',
+    'legacy_missing_parent',
+    'health_or_smoke',
+    'unsupported_old_manifest'
+  ]),
+  totalCalls: z.number().int().nonnegative(),
+  totalDurationMs: z.number().int().nonnegative()
+});
+
 const CodexPromptCallProfileSchema = z.object({
   promptCallId: z.string(),
   runId: z.string(),
+  command: z.string().default('unknown'),
+  status: z.string().default('unknown'),
   chapterNumber: z.number().int().positive().optional(),
   promptId: z.string(),
+  promptFamily: z.string().default('unknown'),
   inferredStage: z.string(),
   likelyCategory: z.string().default('unknown'),
+  classified: z.boolean().default(true),
   durationMs: z.number().int().nonnegative(),
   latencyMs: z.number().nonnegative(),
   promptInputBytes: z.number().int().nonnegative(),
@@ -532,9 +552,91 @@ const CodexPromptCallProfileSchema = z.object({
   jsonParsed: z.boolean(),
   schemaValid: z.boolean(),
   artifactPaths: z.array(z.string()).default([]),
+  rawOutputPath: z.string().optional(),
   finalOutputPath: z.string().optional(),
   parsedOutputPath: z.string().optional(),
   errorType: z.string().optional(),
+  parentPromptCallId: z.string().optional(),
+  parentPromptId: z.string().optional(),
+  parentStage: z.string().optional(),
+  parentRunId: z.string().optional(),
+  wrapperCallType: CodexWrapperCallTypeSchema.optional(),
+  attributionMode: CodexAttributionModeSchema.default('direct'),
+  attributionConfidence: CodexAttributionConfidenceSchema.default('high'),
+  attributionReason: z.string().default('direct business call'),
+  suggestedOptimization: z.string()
+});
+
+const CodexRawRuntimeViewSchema = z.object({
+  totalPromptCallCount: z.number().int().nonnegative(),
+  totalDurationMs: z.number().int().nonnegative(),
+  byStage: StageMetricMapSchema,
+  includesWrapperCalls: z.literal(true)
+});
+
+const CodexBusinessRuntimeViewSchema = z.object({
+  totalBusinessCallCount: z.number().int().nonnegative(),
+  totalDurationMs: z.number().int().nonnegative(),
+  byBusinessStage: StageMetricMapSchema,
+  byPromptId: StageMetricMapSchema,
+  wrapperCallsRolledUp: z.literal(true),
+  doubleCountingRemoved: z.literal(true)
+});
+
+const CodexOverheadRuntimeViewSchema = z.object({
+  wrapperCallCount: z.number().int().nonnegative(),
+  wrapperDurationMs: z.number().int().nonnegative(),
+  healthSmokeDurationMs: z.number().int().nonnegative(),
+  jsonRepairDurationMs: z.number().int().nonnegative(),
+  redactionDurationMs: z.number().int().nonnegative().default(0),
+  artifactWriteDurationMs: z.number().int().nonnegative().default(0),
+  unclassifiedOverheadMs: z.number().int().nonnegative()
+});
+
+const CodexWrapperCallProfileSchema = z.object({
+  promptCallId: z.string(),
+  wrapperCallType: CodexWrapperCallTypeSchema,
+  runId: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  parentPromptCallId: z.string().optional(),
+  parentPromptId: z.string().optional(),
+  parentStage: z.string().optional(),
+  parentRunId: z.string().optional(),
+  attributionMode: CodexAttributionModeSchema,
+  attributionConfidence: CodexAttributionConfidenceSchema,
+  attributionReason: z.string(),
+  rawOutputPath: z.string().optional(),
+  finalOutputPath: z.string().optional(),
+  parsedOutputPath: z.string().optional()
+});
+
+const CodexWrapperBreakdownSchema = z.object({
+  totalWrapperCalls: z.number().int().nonnegative(),
+  totalWrapperDurationMs: z.number().int().nonnegative(),
+  orphanWrapperCallCount: z.number().int().nonnegative(),
+  byWrapperType: z.array(CodexProfileMetricItemSchema).default([]),
+  byParentStage: z.array(CodexProfileMetricItemSchema).default([]),
+  byParentPromptId: z.array(CodexProfileMetricItemSchema).default([]),
+  orphanWrapperCalls: z.array(CodexWrapperCallProfileSchema).default([]),
+  inferredWrapperCalls: z.array(CodexWrapperCallProfileSchema).default([])
+});
+
+const CodexBusinessPromptCallSchema = z.object({
+  businessPromptCallId: z.string(),
+  promptId: z.string(),
+  stage: z.string(),
+  chapterNumber: z.number().int().positive().optional(),
+  runId: z.string(),
+  netDurationMs: z.number().int().nonnegative(),
+  wrapperDurationMs: z.number().int().nonnegative(),
+  providerLatencyMs: z.number().int().nonnegative(),
+  promptInputBytes: z.number().int().nonnegative(),
+  contextBytes: z.number().int().nonnegative(),
+  schemaBytes: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  childWrapperCallIds: z.array(z.string()).default([]),
   suggestedOptimization: z.string()
 });
 
@@ -557,7 +659,8 @@ const CodexOtherCodexBreakdownSchema = z.object({
   byRunId: z.array(CodexProfileMetricItemSchema).default([]),
   byCommand: z.array(CodexProfileMetricItemSchema).default([]),
   byArtifactType: z.array(CodexProfileMetricItemSchema).default([]),
-  likelyCategories: z.array(CodexOtherCategoryMetricItemSchema).default([])
+  likelyCategories: z.array(CodexOtherCategoryMetricItemSchema).default([]),
+  reasonCategories: z.array(CodexOtherReasonCategoryMetricItemSchema).default([])
 });
 
 export const CodexStageRuntimeProfileReportSchema = z.object({
@@ -596,8 +699,43 @@ export const CodexStageRuntimeProfileReportSchema = z.object({
     byRunId: [],
     byCommand: [],
     byArtifactType: [],
-    likelyCategories: []
+    likelyCategories: [],
+    reasonCategories: []
   }),
+  rawRuntimeView: CodexRawRuntimeViewSchema.default({
+    totalPromptCallCount: 0,
+    totalDurationMs: 0,
+    byStage: {},
+    includesWrapperCalls: true
+  }),
+  businessRuntimeView: CodexBusinessRuntimeViewSchema.default({
+    totalBusinessCallCount: 0,
+    totalDurationMs: 0,
+    byBusinessStage: {},
+    byPromptId: {},
+    wrapperCallsRolledUp: true,
+    doubleCountingRemoved: true
+  }),
+  overheadRuntimeView: CodexOverheadRuntimeViewSchema.default({
+    wrapperCallCount: 0,
+    wrapperDurationMs: 0,
+    healthSmokeDurationMs: 0,
+    jsonRepairDurationMs: 0,
+    redactionDurationMs: 0,
+    artifactWriteDurationMs: 0,
+    unclassifiedOverheadMs: 0
+  }),
+  wrapperBreakdown: CodexWrapperBreakdownSchema.default({
+    totalWrapperCalls: 0,
+    totalWrapperDurationMs: 0,
+    orphanWrapperCallCount: 0,
+    byWrapperType: [],
+    byParentStage: [],
+    byParentPromptId: [],
+    orphanWrapperCalls: [],
+    inferredWrapperCalls: []
+  }),
+  slowestBusinessPromptCalls: z.array(CodexBusinessPromptCallSchema).default([]),
   slowestRuns: z.array(CodexRunProfileSchema).default([]),
   durationByCommand: StageMetricMapSchema.default({}),
   durationByPromptId: StageMetricMapSchema.default({}),

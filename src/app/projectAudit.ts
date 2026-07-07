@@ -415,8 +415,11 @@ async function checkCodexStageRuntimeProfile(
   relativePath: string
 ): Promise<void> {
   let report: CodexStageRuntimeProfileReport;
+  let hasRuntimeViews = false;
   try {
-    report = await fileStore.readJson(paths.auditArtifact(fileName), CodexStageRuntimeProfileReportSchema);
+    const rawReport = JSON.parse(await fileStore.readText(paths.auditArtifact(fileName))) as unknown;
+    hasRuntimeViews = isUnknownRecord(rawReport) && 'rawRuntimeView' in rawReport;
+    report = CodexStageRuntimeProfileReportSchema.parse(rawReport);
   } catch {
     return;
   }
@@ -430,6 +433,30 @@ async function checkCodexStageRuntimeProfile(
       'Add promptId rules to src/providers/codex/promptStageMapping.ts for recurring unknown calls.',
       false
     ));
+  }
+  if (report.wrapperBreakdown.orphanWrapperCallCount > 0) {
+    issues.push(issue(
+      `codex_profile_orphan_wrappers_${fileName}`,
+      'warning',
+      'codex_profiling',
+      relativePath,
+      `${report.wrapperBreakdown.orphanWrapperCallCount} Codex wrapper call(s) could not be linked to a parent business prompt.`,
+      'Inspect wrapperBreakdown.orphanWrapperCalls and add parentPromptCallId or improve legacy inference.',
+      false
+    ));
+  }
+  for (const wrapper of report.wrapperBreakdown.orphanWrapperCalls) {
+    if (wrapper.parentPromptCallId !== undefined) {
+      issues.push(issue(
+        `codex_profile_missing_parent_${fileName}_${sanitizeIssueId(wrapper.promptCallId)}`,
+        'error',
+        'codex_profiling',
+        relativePath,
+        `Wrapper call ${wrapper.promptCallId} declares parentPromptCallId=${wrapper.parentPromptCallId}, but the parent call was not found.`,
+        'Restore the parent run manifest prompt call or regenerate provenance with a valid parentPromptCallId.',
+        true
+      ));
+    }
   }
   const promptIdTotal = sumRecord(report.promptCallsByPromptId);
   const stageTotal = sumRecord(report.promptCallsByStage);
@@ -456,14 +483,47 @@ async function checkCodexStageRuntimeProfile(
       true
     ));
   }
+  if (hasRuntimeViews && report.rawRuntimeView.totalPromptCallCount !== report.profiledPromptCallCount) {
+    issues.push(issue(
+      `codex_profile_raw_count_mismatch_${fileName}`,
+      'error',
+      'codex_profiling',
+      relativePath,
+      'rawRuntimeView.totalPromptCallCount does not match profiledPromptCallCount.',
+      'Regenerate the runtime profile.',
+      true
+    ));
+  }
+  if (hasRuntimeViews && (sumRecord(report.businessRuntimeView.byBusinessStage) !== report.businessRuntimeView.totalDurationMs || sumRecord(report.businessRuntimeView.byPromptId) !== report.businessRuntimeView.totalDurationMs)) {
+    issues.push(issue(
+      `codex_profile_business_total_mismatch_${fileName}`,
+      'error',
+      'codex_profiling',
+      relativePath,
+      'businessRuntimeView totals are inconsistent with byBusinessStage or byPromptId.',
+      'Regenerate the runtime profile from run manifest v2 data.',
+      true
+    ));
+  }
+  if (hasRuntimeViews && (report.wrapperBreakdown.totalWrapperCalls !== report.overheadRuntimeView.wrapperCallCount || report.wrapperBreakdown.totalWrapperDurationMs !== report.overheadRuntimeView.wrapperDurationMs)) {
+    issues.push(issue(
+      `codex_profile_wrapper_overhead_mismatch_${fileName}`,
+      'error',
+      'codex_profiling',
+      relativePath,
+      'wrapperBreakdown totals do not match overheadRuntimeView wrapper totals.',
+      'Regenerate the runtime profile.',
+      true
+    ));
+  }
   const otherStageCalls = report.promptCallsByStage.other_codex ?? 0;
-  if (report.otherCodexBreakdown.totalCalls !== otherStageCalls) {
+  if (report.otherCodexBreakdown.totalCalls < Math.max(otherStageCalls, report.remainingUnclassifiedCount)) {
     issues.push(issue(
       `codex_profile_other_breakdown_mismatch_${fileName}`,
       'error',
       'codex_profiling',
       relativePath,
-      'other_codex breakdown totalCalls does not match promptCallsByStage.other_codex.',
+      'other_codex breakdown totalCalls does not cover promptCallsByStage.other_codex and remainingUnclassifiedCount.',
       'Regenerate the runtime profile.',
       true
     ));
@@ -601,6 +661,10 @@ function uniqueProfileCalls(report: CodexStageRuntimeProfileReport): Array<Codex
 
 function sanitizeIssueId(value: string): string {
   return value.replace(/[^a-zA-Z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 80) || 'unknown';
+}
+
+function isUnknownRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function renderAuditMarkdown(report: ProjectAuditReport): string {

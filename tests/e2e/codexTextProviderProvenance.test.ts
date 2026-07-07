@@ -51,6 +51,21 @@ describe('codex-text provider provenance and redaction', () => {
     });
     expect(manifest.promptCalls[0]?.rawOutputPath).toMatch(/^codex\/runs\//);
     expect(manifest.promptCalls[0]?.finalOutputPath).toMatch(/^codex\/runs\//);
+    const parentCall = manifest.promptCalls[0];
+    expect(parentCall?.promptCallId).toMatch(/^prompt_001_/);
+    expect(parentCall?.requestId).toMatch(/^run_m22_codex_provenance_codex_001_/);
+    if (parentCall?.requestId === undefined || parentCall.promptCallId === undefined) throw new Error('missing parent call identity');
+    const childManifest = await store.readJson(paths.runManifest(parentCall.requestId), RunManifestSchema);
+    if (!('schemaVersion' in childManifest) || childManifest.schemaVersion !== '2') throw new Error('expected child v2');
+    expect(childManifest.promptCalls[0]).toMatchObject({
+      provider: 'codex-cli',
+      wrapperCallType: 'exec_text',
+      parentPromptCallId: parentCall.promptCallId,
+      parentPromptId: parentCall.promptId,
+      parentRunId: 'run_m22_codex_provenance',
+      attributionMode: 'parent_child',
+      attributionConfidence: 'high'
+    });
     expect(manifest.artifacts.map((artifact) => artifact.artifactType)).toEqual(expect.arrayContaining(['codex_raw_output', 'codex_final_output']));
     const events = await store.readText(paths.runEvents('run_m22_codex_provenance'));
     expect(events).toContain('PROMPT_CALL_COMPLETED');

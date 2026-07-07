@@ -22,6 +22,10 @@ export const LLMUsageRecordSchema = z.object({
   costUsd: z.number().nonnegative().optional()
 });
 
+export const PromptWrapperCallTypeSchema = z.enum(['exec_text', 'exec_json', 'health', 'smoke', 'repair', 'unknown']);
+export const PromptAttributionModeSchema = z.enum(['direct', 'parent_child', 'inferred', 'unclassified']);
+export const PromptAttributionConfidenceSchema = z.enum(['high', 'medium', 'low']);
+
 export const RunRedactionPolicySchema = z.object({
   savePromptInputs: z.boolean(),
   savePromptOutputs: z.boolean(),
@@ -44,6 +48,14 @@ export const LLMCallRecordSchema = z.object({
   finalOutputPath: z.string().optional(),
   parsedOutputPath: z.string().optional(),
   requestId: z.string().optional(),
+  parentPromptCallId: z.string().optional(),
+  parentPromptId: z.string().optional(),
+  parentStage: z.string().optional(),
+  parentRunId: z.string().optional(),
+  wrapperCallType: PromptWrapperCallTypeSchema.optional(),
+  attributionMode: PromptAttributionModeSchema.optional(),
+  attributionConfidence: PromptAttributionConfidenceSchema.optional(),
+  attributionReason: z.string().optional(),
   finishReason: z.string().optional(),
   mockScenario: z.string().optional(),
   status: z.enum(['succeeded', 'failed']).optional(),

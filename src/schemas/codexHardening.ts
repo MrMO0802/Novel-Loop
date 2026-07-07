@@ -1058,6 +1058,186 @@ export const CodexRealOptimizationBenchmarkReportSchema = z.object({
   sourceBenchmarkReportPath: z.string().optional()
 });
 
+const CodexRegressionConfidenceSchema = z.enum(['low', 'medium', 'high']);
+const CodexRegressionRootCauseTypeSchema = z.enum([
+  'duplicate_call',
+  'increased_prompt_bytes',
+  'increased_schema_bytes',
+  'increased_output_bytes',
+  'retry_repair_increase',
+  'context_builder_change',
+  'cache_not_used',
+  'local_assemble_side_effect',
+  'attribution_artifact',
+  'codex_runtime_variance',
+  'unknown'
+]);
+
+const CodexChapterRegressionStageBreakdownSchema = z.object({
+  stage: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  promptCallCount: z.number().int().nonnegative(),
+  codexCallCount: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  promptInputBytes: z.number().int().nonnegative(),
+  contextBytes: z.number().int().nonnegative(),
+  schemaBytes: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative(),
+  rawJsonlBytes: z.number().int().nonnegative(),
+  artifactCount: z.number().int().nonnegative(),
+  failureCount: z.number().int().nonnegative(),
+  comparedToBaselineDeltaMs: z.number().int(),
+  comparedToBaselineDeltaPercent: z.number()
+});
+
+const CodexChapterRegressionChapterComparisonSchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  baselineDurationMs: z.number().int().nonnegative(),
+  currentDurationMs: z.number().int().nonnegative(),
+  deltaMs: z.number().int(),
+  deltaPercent: z.number(),
+  durationByStage: z.record(z.string(), CodexChapterRegressionStageBreakdownSchema),
+  durationByPromptId: z.record(z.string(), z.number().int().nonnegative()),
+  codexCallCount: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  promptBytesTotal: z.number().int().nonnegative(),
+  schemaBytesTotal: z.number().int().nonnegative(),
+  outputBytesTotal: z.number().int().nonnegative(),
+  rawJsonlBytesTotal: z.number().int().nonnegative(),
+  qualityCriticalIssues: z.number().int().nonnegative(),
+  continuityWarnings: z.number().int().nonnegative()
+});
+
+const CodexDuplicatePromptCallSchema = z.object({
+  promptId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  stage: z.string(),
+  runIds: z.array(z.string()),
+  artifactPaths: z.array(z.string()),
+  reason: z.string(),
+  safeToReuse: z.boolean(),
+  suggestedFix: z.string()
+});
+
+const CodexRepeatedStageCallSchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  stage: z.string(),
+  promptIds: z.array(z.string()),
+  runIds: z.array(z.string()),
+  reason: z.string(),
+  suggestedFix: z.string()
+});
+
+const CodexBytesRegressionSchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  stage: z.string(),
+  promptId: z.string(),
+  baselineBytes: z.number().int().nonnegative(),
+  currentBytes: z.number().int().nonnegative(),
+  deltaBytes: z.number().int(),
+  deltaPercent: z.number(),
+  likelyReason: z.string(),
+  suggestedFix: z.string()
+});
+
+const CodexRetryRepairRegressionSchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  promptId: z.string(),
+  stage: z.string(),
+  baselineRetryCount: z.number().int().nonnegative(),
+  currentRetryCount: z.number().int().nonnegative(),
+  baselineRepairCount: z.number().int().nonnegative(),
+  currentRepairCount: z.number().int().nonnegative(),
+  errorTypes: z.array(z.string()),
+  suggestedFix: z.string()
+});
+
+const CodexRegressionRootCauseSchema = z.object({
+  rootCauseId: z.string(),
+  rootCauseType: CodexRegressionRootCauseTypeSchema,
+  affectedChapter: z.number().int().positive(),
+  affectedStage: z.string(),
+  affectedPromptId: z.string(),
+  evidence: z.array(z.string().min(1)).min(1),
+  impactMs: z.number().int().nonnegative(),
+  confidence: CodexRegressionConfidenceSchema,
+  proposedFix: z.string().min(1),
+  riskLevel: z.enum(['low', 'medium', 'high']),
+  nextExperiment: z.string().min(1)
+});
+
+const CodexRegressionRecommendedFixSchema = z.object({
+  experimentId: z.string(),
+  targetChapter: z.number().int().positive(),
+  targetStage: z.string(),
+  targetPromptId: z.string(),
+  hypothesis: z.string().min(1),
+  change: z.string().min(1),
+  expectedImpactMs: z.number().int().nonnegative(),
+  safetyRisk: z.enum(['low', 'medium', 'high']),
+  requiredTests: z.array(z.string().min(1)),
+  rollbackPlan: z.string().min(1)
+});
+
+const CodexMappingCleanupSchema = z.object({
+  unknownPromptMappings: z.array(
+    z.object({
+      promptId: z.string(),
+      runId: z.string(),
+      artifactPaths: z.array(z.string()),
+      suggestedMapping: z.string()
+    })
+  ),
+  diagnosticOverheadClassified: z.array(
+    z.object({
+      promptId: z.string(),
+      runId: z.string(),
+      reason: z.string()
+    })
+  ),
+  unresolvedWarnings: z.array(
+    z.object({
+      promptId: z.string(),
+      runId: z.string(),
+      warning: z.string(),
+      artifactPaths: z.array(z.string())
+    })
+  )
+});
+
+export const CodexChapterRegressionAnalysisSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  baselineSource: z.string(),
+  currentBenchmarkPath: z.string(),
+  baselineChapters: z.array(CodexChapterRegressionChapterComparisonSchema),
+  currentChapters: z.array(CodexChapterRegressionChapterComparisonSchema),
+  regressions: z.array(CodexChapterRegressionChapterComparisonSchema),
+  improvedStages: z.array(CodexChapterRegressionStageBreakdownSchema),
+  suspectedRootCauses: z.array(CodexRegressionRootCauseSchema),
+  recommendedFixes: z.array(CodexRegressionRecommendedFixSchema),
+  confidence: CodexRegressionConfidenceSchema,
+  warnings: z.array(z.string()),
+  duplicatePromptCalls: z.array(CodexDuplicatePromptCallSchema),
+  repeatedStageCalls: z.array(CodexRepeatedStageCallSchema),
+  rerunOnConfirmDetected: z.boolean(),
+  previewArtifactsReused: z.boolean(),
+  previewPatchReused: z.boolean(),
+  finalReused: z.boolean(),
+  stateDiffReused: z.boolean(),
+  promptBytesRegressions: z.array(CodexBytesRegressionSchema),
+  schemaBytesRegressions: z.array(CodexBytesRegressionSchema),
+  outputBytesRegressions: z.array(CodexBytesRegressionSchema),
+  retryRegressions: z.array(CodexRetryRepairRegressionSchema),
+  repairRegressions: z.array(CodexRetryRepairRegressionSchema),
+  jsonRepairHotspots: z.array(CodexRetryRepairRegressionSchema),
+  mappingCleanup: CodexMappingCleanupSchema,
+  storyStateMutated: z.literal(false)
+});
+
 export type CodexErrorType = z.infer<typeof CodexErrorTypeSchema>;
 export type CodexJsonFailureAttempt = z.infer<typeof CodexJsonFailureAttemptSchema>;
 export type CodexJsonFailureReport = z.infer<typeof CodexJsonFailureReportSchema>;
@@ -1090,3 +1270,4 @@ export type CodexRuntimeOptimizationReport = z.infer<typeof CodexRuntimeOptimiza
 export type CodexBusinessOptimizationPlan = z.infer<typeof CodexBusinessOptimizationPlanSchema>;
 export type CodexRealOptimizationStageDelta = z.infer<typeof CodexRealOptimizationStageDeltaSchema>;
 export type CodexRealOptimizationBenchmarkReport = z.infer<typeof CodexRealOptimizationBenchmarkReportSchema>;
+export type CodexChapterRegressionAnalysis = z.infer<typeof CodexChapterRegressionAnalysisSchema>;

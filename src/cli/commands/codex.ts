@@ -3,6 +3,7 @@ import type { Command } from 'commander';
 import { checkCodexStatus, execCodexJson, execCodexText, runCodexSmoke } from '../../app/codexBoundary.js';
 import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
+import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { evaluateCodexCrossChapterDrift, runCodexMultiChapterPilot } from '../../app/codexMultiChapterPilot.js';
 import { runCodexProfileComparison, runCodexRuntimeBenchmark } from '../../app/codexRuntimeBenchmark.js';
@@ -394,6 +395,32 @@ export function registerCodexCommand(program: Command): void {
           `realBenchmark: ${String(result.report.realBenchmark)}`,
           `improvedStages: ${result.report.improvedStages.join(',') || 'none'}`,
           `regressedStages: ${result.report.regressedStages.join(',') || 'none'}`
+        ].join('\n') + '\n'
+      );
+    });
+
+  addBoundaryOptions(codex.command('regression-analysis').description('[experimental/internal] Analyze chapter2/chapter3 Codex runtime regressions from existing artifacts'))
+    .argument('<projectId>', 'project id')
+    .action(async (projectId: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await generateCodexChapterRegressionAnalysis({
+        projectId,
+        projectsRoot: options.root ?? './projects'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          'codexChapterRegressionAnalysis: success',
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `currentBenchmarkPath: ${result.report.currentBenchmarkPath}`,
+          `regressedChapters: ${result.report.regressions.map((chapter) => chapter.chapterNumber).join(',') || 'none'}`,
+          `duplicatePromptCalls: ${result.report.duplicatePromptCalls.length}`,
+          `topRootCause: ${result.report.suspectedRootCauses[0]?.rootCauseId ?? 'none'}`,
+          `recommendedFixes: ${result.report.recommendedFixes.length}`
         ].join('\n') + '\n'
       );
     });

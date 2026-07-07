@@ -8,6 +8,7 @@ import {
   ChapterContextSummarySchema,
   BuildBibleCacheReportSchema,
   CodexCallReductionReportSchema,
+  CodexChapterRegressionAnalysisSchema,
   CodexChapterQualityReportSchema,
   CodexBudgetReportSchema,
   CodexBusinessOptimizationPlanSchema,
@@ -32,7 +33,7 @@ import {
   RunManifestSchema,
   StoryStateSchema
 } from '../schemas/index.js';
-import type { CodexBusinessOptimizationPlan, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
+import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -389,6 +390,11 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^codex_real_optimization_benchmark_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_real_optimization', path.join('audit', fileName), CodexRealOptimizationBenchmarkReportSchema);
       }
+      if (/^codex_chapter_regression_analysis_v\d+\.json$/.test(fileName)) {
+        const relativePath = path.join('audit', fileName);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_regression_analysis', relativePath, CodexChapterRegressionAnalysisSchema);
+        await checkCodexChapterRegressionAnalysis(issues, paths, fileStore, fileName, relativePath);
+      }
       if (/^codex_business_optimization_plan_v\d+\.json$/.test(fileName)) {
         const relativePath = path.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_optimization', relativePath, CodexBusinessOptimizationPlanSchema);
@@ -633,6 +639,84 @@ async function checkCodexBusinessOptimizationPlan(
   }
 }
 
+async function checkCodexChapterRegressionAnalysis(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  fileName: string,
+  relativePath: string
+): Promise<void> {
+  let report: CodexChapterRegressionAnalysis;
+  try {
+    report = await fileStore.readJson(paths.auditArtifact(fileName), CodexChapterRegressionAnalysisSchema);
+  } catch {
+    return;
+  }
+  if (!(await fileStore.exists(paths.projectArtifact(report.currentBenchmarkPath)))) {
+    issues.push(issue(
+      `codex_regression_benchmark_missing_${sanitizeIssueId(fileName)}`,
+      'error',
+      'codex_regression_analysis',
+      relativePath,
+      `Regression analysis references missing benchmark ${report.currentBenchmarkPath}.`,
+      'Regenerate codex benchmark or rerun codex regression-analysis against an existing benchmark report.',
+      true
+    ));
+  }
+  for (const chapter of [...report.baselineChapters, ...report.currentChapters, ...report.regressions]) {
+    if (chapter.baselineDurationMs < 0 || chapter.currentDurationMs < 0 || !Number.isFinite(chapter.deltaPercent)) {
+      issues.push(issue(
+        `codex_regression_bad_chapter_metric_${sanitizeIssueId(fileName)}_${chapter.chapterNumber}`,
+        'error',
+        'codex_regression_analysis',
+        relativePath,
+        `Regression analysis has invalid metrics for chapter ${chapter.chapterNumber}.`,
+        'Regenerate codex regression-analysis from schema-valid benchmark/profile artifacts.',
+        true
+      ));
+    }
+    for (const stage of Object.values(chapter.durationByStage)) {
+      if (stage.durationMs < 0 || !Number.isFinite(stage.comparedToBaselineDeltaPercent)) {
+        issues.push(issue(
+          `codex_regression_bad_stage_metric_${sanitizeIssueId(fileName)}_${chapter.chapterNumber}_${sanitizeIssueId(stage.stage)}`,
+          'error',
+          'codex_regression_analysis',
+          relativePath,
+          `Regression stage ${stage.stage} has invalid duration or percent values.`,
+          'Regenerate codex regression-analysis from complete artifacts.',
+          true
+        ));
+      }
+    }
+  }
+  for (const cause of report.suspectedRootCauses) {
+    if (cause.evidence.length === 0) {
+      issues.push(issue(
+        `codex_regression_root_cause_missing_evidence_${sanitizeIssueId(cause.rootCauseId)}`,
+        'error',
+        'codex_regression_analysis',
+        relativePath,
+        `Root cause ${cause.rootCauseId} has no evidence.`,
+        'Regenerate regression analysis with evidence attached to every suspected root cause.',
+        true
+      ));
+    }
+  }
+  for (const fix of report.recommendedFixes) {
+    if (fix.rollbackPlan.trim() === '') {
+      issues.push(issue(
+        `codex_regression_fix_missing_rollback_${sanitizeIssueId(fix.experimentId)}`,
+        'error',
+        'codex_regression_analysis',
+        relativePath,
+        `Recommended fix ${fix.experimentId} is missing rollbackPlan.`,
+        'Regenerate regression analysis with rollback plans for every experiment.',
+        true
+      ));
+    }
+  }
+}
+
 async function checkCodexStageRuntimeProfile(
   issues: AuditIssue[],
   paths: ProjectPaths,
@@ -649,24 +733,26 @@ async function checkCodexStageRuntimeProfile(
   } catch {
     return;
   }
-  if (report.remainingUnclassifiedCount > 0) {
+  const actionableUnclassifiedCalls = report.unclassifiedCalls.filter((call) => !isDiagnosticProfileCall(call));
+  if (actionableUnclassifiedCalls.length > 0) {
     issues.push(issue(
       `codex_profile_unclassified_${fileName}`,
       'warning',
       'codex_profiling',
       relativePath,
-      `${report.remainingUnclassifiedCount} Codex prompt call(s) remain attributed to other_codex.`,
+      `${actionableUnclassifiedCalls.length} Codex prompt call(s) remain attributed to other_codex.`,
       'Add promptId rules to src/providers/codex/promptStageMapping.ts for recurring unknown calls.',
       false
     ));
   }
-  if (report.wrapperBreakdown.orphanWrapperCallCount > 0) {
+  const actionableOrphanWrappers = report.wrapperBreakdown.orphanWrapperCalls.filter((wrapper) => !isDiagnosticWrapperCall(wrapper));
+  if (actionableOrphanWrappers.length > 0) {
     issues.push(issue(
       `codex_profile_orphan_wrappers_${fileName}`,
       'warning',
       'codex_profiling',
       relativePath,
-      `${report.wrapperBreakdown.orphanWrapperCallCount} Codex wrapper call(s) could not be linked to a parent business prompt.`,
+      `${actionableOrphanWrappers.length} Codex wrapper call(s) could not be linked to a parent business prompt.`,
       'Inspect wrapperBreakdown.orphanWrapperCalls and add parentPromptCallId or improve legacy inference.',
       false
     ));
@@ -865,6 +951,26 @@ function issue(issueId: string, severity: AuditIssue['severity'], category: stri
 
 function sumRecord(record: Record<string, number>): number {
   return Object.values(record).reduce((sum, value) => sum + value, 0);
+}
+
+function isDiagnosticProfileCall(call: CodexStageRuntimeProfileReport['unclassifiedCalls'][number]): boolean {
+  const promptId = call.promptId.toLowerCase().replace(/-/g, '_');
+  return (
+    call.likelyCategory === 'smoke' ||
+    call.likelyCategory === 'exec_json_smoke' ||
+    call.likelyCategory === 'health_check' ||
+    call.inferredStage === 'smoke' ||
+    call.inferredStage === 'exec_json_smoke' ||
+    call.inferredStage === 'health_check' ||
+    promptId.includes('smoke') ||
+    promptId.includes('exec_json') ||
+    promptId.includes('health')
+  );
+}
+
+function isDiagnosticWrapperCall(call: CodexStageRuntimeProfileReport['wrapperBreakdown']['orphanWrapperCalls'][number]): boolean {
+  const promptCallId = call.promptCallId.toLowerCase().replace(/-/g, '_');
+  return call.wrapperCallType === 'smoke' || call.wrapperCallType === 'health' || (call.wrapperCallType === 'exec_json' && (promptCallId.includes('exec_json') || promptCallId.includes('smoke')));
 }
 
 function uniqueProfileCalls(report: CodexStageRuntimeProfileReport): Array<CodexStageRuntimeProfileReport['slowestPromptCalls'][number]> {

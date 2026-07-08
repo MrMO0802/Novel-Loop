@@ -20,20 +20,24 @@ import {
   CodexPatchFailureReportSchema,
   CodexRuntimeBenchmarkReportSchema,
   CodexRuntimeFailureReportSchema,
+  CodexRuntimeGapReportSchema,
   CodexRuntimeOptimizationReportSchema,
   CodexRealOptimizationBenchmarkReportSchema,
+  CodexMissionMicroBenchmarkReportSchema,
+  CodexMissionRetryReportSchema,
   CodexSingleChapterSmokeReportSchema,
   CodexStageRuntimeProfileReportSchema,
   CommitJournalSchema,
   CommitReportSchema,
   ConfigSchema,
   FinalAssemblyReportSchema,
+  MissionSchemaDiagnosticsReportSchema,
   ProjectAuditReportSchema,
   RunEventSchema,
   RunManifestSchema,
   StoryStateSchema
 } from '../schemas/index.js';
-import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
+import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -395,6 +399,20 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_regression_analysis', relativePath, CodexChapterRegressionAnalysisSchema);
         await checkCodexChapterRegressionAnalysis(issues, paths, fileStore, fileName, relativePath);
       }
+      if (/^codex_runtime_gap_report_v\d+\.json$/.test(fileName)) {
+        const relativePath = path.join('audit', fileName);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_gap', relativePath, CodexRuntimeGapReportSchema);
+        await checkCodexRuntimeGapReport(issues, paths, fileStore, fileName, relativePath);
+      }
+      if (/^codex_mission_retry_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), CodexMissionRetryReportSchema);
+      }
+      if (/^codex_mission_micro_benchmark_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), CodexMissionMicroBenchmarkReportSchema);
+      }
+      if (/^mission_schema_diagnostics_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), MissionSchemaDiagnosticsReportSchema);
+      }
       if (/^codex_business_optimization_plan_v\d+\.json$/.test(fileName)) {
         const relativePath = path.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_optimization', relativePath, CodexBusinessOptimizationPlanSchema);
@@ -714,6 +732,50 @@ async function checkCodexChapterRegressionAnalysis(
         true
       ));
     }
+  }
+}
+
+async function checkCodexRuntimeGapReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  fileName: string,
+  relativePath: string
+): Promise<void> {
+  let report: CodexRuntimeGapReport;
+  try {
+    report = await fileStore.readJson(paths.auditArtifact(fileName), CodexRuntimeGapReportSchema);
+  } catch {
+    return;
+  }
+  for (const sourcePath of [report.sourceBenchmarkPath, report.sourceProfilePath]) {
+    if (!sourcePath.endsWith('_missing.json') && !(await fileStore.exists(paths.projectArtifact(sourcePath)))) {
+      issues.push(issue(
+        `codex_runtime_gap_source_missing_${sanitizeIssueId(fileName)}_${sanitizeIssueId(sourcePath)}`,
+        'error',
+        'codex_runtime_gap',
+        relativePath,
+        `Runtime gap report references missing source file ${sourcePath}.`,
+        'Regenerate runtime-gap after restoring benchmark/profile artifacts.',
+        true
+      ));
+    }
+  }
+  const impossible =
+    report.totalUnattributedGapMs > report.totalWallClockMs ||
+    report.gapByRun.some((run) => run.unattributedGapMs > run.wallClockMs || run.gapPercent < 0) ||
+    report.gapByChapter.some((chapter) => chapter.unattributedGapMs > chapter.wallClockMs || chapter.gapPercent < 0) ||
+    report.gapByStage.some((stage) => stage.unattributedGapMs > stage.wallClockMs || stage.gapPercent < 0);
+  if (impossible) {
+    issues.push(issue(
+      `codex_runtime_gap_impossible_metric_${sanitizeIssueId(fileName)}`,
+      'error',
+      'codex_runtime_gap',
+      relativePath,
+      'Runtime gap report contains an impossible negative or over-wall-clock gap metric.',
+      'Regenerate runtime-gap from complete run manifest and benchmark artifacts.',
+      true
+    ));
   }
 }
 

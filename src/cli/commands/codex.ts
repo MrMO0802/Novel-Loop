@@ -5,8 +5,10 @@ import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOp
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
+import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
 import { evaluateCodexCrossChapterDrift, runCodexMultiChapterPilot } from '../../app/codexMultiChapterPilot.js';
 import { runCodexProfileComparison, runCodexRuntimeBenchmark } from '../../app/codexRuntimeBenchmark.js';
+import { generateCodexRuntimeGapReport } from '../../app/codexRuntimeGap.js';
 import { generateCodexRuntimeOptimizationReport } from '../../app/codexRuntimeOptimization.js';
 import { profileCodexRuntime } from '../../app/codexRuntimeProfiler.js';
 import { runCodexSingleChapterSmoke } from '../../app/codexSingleChapterSmoke.js';
@@ -54,6 +56,7 @@ interface CodexCommandOptions {
   codexFinalMode?: string;
   useCache?: boolean;
   warmCache?: boolean;
+  chapter?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -423,6 +426,72 @@ export function registerCodexCommand(program: Command): void {
           `recommendedFixes: ${result.report.recommendedFixes.length}`
         ].join('\n') + '\n'
       );
+    });
+
+  addBoundaryOptions(codex.command('runtime-gap').description('[experimental/internal] Analyze wall-clock vs prompt-call runtime gaps from existing artifacts'))
+    .argument('<projectId>', 'project id')
+    .action(async (projectId: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await generateCodexRuntimeGapReport({
+        projectId,
+        projectsRoot: options.root ?? './projects'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          'codexRuntimeGap: success',
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `totalWallClockMs: ${result.report.totalWallClockMs}`,
+          `totalPromptCallMs: ${result.report.totalPromptCallMs}`,
+          `totalLocalStageMs: ${result.report.totalLocalStageMs}`,
+          `totalUnattributedGapMs: ${result.report.totalUnattributedGapMs}`,
+          `largestGapRun: ${result.report.gapByRun[0]?.runId ?? 'none'}`
+        ].join('\n') + '\n'
+      );
+    });
+
+  addCodexPilotOptions(addBoundaryOptions(codex.command('mission-benchmark').description('[pilot diagnostic] Run only Codex chapter mission generation and record retry/schema diagnostics')))
+    .argument('<projectId>', 'project id')
+    .requiredOption('--chapter <number>', 'chapter number')
+    .option('--prompt-root <path>', 'prompt root directory', './prompts')
+    .action(async (projectId: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexMissionMicroBenchmark({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        promptRoot: options.promptRoot ?? './prompts',
+        chapterNumber: parsePositiveInteger(requiredOption(options.chapter, 'chapter'), 'chapter'),
+        ...resolveCodexCliOptions({
+          ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+          codexProfile: options.codexProfile ?? 'clean',
+          codexJsonRetries: options.codexJsonRetries ?? '2',
+          ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+          codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+          codexTimeoutMs: options.codexTimeoutMs ?? options.timeoutMs ?? '180000'
+        })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          `codexMissionBenchmark: ${result.report.success ? 'success' : 'failed'}`,
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `retryReportPath: ${result.retryReportPath}`,
+          `schemaDiagnosticsPath: ${result.schemaDiagnosticsPath}`,
+          `chapterNumber: ${result.report.chapterNumber}`,
+          `retryCount: ${result.report.retryCount}`,
+          `repairCount: ${result.report.repairCount}`,
+          `schemaValid: ${String(result.report.schemaValid)}`
+        ].join('\n') + '\n'
+      );
+      if (!result.report.success) process.exitCode = 1;
     });
 
   program

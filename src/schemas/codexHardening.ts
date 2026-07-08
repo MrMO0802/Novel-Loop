@@ -550,7 +550,11 @@ const CodexOtherReasonCategoryMetricItemSchema = z.object({
     'wrapper_orphan',
     'legacy_missing_parent',
     'health_or_smoke',
-    'unsupported_old_manifest'
+    'unsupported_old_manifest',
+    'diagnostic_overhead',
+    'smoke_or_health',
+    'standalone_operator_command',
+    'unknown_runtime_gap'
   ]),
   totalCalls: z.number().int().nonnegative(),
   totalDurationMs: z.number().int().nonnegative()
@@ -624,6 +628,7 @@ const CodexWrapperCallProfileSchema = z.object({
   promptCallId: z.string(),
   wrapperCallType: CodexWrapperCallTypeSchema,
   runId: z.string(),
+  command: z.string().default('unknown'),
   durationMs: z.number().int().nonnegative(),
   parentPromptCallId: z.string().optional(),
   parentPromptId: z.string().optional(),
@@ -632,9 +637,39 @@ const CodexWrapperCallProfileSchema = z.object({
   attributionMode: CodexAttributionModeSchema,
   attributionConfidence: CodexAttributionConfidenceSchema,
   attributionReason: z.string(),
+  artifactPath: z.string().optional(),
   rawOutputPath: z.string().optional(),
   finalOutputPath: z.string().optional(),
-  parsedOutputPath: z.string().optional()
+  parsedOutputPath: z.string().optional(),
+  timestamp: z.string().default('unknown'),
+  structuredReason: z.enum([
+    'diagnostic_overhead',
+    'legacy_missing_parent',
+    'smoke_or_health',
+    'standalone_operator_command',
+    'unknown_runtime_gap'
+  ]).default('unknown_runtime_gap'),
+  suggestedFix: z.string().default('Inspect wrapper provenance and add parentPromptCallId when this is a child of a business prompt.')
+});
+
+const CodexWrapperWarningSchema = z.object({
+  runId: z.string(),
+  promptCallId: z.string(),
+  command: z.string(),
+  artifactPath: z.string().optional(),
+  rawOutputPath: z.string().optional(),
+  finalOutputPath: z.string().optional(),
+  parsedOutputPath: z.string().optional(),
+  timestamp: z.string(),
+  reason: z.enum([
+    'diagnostic_overhead',
+    'legacy_missing_parent',
+    'smoke_or_health',
+    'standalone_operator_command',
+    'unknown_runtime_gap'
+  ]),
+  suggestedFix: z.string(),
+  attributionConfidence: CodexAttributionConfidenceSchema
 });
 
 const CodexWrapperBreakdownSchema = z.object({
@@ -645,7 +680,8 @@ const CodexWrapperBreakdownSchema = z.object({
   byParentStage: z.array(CodexProfileMetricItemSchema).default([]),
   byParentPromptId: z.array(CodexProfileMetricItemSchema).default([]),
   orphanWrapperCalls: z.array(CodexWrapperCallProfileSchema).default([]),
-  inferredWrapperCalls: z.array(CodexWrapperCallProfileSchema).default([])
+  inferredWrapperCalls: z.array(CodexWrapperCallProfileSchema).default([]),
+  orphanWrapperWarnings: z.array(CodexWrapperWarningSchema).default([])
 });
 
 const CodexBusinessPromptCallSchema = z.object({
@@ -760,7 +796,8 @@ export const CodexStageRuntimeProfileReportSchema = z.object({
     byParentStage: [],
     byParentPromptId: [],
     orphanWrapperCalls: [],
-    inferredWrapperCalls: []
+    inferredWrapperCalls: [],
+    orphanWrapperWarnings: []
   }),
   slowestBusinessPromptCalls: z.array(CodexBusinessPromptCallSchema).default([]),
   slowestRuns: z.array(CodexRunProfileSchema).default([]),
@@ -1097,6 +1134,9 @@ const CodexChapterRegressionChapterComparisonSchema = z.object({
   currentDurationMs: z.number().int().nonnegative(),
   deltaMs: z.number().int(),
   deltaPercent: z.number(),
+  explainedDeltaMs: z.number().int().nonnegative().default(0),
+  unexplainedDeltaMs: z.number().int().nonnegative().default(0),
+  explanationCoveragePercent: z.number().default(0),
   durationByStage: z.record(z.string(), CodexChapterRegressionStageBreakdownSchema),
   durationByPromptId: z.record(z.string(), z.number().int().nonnegative()),
   codexCallCount: z.number().int().nonnegative(),
@@ -1202,9 +1242,165 @@ const CodexMappingCleanupSchema = z.object({
       promptId: z.string(),
       runId: z.string(),
       warning: z.string(),
-      artifactPaths: z.array(z.string())
+      artifactPaths: z.array(z.string()),
+      promptCallId: z.string().optional(),
+      command: z.string().optional(),
+      artifactPath: z.string().optional(),
+      rawOutputPath: z.string().optional(),
+      finalOutputPath: z.string().optional(),
+      parsedOutputPath: z.string().optional(),
+      timestamp: z.string().optional(),
+      reason: z.enum([
+        'diagnostic_overhead',
+        'legacy_missing_parent',
+        'smoke_or_health',
+        'standalone_operator_command',
+        'unknown_runtime_gap'
+      ]).optional(),
+      suggestedFix: z.string().optional(),
+      parentPromptCallId: z.string().optional(),
+      parentPromptId: z.string().optional(),
+      parentStage: z.string().optional()
     })
   )
+});
+
+const CodexRegressionRecommendationSchema = z.object({
+  recommendationType: z.enum(['continue_runtime_gap_analysis', 'stabilize_mission_retry', 'close_wrapper_attribution', 'run_micro_benchmark']),
+  reason: z.string(),
+  suggestedCommand: z.string().optional(),
+  priority: z.enum(['low', 'medium', 'high'])
+});
+
+const CodexRuntimeGapSourceSchema = z.enum([
+  'codex_provider_latency_variance',
+  'codex_process_startup',
+  'jsonl_stream_wait',
+  'artifact_io',
+  'local_processing',
+  'event_timing_missing',
+  'legacy_manifest_gap',
+  'benchmark_aggregation_gap',
+  'unknown'
+]);
+
+const CodexRuntimeGapChapterSchema = z.object({
+  chapterNumber: z.number().int().positive(),
+  wallClockMs: z.number().int().nonnegative(),
+  promptCallMs: z.number().int().nonnegative(),
+  localStageMs: z.number().int().nonnegative(),
+  unattributedGapMs: z.number().int().nonnegative(),
+  gapPercent: z.number(),
+  largestGapRunIds: z.array(z.string()),
+  largestGapStages: z.array(z.string())
+});
+
+const CodexRuntimeGapRunSchema = z.object({
+  runId: z.string(),
+  command: z.string(),
+  chapterNumber: z.number().int().positive().optional(),
+  wallClockMs: z.number().int().nonnegative(),
+  promptCallMs: z.number().int().nonnegative(),
+  localStageMs: z.number().int().nonnegative(),
+  eventDurationMs: z.number().int().nonnegative(),
+  unattributedGapMs: z.number().int().nonnegative(),
+  gapPercent: z.number(),
+  status: z.string(),
+  suspectedSource: CodexRuntimeGapSourceSchema
+});
+
+const CodexRuntimeGapStageSchema = z.object({
+  stage: z.string(),
+  chapterNumber: z.number().int().positive().optional(),
+  wallClockMs: z.number().int().nonnegative(),
+  promptCallMs: z.number().int().nonnegative(),
+  localStageMs: z.number().int().nonnegative(),
+  unattributedGapMs: z.number().int().nonnegative(),
+  gapPercent: z.number()
+});
+
+const CodexRuntimeGapSuspectedSourceSchema = z.object({
+  suspectedSource: CodexRuntimeGapSourceSchema,
+  totalGapMs: z.number().int().nonnegative(),
+  runIds: z.array(z.string()),
+  evidence: z.array(z.string())
+});
+
+const CodexRuntimeGapRecommendationSchema = z.object({
+  recommendedAction: z.enum(['fix_observability_before_prompt_compression', 'measure_provider_variance', 'add_parent_attribution', 'inspect_event_timing']),
+  reason: z.string(),
+  suggestedCommand: z.string().optional(),
+  priority: z.enum(['low', 'medium', 'high'])
+});
+
+export const CodexRuntimeGapReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  sourceBenchmarkPath: z.string(),
+  sourceProfilePath: z.string(),
+  totalWallClockMs: z.number().int().nonnegative(),
+  totalPromptCallMs: z.number().int().nonnegative(),
+  totalLocalStageMs: z.number().int().nonnegative(),
+  totalUnattributedGapMs: z.number().int().nonnegative(),
+  gapByChapter: z.array(CodexRuntimeGapChapterSchema),
+  gapByRun: z.array(CodexRuntimeGapRunSchema),
+  gapByStage: z.array(CodexRuntimeGapStageSchema),
+  suspectedGapSources: z.array(CodexRuntimeGapSuspectedSourceSchema),
+  recommendations: z.array(CodexRuntimeGapRecommendationSchema),
+  storyStateMutated: z.literal(false)
+});
+
+export const MissionSchemaDiagnosticsReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  promptId: z.string(),
+  generatedAt: z.string(),
+  schemaValid: z.boolean(),
+  errorTypes: z.array(z.string()),
+  missingFields: z.array(z.string()).default([]),
+  extraFields: z.array(z.string()).default([]),
+  outputPath: z.string().optional(),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexMissionRetryReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  promptId: z.string(),
+  previousRetryCount: z.number().int().nonnegative(),
+  currentRetryCount: z.number().int().nonnegative(),
+  schemaErrorTypes: z.array(z.string()),
+  repairUsed: z.boolean(),
+  promptChanges: z.array(z.string()),
+  schemaChanges: z.array(z.string()),
+  normalizerChanges: z.array(z.string()),
+  success: z.boolean(),
+  generatedAt: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexMissionMicroBenchmarkReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  promptId: z.string(),
+  generatedAt: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  promptBytes: z.number().int().nonnegative(),
+  schemaBytes: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative(),
+  schemaValid: z.boolean(),
+  errors: z.array(z.string()),
+  success: z.boolean(),
+  runId: z.string(),
+  retryReportPath: z.string(),
+  schemaDiagnosticsPath: z.string(),
+  storyStateMutated: z.literal(false)
 });
 
 export const CodexChapterRegressionAnalysisSchema = z.object({
@@ -1219,6 +1415,10 @@ export const CodexChapterRegressionAnalysisSchema = z.object({
   improvedStages: z.array(CodexChapterRegressionStageBreakdownSchema),
   suspectedRootCauses: z.array(CodexRegressionRootCauseSchema),
   recommendedFixes: z.array(CodexRegressionRecommendedFixSchema),
+  recommendations: z.array(CodexRegressionRecommendationSchema).default([]),
+  runtimeGapReportPath: z.string().optional(),
+  missionRetryReportPath: z.string().optional(),
+  missionMicroBenchmarkPath: z.string().optional(),
   confidence: CodexRegressionConfidenceSchema,
   warnings: z.array(z.string()),
   duplicatePromptCalls: z.array(CodexDuplicatePromptCallSchema),
@@ -1270,4 +1470,8 @@ export type CodexRuntimeOptimizationReport = z.infer<typeof CodexRuntimeOptimiza
 export type CodexBusinessOptimizationPlan = z.infer<typeof CodexBusinessOptimizationPlanSchema>;
 export type CodexRealOptimizationStageDelta = z.infer<typeof CodexRealOptimizationStageDeltaSchema>;
 export type CodexRealOptimizationBenchmarkReport = z.infer<typeof CodexRealOptimizationBenchmarkReportSchema>;
+export type CodexRuntimeGapReport = z.infer<typeof CodexRuntimeGapReportSchema>;
+export type MissionSchemaDiagnosticsReport = z.infer<typeof MissionSchemaDiagnosticsReportSchema>;
+export type CodexMissionRetryReport = z.infer<typeof CodexMissionRetryReportSchema>;
+export type CodexMissionMicroBenchmarkReport = z.infer<typeof CodexMissionMicroBenchmarkReportSchema>;
 export type CodexChapterRegressionAnalysis = z.infer<typeof CodexChapterRegressionAnalysisSchema>;

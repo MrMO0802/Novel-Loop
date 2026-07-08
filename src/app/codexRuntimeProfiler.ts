@@ -22,6 +22,7 @@ interface PromptCallProfileDraft {
   runId: string;
   command: string;
   status: string;
+  timestamp: string;
   chapterNumber?: number;
   promptId: string;
   promptFamily: string;
@@ -408,6 +409,7 @@ function toPromptCallProfile(manifest: RunManifestV2, call: RunManifestV2['promp
     runId: manifest.runId,
     command: manifest.command,
     status: call.status ?? 'succeeded',
+    timestamp: call.startedAt,
     promptId: call.promptId,
     promptFamily: mapping.promptFamily,
     inferredStage: mapping.stage,
@@ -651,7 +653,14 @@ function otherCodexReasonCategory(call: PromptCallProfileDraft):
   | 'wrapper_orphan'
   | 'legacy_missing_parent'
   | 'health_or_smoke'
-  | 'unsupported_old_manifest' {
+  | 'unsupported_old_manifest'
+  | 'diagnostic_overhead'
+  | 'smoke_or_health'
+  | 'standalone_operator_command'
+  | 'unknown_runtime_gap' {
+  const reason = structuredWrapperReason(call);
+  if (reason !== undefined && reason !== 'unknown_runtime_gap') return reason;
+  if (call.likelyCategory === 'smoke' || call.likelyCategory === 'exec_json_smoke') return 'smoke_or_health';
   if (call.wrapperCallType === 'health' || call.wrapperCallType === 'smoke') return 'health_or_smoke';
   if (isWrapperCall(call) && call.parentPromptCallId !== undefined) return 'legacy_missing_parent';
   if (isWrapperCall(call)) return 'wrapper_orphan';
@@ -696,6 +705,7 @@ function buildWrapperBreakdown(wrapperCalls: PromptCallProfileDraft[]) {
   const orphanWrapperCalls = wrapperCalls.filter((call) => call.attributionMode === 'unclassified');
   const inferredWrapperCalls = wrapperCalls.filter((call) => call.attributionMode === 'inferred');
   const attributedWrappers = wrapperCalls.filter((call) => call.parentPromptCallId !== undefined && call.attributionMode !== 'unclassified');
+  const structuredOrphans = orphanWrapperCalls.map(toWrapperCallProfile);
   return {
     totalWrapperCalls: wrapperCalls.length,
     totalWrapperDurationMs: wrapperCalls.reduce((sum, call) => sum + call.durationMs, 0),
@@ -703,16 +713,32 @@ function buildWrapperBreakdown(wrapperCalls: PromptCallProfileDraft[]) {
     byWrapperType: metricItems(wrapperCalls, (call) => call.wrapperCallType ?? 'unknown'),
     byParentStage: metricItems(attributedWrappers, (call) => call.parentStage ?? 'unknown'),
     byParentPromptId: metricItems(attributedWrappers, (call) => call.parentPromptId ?? 'unknown'),
-    orphanWrapperCalls: orphanWrapperCalls.map(toWrapperCallProfile),
-    inferredWrapperCalls: inferredWrapperCalls.map(toWrapperCallProfile)
+    orphanWrapperCalls: structuredOrphans,
+    inferredWrapperCalls: inferredWrapperCalls.map(toWrapperCallProfile),
+    orphanWrapperWarnings: structuredOrphans.map((call) => ({
+      runId: call.runId,
+      promptCallId: call.promptCallId,
+      command: call.command,
+      ...(call.artifactPath === undefined ? {} : { artifactPath: call.artifactPath }),
+      ...(call.rawOutputPath === undefined ? {} : { rawOutputPath: call.rawOutputPath }),
+      ...(call.finalOutputPath === undefined ? {} : { finalOutputPath: call.finalOutputPath }),
+      ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath }),
+      timestamp: call.timestamp,
+      reason: call.structuredReason,
+      suggestedFix: call.suggestedFix,
+      attributionConfidence: call.attributionConfidence
+    }))
   };
 }
 
 function toWrapperCallProfile(call: PromptCallProfileDraft) {
+  const artifactPath = call.finalOutputPath ?? call.parsedOutputPath ?? call.rawOutputPath ?? call.artifactPaths[0];
+  const structuredReason = structuredWrapperReason(call) ?? 'unknown_runtime_gap';
   return {
     promptCallId: call.promptCallId,
     wrapperCallType: call.wrapperCallType ?? 'unknown',
     runId: call.runId,
+    command: call.command,
     durationMs: call.durationMs,
     ...(call.parentPromptCallId === undefined ? {} : { parentPromptCallId: call.parentPromptCallId }),
     ...(call.parentPromptId === undefined ? {} : { parentPromptId: call.parentPromptId }),
@@ -721,10 +747,37 @@ function toWrapperCallProfile(call: PromptCallProfileDraft) {
     attributionMode: call.attributionMode,
     attributionConfidence: call.attributionConfidence,
     attributionReason: call.attributionReason,
+    ...(artifactPath === undefined ? {} : { artifactPath }),
     ...(call.rawOutputPath === undefined ? {} : { rawOutputPath: call.rawOutputPath }),
     ...(call.finalOutputPath === undefined ? {} : { finalOutputPath: call.finalOutputPath }),
-    ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath })
+    ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath }),
+    timestamp: call.timestamp,
+    structuredReason,
+    suggestedFix: suggestedWrapperFix(structuredReason)
   };
+}
+
+function structuredWrapperReason(
+  call: Pick<PromptCallProfileDraft, 'wrapperCallType' | 'parentPromptCallId' | 'command' | 'promptId' | 'attributionMode'>
+): 'diagnostic_overhead' | 'legacy_missing_parent' | 'smoke_or_health' | 'standalone_operator_command' | 'unknown_runtime_gap' | undefined {
+  if (call.wrapperCallType === undefined) return undefined;
+  const command = call.command.toLowerCase().replace(/-/g, '_');
+  const promptId = call.promptId.toLowerCase().replace(/-/g, '_');
+  if (call.wrapperCallType === 'health' || call.wrapperCallType === 'smoke' || promptId.includes('smoke') || promptId.includes('health')) return 'smoke_or_health';
+  if (call.wrapperCallType === 'exec_json' && promptId === 'codex.exec_json') return 'smoke_or_health';
+  if (call.parentPromptCallId !== undefined && call.attributionMode === 'unclassified') return 'legacy_missing_parent';
+  if (call.wrapperCallType === 'exec_json' && (command.includes('exec_json') || command.includes('smoke'))) return 'diagnostic_overhead';
+  if (command.includes('operator') || command.includes('exec_text') || command.includes('exec_text')) return 'standalone_operator_command';
+  if (call.wrapperCallType === 'exec_text' && command === 'codex') return 'unknown_runtime_gap';
+  return 'unknown_runtime_gap';
+}
+
+function suggestedWrapperFix(reason: NonNullable<ReturnType<typeof structuredWrapperReason>>): string {
+  if (reason === 'legacy_missing_parent') return 'Restore the missing parent run manifest or correct parentPromptCallId / parentRunId provenance.';
+  if (reason === 'diagnostic_overhead') return 'Keep as diagnostic overhead if this is an operator smoke command; otherwise add parentPromptCallId.';
+  if (reason === 'smoke_or_health') return 'Classify as smoke_or_health diagnostic overhead and exclude from business optimization.';
+  if (reason === 'standalone_operator_command') return 'If this operator command is expected, leave it standalone; if it is a child Codex call, add parentPromptCallId.';
+  return 'Inspect wrapper provenance; add parentPromptCallId only when a high-confidence business parent exists.';
 }
 
 function metricDurationRecord<T>(items: T[], keyFor: (item: T) => string, durationFor: (item: T) => number): Record<string, number> {
@@ -749,6 +802,7 @@ function businessToPromptCallProfile(businessCall: BusinessPromptCallDraft, call
     attributionMode: 'direct',
     attributionConfidence: 'high',
     attributionReason: 'business runtime view',
+    timestamp: new Date(0).toISOString(),
     durationMs: businessCall.netDurationMs,
     latencyMs: businessCall.providerLatencyMs,
     promptInputBytes: businessCall.promptInputBytes,

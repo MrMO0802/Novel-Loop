@@ -11,6 +11,8 @@ Rules:
 - Do not add new plot content.
 - Do not change the semantic meaning.
 - Only repair JSON structure and schema shape.
+- Repair missing required fields, scalar types, and array item types before changing wording.
+- Do not wrap output in ```json fences.
 - No markdown.
 - No explanation.
 

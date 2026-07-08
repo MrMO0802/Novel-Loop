@@ -290,6 +290,14 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^audit\/codex_real_optimization_benchmark_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_real_optimization_benchmark_report', phase: 'audit' };
   if (/^audit\/codex_chapter_regression_analysis_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_chapter_regression_analysis', phase: 'audit', schemaName: 'CodexChapterRegressionAnalysisSchema' };
   if (/^audit\/codex_chapter_regression_analysis_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_chapter_regression_analysis', phase: 'audit' };
+  if (/^audit\/codex_runtime_gap_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_runtime_gap_report', phase: 'audit', schemaName: 'CodexRuntimeGapReportSchema' };
+  if (/^audit\/codex_runtime_gap_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_runtime_gap_report', phase: 'audit' };
+  if (/^audit\/codex_mission_retry_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_mission_retry_report', phase: 'audit', schemaName: 'CodexMissionRetryReportSchema' };
+  if (/^audit\/codex_mission_retry_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_mission_retry_report', phase: 'audit' };
+  if (/^audit\/codex_mission_micro_benchmark_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_mission_micro_benchmark_report', phase: 'audit', schemaName: 'CodexMissionMicroBenchmarkReportSchema' };
+  if (/^audit\/codex_mission_micro_benchmark_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_mission_micro_benchmark_report', phase: 'audit' };
+  if (/^audit\/mission_schema_diagnostics_v\d+\.json$/.test(relativePath)) return { artifactType: 'mission_schema_diagnostics_report', phase: 'audit', schemaName: 'MissionSchemaDiagnosticsReportSchema' };
+  if (/^audit\/mission_schema_diagnostics_v\d+\.md$/.test(relativePath)) return { artifactType: 'mission_schema_diagnostics_report', phase: 'audit' };
   if (/^audit\/codex_runtime_failure_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_runtime_failure_report', phase: 'audit', schemaName: 'CodexRuntimeFailureReportSchema' };
   if (/^conflict_report_v\d+\.json$/.test(fileName)) return { artifactType: 'conflict_report', phase: 'conflict', schemaName: 'ConflictReportSchema' };
   if (/^patch_repair_plan_v\d+\.json$/.test(fileName)) return { artifactType: 'repair_plan', phase: 'conflict', schemaName: 'PatchRepairPlanSchema' };

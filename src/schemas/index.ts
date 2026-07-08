@@ -236,15 +236,19 @@ export {
   CodexRuntimeBenchmarkReportSchema,
   CodexRuntimeBenchmarkStageSchema,
   CodexRuntimeFailureReportSchema,
+  CodexRuntimeGapReportSchema,
   CodexRuntimeOptimizationReportSchema,
   CodexRealOptimizationBenchmarkReportSchema,
   CodexRealOptimizationContextBudgetStatsSchema,
   CodexRealOptimizationSafetyChecksSchema,
   CodexRealOptimizationStageDeltaSchema,
+  CodexMissionMicroBenchmarkReportSchema,
+  CodexMissionRetryReportSchema,
   CodexSingleChapterSmokeReportSchema,
   CodexSingleChapterSmokeStageSchema,
   CodexStageRuntimeOptimizationCandidateSchema,
-  CodexStageRuntimeProfileReportSchema
+  CodexStageRuntimeProfileReportSchema,
+  MissionSchemaDiagnosticsReportSchema
 } from './codexHardening.js';
 export type {
   CodexBudgetReport,
@@ -274,12 +278,16 @@ export type {
   CodexRuntimeBenchmarkReport,
   CodexRuntimeBenchmarkStage,
   CodexRuntimeFailureReport,
+  CodexRuntimeGapReport,
   CodexRuntimeOptimizationReport,
   CodexRealOptimizationBenchmarkReport,
   CodexRealOptimizationStageDelta,
+  CodexMissionMicroBenchmarkReport,
+  CodexMissionRetryReport,
   CodexSingleChapterSmokeReport,
   CodexSingleChapterSmokeStage,
-  CodexStageRuntimeProfileReport
+  CodexStageRuntimeProfileReport,
+  MissionSchemaDiagnosticsReport
 } from './codexHardening.js';
 
 export { ArcMapSchema, ChapterQueueSchema, ChapterQueueStageSchema, ChapterQueueStatusSchema } from './planningArtifacts.js';

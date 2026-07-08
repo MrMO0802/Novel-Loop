@@ -66,6 +66,10 @@ export const ArtifactTypeSchema = z.enum([
   'codex_runtime_optimization_report',
   'codex_real_optimization_benchmark_report',
   'codex_chapter_regression_analysis',
+  'codex_runtime_gap_report',
+  'codex_mission_retry_report',
+  'codex_mission_micro_benchmark_report',
+  'mission_schema_diagnostics_report',
   'codex_runtime_failure_report'
 ]);
 

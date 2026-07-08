@@ -46,6 +46,13 @@ interface PromptCallDetail {
   retryCount: number;
   repairCount: number;
   artifactPaths: string[];
+  rawOutputPath?: string;
+  finalOutputPath?: string;
+  parsedOutputPath?: string;
+  timestamp: string;
+  parentPromptCallId?: string;
+  parentPromptId?: string;
+  parentStage?: string;
   status: string;
   errorType?: string;
   classified: boolean;
@@ -110,7 +117,7 @@ export async function generateCodexChapterRegressionAnalysis(
     const baselineDuration = baselineDurationFor(chapterNumber);
     return buildChapterComparison(chapterNumber, baselineDuration, baselineDuration, [], qualityCriticalIssues[chapterNumber] ?? 0, continuityWarnings[chapterNumber] ?? 0);
   });
-  const currentChapters = TARGET_CHAPTERS.map((chapterNumber) =>
+  const rawCurrentChapters = TARGET_CHAPTERS.map((chapterNumber) =>
     buildChapterComparison(
       chapterNumber,
       baselineDurationFor(chapterNumber),
@@ -139,6 +146,10 @@ export async function generateCodexChapterRegressionAnalysis(
     calls
   });
   const recommendedFixes = buildRecommendedFixes(rootCauses);
+  const currentChapters = applyExplanationCoverage(rawCurrentChapters, rootCauses);
+  const runtimeGapReportPath = await latestAuditReportPath(paths, fileStore, 'codex_runtime_gap_report');
+  const missionRetryReportPath = await latestAuditReportPath(paths, fileStore, 'codex_mission_retry_report');
+  const missionMicroBenchmarkPath = await latestAuditReportPath(paths, fileStore, 'codex_mission_micro_benchmark');
   const artifact = await nextAuditArtifact(paths, fileStore, 'codex_chapter_regression_analysis');
   const report = await fileStore.writeJson(
     artifact.jsonPath,
@@ -154,6 +165,13 @@ export async function generateCodexChapterRegressionAnalysis(
       improvedStages: currentChapters.flatMap((chapter) => Object.values(chapter.durationByStage).filter((stage) => stage.comparedToBaselineDeltaMs < 0)),
       suspectedRootCauses: rootCauses,
       recommendedFixes,
+      recommendations: buildRegressionRecommendations(currentChapters, rootCauses, mappingCleanup, {
+        ...(runtimeGapReportPath === undefined ? {} : { runtimeGapReportPath }),
+        ...(missionMicroBenchmarkPath === undefined ? {} : { missionMicroBenchmarkPath })
+      }),
+      ...(runtimeGapReportPath === undefined ? {} : { runtimeGapReportPath }),
+      ...(missionRetryReportPath === undefined ? {} : { missionRetryReportPath }),
+      ...(missionMicroBenchmarkPath === undefined ? {} : { missionMicroBenchmarkPath }),
       confidence: benchmark !== undefined && profile !== undefined ? 'high' : 'low',
       warnings: buildWarnings(benchmark, profile, mappingCleanup),
       duplicatePromptCalls,
@@ -242,6 +260,13 @@ function callsFromProfile(profile: CodexStageRuntimeProfileReport): PromptCallDe
     retryCount: call.retryCount,
     repairCount: call.repairCount,
     artifactPaths: call.artifactPaths,
+    ...(call.rawOutputPath === undefined ? {} : { rawOutputPath: call.rawOutputPath }),
+    ...(call.finalOutputPath === undefined ? {} : { finalOutputPath: call.finalOutputPath }),
+    ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath }),
+    timestamp: new Date(0).toISOString(),
+    ...(call.parentPromptCallId === undefined ? {} : { parentPromptCallId: call.parentPromptCallId }),
+    ...(call.parentPromptId === undefined ? {} : { parentPromptId: call.parentPromptId }),
+    ...(call.parentStage === undefined ? {} : { parentStage: call.parentStage }),
     status: call.status,
     ...(call.errorType === undefined ? {} : { errorType: call.errorType }),
     classified: call.classified,
@@ -286,6 +311,13 @@ async function callsFromRunManifests(paths: ProjectPaths, fileStore: FileStore):
         retryCount: call.retryCount ?? 0,
         repairCount,
         artifactPaths: uniqueStrings([call.rawOutputPath, call.finalOutputPath, call.parsedOutputPath, call.inputArtifactPath, call.outputArtifactPath]),
+        ...(call.rawOutputPath === undefined ? {} : { rawOutputPath: call.rawOutputPath }),
+        ...(call.finalOutputPath === undefined ? {} : { finalOutputPath: call.finalOutputPath }),
+        ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath }),
+        timestamp: call.startedAt,
+        ...(call.parentPromptCallId === undefined ? {} : { parentPromptCallId: call.parentPromptCallId }),
+        ...(call.parentPromptId === undefined ? {} : { parentPromptId: call.parentPromptId }),
+        ...(call.parentStage === undefined ? {} : { parentStage: call.parentStage }),
         status: call.status ?? 'succeeded',
         ...(call.errorType === undefined ? {} : { errorType: call.errorType }),
         classified: mapping.classified || isDiagnosticOverhead(call.promptId, manifest.command, call.wrapperCallType),
@@ -360,6 +392,9 @@ function buildChapterComparison(
     currentDurationMs,
     deltaMs,
     deltaPercent: percent(deltaMs, baselineDurationMs),
+    explainedDeltaMs: 0,
+    unexplainedDeltaMs: Math.max(0, deltaMs),
+    explanationCoveragePercent: 0,
     durationByStage,
     durationByPromptId: promptDurations,
     codexCallCount: calls.filter((call) => !call.promptId.startsWith('codex.')).length,
@@ -527,19 +562,90 @@ function buildRecommendedFixes(rootCauses: CodexChapterRegressionAnalysis['suspe
   });
 }
 
+function applyExplanationCoverage(
+  chapters: CodexChapterRegressionAnalysis['currentChapters'],
+  rootCauses: CodexChapterRegressionAnalysis['suspectedRootCauses']
+): CodexChapterRegressionAnalysis['currentChapters'] {
+  return chapters.map((chapter) => {
+    const explainedDeltaMs = Math.min(
+      Math.max(0, chapter.deltaMs),
+      rootCauses.filter((cause) => cause.affectedChapter === chapter.chapterNumber).reduce((sum, cause) => sum + cause.impactMs, 0)
+    );
+    const unexplainedDeltaMs = Math.max(0, chapter.deltaMs - explainedDeltaMs);
+    return {
+      ...chapter,
+      explainedDeltaMs,
+      unexplainedDeltaMs,
+      explanationCoveragePercent: percent(explainedDeltaMs, Math.max(0, chapter.deltaMs))
+    };
+  });
+}
+
+function buildRegressionRecommendations(
+  chapters: CodexChapterRegressionAnalysis['currentChapters'],
+  rootCauses: CodexChapterRegressionAnalysis['suspectedRootCauses'],
+  mappingCleanup: CodexChapterRegressionAnalysis['mappingCleanup'],
+  paths: { runtimeGapReportPath?: string; missionMicroBenchmarkPath?: string }
+): CodexChapterRegressionAnalysis['recommendations'] {
+  const recommendations: CodexChapterRegressionAnalysis['recommendations'] = [];
+  if (chapters.some((chapter) => chapter.deltaMs > 0 && chapter.explanationCoveragePercent < 50)) {
+    recommendations.push({
+      recommendationType: 'continue_runtime_gap_analysis',
+      reason: 'Regression explanation coverage is below 50%; close wall-clock runtime gap before prompt compression.',
+      suggestedCommand: paths.runtimeGapReportPath === undefined ? 'corepack pnpm novel-loop codex runtime-gap <projectId>' : `review ${paths.runtimeGapReportPath}`,
+      priority: 'high'
+    });
+  }
+  if (rootCauses.some((cause) => cause.rootCauseType === 'retry_repair_increase' && cause.affectedStage === 'chapter_mission')) {
+    recommendations.push({
+      recommendationType: 'stabilize_mission_retry',
+      reason: 'Chapter mission retry was observed; run a targeted mission micro-benchmark before broad prompt changes.',
+      suggestedCommand: paths.missionMicroBenchmarkPath === undefined ? 'corepack pnpm novel-loop codex mission-benchmark <projectId> --chapter 2' : `review ${paths.missionMicroBenchmarkPath}`,
+      priority: 'medium'
+    });
+  }
+  if (mappingCleanup.unresolvedWarnings.length > 0) {
+    recommendations.push({
+      recommendationType: 'close_wrapper_attribution',
+      reason: `${mappingCleanup.unresolvedWarnings.length} wrapper or prompt mapping warning(s) remain structured but unresolved.`,
+      priority: 'medium'
+    });
+  }
+  return recommendations;
+}
+
 function buildMappingCleanup(calls: PromptCallDetail[], profile: CodexStageRuntimeProfileReport | undefined): CodexChapterRegressionAnalysis['mappingCleanup'] {
   const diagnosticOverheadClassified = calls
     .filter((call) => isDiagnosticOverhead(call.promptId, call.command, call.wrapperCallType))
     .map((call) => ({ promptId: call.promptId, runId: call.runId, reason: 'standalone Codex smoke/health/exec-json diagnostic overhead' }));
   const unresolved = calls
     .filter((call) => !call.classified && !isDiagnosticOverhead(call.promptId, call.command, call.wrapperCallType))
-    .map((call) => ({ promptId: call.promptId, runId: call.runId, warning: 'unclassified Codex prompt call remains', artifactPaths: call.artifactPaths }));
+    .map((call) => structuredUnresolvedWarning(call));
   const unknownPromptMappings = calls
     .filter((call) => call.stage === 'other_codex' && !isDiagnosticOverhead(call.promptId, call.command, call.wrapperCallType) && !call.promptId.startsWith('codex.'))
     .map((call) => ({ promptId: call.promptId, runId: call.runId, artifactPaths: call.artifactPaths, suggestedMapping: 'Add promptId rule or declare diagnostic_overhead if intentional.' }));
   for (const wrapper of profile?.wrapperBreakdown.orphanWrapperCalls ?? []) {
     if (isDiagnosticOverhead(wrapper.promptCallId, 'codex', wrapper.wrapperCallType)) {
       diagnosticOverheadClassified.push({ promptId: wrapper.promptCallId, runId: wrapper.runId, reason: 'orphan wrapper looks like standalone diagnostic overhead' });
+    } else if (!unresolved.some((warning) => warning.runId === wrapper.runId && warning.promptCallId === wrapper.promptCallId)) {
+      unresolved.push({
+        promptId: wrapper.promptCallId,
+        runId: wrapper.runId,
+        promptCallId: wrapper.promptCallId,
+        command: wrapper.command,
+        warning: 'unclassified Codex wrapper call remains',
+        artifactPaths: uniqueStrings([wrapper.rawOutputPath, wrapper.finalOutputPath, wrapper.parsedOutputPath, wrapper.artifactPath]),
+        ...(wrapper.artifactPath === undefined ? {} : { artifactPath: wrapper.artifactPath }),
+        ...(wrapper.rawOutputPath === undefined ? {} : { rawOutputPath: wrapper.rawOutputPath }),
+        ...(wrapper.finalOutputPath === undefined ? {} : { finalOutputPath: wrapper.finalOutputPath }),
+        ...(wrapper.parsedOutputPath === undefined ? {} : { parsedOutputPath: wrapper.parsedOutputPath }),
+        timestamp: wrapper.timestamp,
+        reason: wrapper.structuredReason,
+        suggestedFix: wrapper.suggestedFix,
+        ...(wrapper.parentPromptCallId === undefined ? {} : { parentPromptCallId: wrapper.parentPromptCallId }),
+        ...(wrapper.parentPromptId === undefined ? {} : { parentPromptId: wrapper.parentPromptId }),
+        ...(wrapper.parentStage === undefined ? {} : { parentStage: wrapper.parentStage })
+      });
     }
   }
   return {
@@ -549,12 +655,61 @@ function buildMappingCleanup(calls: PromptCallDetail[], profile: CodexStageRunti
   };
 }
 
+function structuredUnresolvedWarning(call: PromptCallDetail): CodexChapterRegressionAnalysis['mappingCleanup']['unresolvedWarnings'][number] {
+  const reason = structuredWarningReason(call);
+  const artifactPath = call.finalOutputPath ?? call.parsedOutputPath ?? call.rawOutputPath ?? call.artifactPaths[0];
+  return {
+    promptId: call.promptId,
+    runId: call.runId,
+    promptCallId: call.promptCallId,
+    command: call.command,
+    warning: 'unclassified Codex prompt call remains',
+    artifactPaths: call.artifactPaths,
+    ...(artifactPath === undefined ? {} : { artifactPath }),
+    ...(call.rawOutputPath === undefined ? {} : { rawOutputPath: call.rawOutputPath }),
+    ...(call.finalOutputPath === undefined ? {} : { finalOutputPath: call.finalOutputPath }),
+    ...(call.parsedOutputPath === undefined ? {} : { parsedOutputPath: call.parsedOutputPath }),
+    timestamp: call.timestamp,
+    reason,
+    suggestedFix: suggestedFixForStructuredWarning(reason),
+    ...(call.parentPromptCallId === undefined ? {} : { parentPromptCallId: call.parentPromptCallId }),
+    ...(call.parentPromptId === undefined ? {} : { parentPromptId: call.parentPromptId }),
+    ...(call.parentStage === undefined ? {} : { parentStage: call.parentStage })
+  };
+}
+
 function buildWarnings(benchmark: { report: CodexRuntimeBenchmarkReport } | undefined, profile: CodexStageRuntimeProfileReport | undefined, mappingCleanup: CodexChapterRegressionAnalysis['mappingCleanup']): string[] {
   return [
     ...(benchmark === undefined ? ['No chapter2/chapter3 benchmark report found.'] : []),
     ...(profile === undefined ? ['No codex_stage_runtime_profile report found; prompt-level analysis is incomplete.'] : []),
     ...mappingCleanup.unresolvedWarnings.map((warning) => `Unresolved mapping: ${warning.promptId} in ${warning.runId}`)
   ];
+}
+
+function structuredWarningReason(call: PromptCallDetail): NonNullable<CodexChapterRegressionAnalysis['mappingCleanup']['unresolvedWarnings'][number]['reason']> {
+  const command = call.command.toLowerCase().replace(/-/g, '_');
+  const promptId = call.promptId.toLowerCase().replace(/-/g, '_');
+  if (call.wrapperCallType === 'health' || call.wrapperCallType === 'smoke' || promptId.includes('health') || promptId.includes('smoke')) return 'smoke_or_health';
+  if (call.parentPromptCallId !== undefined) return 'legacy_missing_parent';
+  if (call.wrapperCallType === 'exec_json' && (command.includes('exec_json') || command.includes('smoke'))) return 'diagnostic_overhead';
+  if (call.wrapperCallType === 'exec_text' && (command.includes('operator') || command.includes('exec_text'))) return 'standalone_operator_command';
+  return 'unknown_runtime_gap';
+}
+
+function suggestedFixForStructuredWarning(reason: NonNullable<CodexChapterRegressionAnalysis['mappingCleanup']['unresolvedWarnings'][number]['reason']>): string {
+  if (reason === 'legacy_missing_parent') return 'Restore the missing parent run manifest or correct parentPromptCallId / parentRunId.';
+  if (reason === 'diagnostic_overhead') return 'Classify as diagnostic overhead when intentional; otherwise attach parentPromptCallId.';
+  if (reason === 'smoke_or_health') return 'Keep smoke/health outside business runtime optimization.';
+  if (reason === 'standalone_operator_command') return 'Keep as standalone operator command or add parentPromptCallId if this was a child business Codex call.';
+  return 'Inspect runtime events and add high-confidence parent attribution before optimizing this call.';
+}
+
+async function latestAuditReportPath(paths: ProjectPaths, fileStore: FileStore, baseName: string): Promise<string | undefined> {
+  if (!(await fileStore.exists(paths.auditDir()))) return undefined;
+  const fileName = (await fileStore.list(paths.auditDir()))
+    .filter((entry) => new RegExp(`^${baseName}_v\\d+\\.json$`).test(entry))
+    .sort((left, right) => versionOf(right) - versionOf(left))[0];
+  return fileName === undefined ? undefined : path.join('audit', fileName);
 }
 
 async function readContinuityWarnings(paths: ProjectPaths, fileStore: FileStore): Promise<Record<number, number>> {

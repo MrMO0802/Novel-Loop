@@ -26,6 +26,9 @@ describe('M21 Codex CLI', () => {
     expect(codexCommand?.helpInformation()).toContain('exec-text');
     expect(codexCommand?.helpInformation()).toContain('exec-json');
     expect(codexCommand?.helpInformation()).toContain('--codex-bin');
+    const sampleStage = codexCommand?.commands.find((command) => command.name() === 'sample-stage');
+    expect(sampleStage?.helpInformation()).toContain('--timeout-ms <ms>');
+    expect(sampleStage?.helpInformation()).toContain('--stage <stage>');
   });
 
   test('exec-json command prints parsed JSON artifact path and uses fake codex binary', async () => {

@@ -1377,6 +1377,60 @@ export const CodexRuntimeGapReportSchema = z.object({
   storyStateMutated: z.literal(false)
 });
 
+export const CodexRuntimeSamplingStageSchema = z.enum(['chapter_mission', 'scene_cards', 'write_scene', 'canon_patch_proposal', 'diagnostics', 'final_chapter']);
+
+export const CodexRuntimeSamplingSampleSchema = z.object({
+  sampleId: z.string(),
+  runId: z.string(),
+  promptCallId: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  schemaValid: z.boolean(),
+  jsonParsed: z.boolean(),
+  promptInputBytes: z.number().int().nonnegative(),
+  schemaBytes: z.number().int().nonnegative(),
+  outputBytes: z.number().int().nonnegative(),
+  errorType: z.string().optional(),
+  failureReportPath: z.string().optional(),
+  artifactPaths: z.array(z.string()).default([]),
+  stateMutated: z.literal(false)
+});
+
+export const CodexRuntimeSamplingInterpretationSchema = z.object({
+  varianceLevel: z.enum(['low', 'medium', 'high']),
+  stableBottleneck: z.boolean(),
+  likelyRuntimeVariance: z.boolean(),
+  enoughEvidenceForPromptOptimization: z.boolean(),
+  explanation: z.string()
+});
+
+export const CodexRuntimeSamplingReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  generatedAt: z.string(),
+  chapterNumber: z.number().int().positive(),
+  stage: CodexRuntimeSamplingStageSchema,
+  promptId: z.string(),
+  sampleCount: z.number().int().nonnegative(),
+  successCount: z.number().int().nonnegative(),
+  failureCount: z.number().int().nonnegative(),
+  minDurationMs: z.number().int().nonnegative(),
+  maxDurationMs: z.number().int().nonnegative(),
+  meanDurationMs: z.number().nonnegative(),
+  medianDurationMs: z.number().int().nonnegative(),
+  p90DurationMs: z.number().int().nonnegative(),
+  p95DurationMs: z.number().int().nonnegative(),
+  retryRate: z.number().min(0).max(1),
+  repairRate: z.number().min(0).max(1),
+  schemaValidRate: z.number().min(0).max(1),
+  timeoutRate: z.number().min(0).max(1),
+  samples: z.array(CodexRuntimeSamplingSampleSchema),
+  interpretation: CodexRuntimeSamplingInterpretationSchema,
+  recommendation: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
 export const MissionSchemaDiagnosticsReportSchema = z.object({
   reportId: z.string(),
   projectId: z.string(),
@@ -1497,6 +1551,10 @@ export type CodexBusinessOptimizationPlan = z.infer<typeof CodexBusinessOptimiza
 export type CodexRealOptimizationStageDelta = z.infer<typeof CodexRealOptimizationStageDeltaSchema>;
 export type CodexRealOptimizationBenchmarkReport = z.infer<typeof CodexRealOptimizationBenchmarkReportSchema>;
 export type CodexRuntimeGapReport = z.infer<typeof CodexRuntimeGapReportSchema>;
+export type CodexRuntimeSamplingStage = z.infer<typeof CodexRuntimeSamplingStageSchema>;
+export type CodexRuntimeSamplingSample = z.infer<typeof CodexRuntimeSamplingSampleSchema>;
+export type CodexRuntimeSamplingInterpretation = z.infer<typeof CodexRuntimeSamplingInterpretationSchema>;
+export type CodexRuntimeSamplingReport = z.infer<typeof CodexRuntimeSamplingReportSchema>;
 export type MissionSchemaDiagnosticsReport = z.infer<typeof MissionSchemaDiagnosticsReportSchema>;
 export type CodexMissionRetryReport = z.infer<typeof CodexMissionRetryReportSchema>;
 export type CodexMissionMicroBenchmarkReport = z.infer<typeof CodexMissionMicroBenchmarkReportSchema>;

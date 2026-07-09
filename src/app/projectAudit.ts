@@ -22,6 +22,7 @@ import {
   CodexRuntimeFailureReportSchema,
   CodexRuntimeGapReportSchema,
   CodexRuntimeOptimizationReportSchema,
+  CodexRuntimeSamplingReportSchema,
   CodexRealOptimizationBenchmarkReportSchema,
   CodexMissionMicroBenchmarkReportSchema,
   CodexMissionRetryReportSchema,
@@ -37,7 +38,7 @@ import {
   RunManifestSchema,
   StoryStateSchema
 } from '../schemas/index.js';
-import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexStageRuntimeProfileReport, RunEvent, RunManifest } from '../schemas/index.js';
+import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexRuntimeSamplingReport, CodexStageRuntimeProfileReport, RunEvent, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -503,6 +504,11 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_gap', relativePath, CodexRuntimeGapReportSchema);
         await checkCodexRuntimeGapReport(issues, paths, fileStore, fileName, relativePath);
       }
+      if (/^codex_runtime_sampling_report_v\d+\.json$/.test(fileName)) {
+        const relativePath = path.join('audit', fileName);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_sampling', relativePath, CodexRuntimeSamplingReportSchema);
+        await checkCodexRuntimeSamplingReport(issues, paths, fileStore, fileName, relativePath);
+      }
       if (/^codex_mission_retry_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), CodexMissionRetryReportSchema);
       }
@@ -876,6 +882,98 @@ async function checkCodexRuntimeGapReport(
       true
     ));
   }
+}
+
+async function checkCodexRuntimeSamplingReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  fileName: string,
+  relativePath: string
+): Promise<void> {
+  let report: CodexRuntimeSamplingReport;
+  try {
+    report = await fileStore.readJson(paths.auditArtifact(fileName), CodexRuntimeSamplingReportSchema);
+  } catch {
+    return;
+  }
+  if (report.sampleCount !== report.samples.length || report.successCount + report.failureCount !== report.sampleCount) {
+    issues.push(issue(
+      `codex_sampling_count_mismatch_${sanitizeIssueId(fileName)}`,
+      'error',
+      'codex_runtime_sampling',
+      relativePath,
+      'Runtime sampling report counts do not match sample records.',
+      'Regenerate codex sample-stage for this project.',
+      true
+    ));
+  }
+  for (const sample of report.samples) {
+    if (sample.stateMutated !== false) {
+      issues.push(issue(
+        `codex_sampling_state_mutated_${sanitizeIssueId(fileName)}_${sanitizeIssueId(sample.sampleId)}`,
+        'critical',
+        'codex_runtime_sampling',
+        relativePath,
+        `Runtime sample ${sample.sampleId} reports Story State mutation.`,
+        'Restore Story State and rerun sample-stage with read-only boundaries.',
+        true
+      ));
+    }
+    if (!(await fileStore.exists(paths.runManifest(sample.runId)))) {
+      issues.push(issue(
+        `codex_sampling_run_missing_${sanitizeIssueId(fileName)}_${sanitizeIssueId(sample.runId)}`,
+        'error',
+        'codex_runtime_sampling',
+        relativePath,
+        `Runtime sample ${sample.sampleId} references missing run ${sample.runId}.`,
+        'Restore the run manifest or regenerate the sampling report.',
+        true
+      ));
+    }
+    for (const artifactPath of sample.artifactPaths) {
+      if (isCanonicalSamplingForbiddenPath(artifactPath)) {
+        issues.push(issue(
+          `codex_sampling_canonical_path_${sanitizeIssueId(fileName)}_${sanitizeIssueId(sample.sampleId)}_${sanitizeIssueId(artifactPath)}`,
+          'error',
+          'codex_runtime_sampling',
+          artifactPath,
+          `Runtime sample ${sample.sampleId} references canonical artifact ${artifactPath}.`,
+          'Sampling artifacts must stay under audit/codex/samples or codex/runs.',
+          true
+        ));
+      }
+      if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) {
+        issues.push(issue(
+          `codex_sampling_artifact_missing_${sanitizeIssueId(fileName)}_${sanitizeIssueId(sample.sampleId)}_${sanitizeIssueId(artifactPath)}`,
+          'error',
+          'codex_runtime_sampling',
+          artifactPath,
+          `Runtime sample ${sample.sampleId} references missing artifact ${artifactPath}.`,
+          'Restore the sample artifact or regenerate codex sample-stage.',
+          true
+        ));
+      }
+    }
+    if (sample.failureReportPath !== undefined && !(await fileStore.exists(paths.projectArtifact(sample.failureReportPath)))) {
+      issues.push(issue(
+        `codex_sampling_failure_report_missing_${sanitizeIssueId(fileName)}_${sanitizeIssueId(sample.sampleId)}`,
+        'error',
+        'codex_runtime_sampling',
+        sample.failureReportPath,
+        `Runtime sample ${sample.sampleId} references a missing failure report.`,
+        'Restore the failure report or regenerate codex sample-stage.',
+        true
+      ));
+    }
+  }
+}
+
+function isCanonicalSamplingForbiddenPath(artifactPath: string): boolean {
+  const normalized = artifactPath.split(path.sep).join(path.posix.sep);
+  if (normalized === 'state/story_state.json') return true;
+  if (!normalized.startsWith('chapters/chapter_')) return false;
+  return /\/(mission\.json|ranking\.json|selected_plan\.md|scene_cards\.json|draft_v\d+\.md|diagnostics_v\d+\.json|revision_plan_v\d+\.json|final\.md|canon_patch\.json|commit_report\.json)$/.test(normalized);
 }
 
 async function checkCodexStageRuntimeProfile(

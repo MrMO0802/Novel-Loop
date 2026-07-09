@@ -292,6 +292,8 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^audit\/codex_chapter_regression_analysis_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_chapter_regression_analysis', phase: 'audit' };
   if (/^audit\/codex_runtime_gap_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_runtime_gap_report', phase: 'audit', schemaName: 'CodexRuntimeGapReportSchema' };
   if (/^audit\/codex_runtime_gap_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_runtime_gap_report', phase: 'audit' };
+  if (/^audit\/codex_runtime_sampling_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_runtime_sampling_report', phase: 'audit', schemaName: 'CodexRuntimeSamplingReportSchema' };
+  if (/^audit\/codex_runtime_sampling_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_runtime_sampling_report', phase: 'audit' };
   if (/^audit\/codex_mission_retry_report_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_mission_retry_report', phase: 'audit', schemaName: 'CodexMissionRetryReportSchema' };
   if (/^audit\/codex_mission_retry_report_v\d+\.md$/.test(relativePath)) return { artifactType: 'codex_mission_retry_report', phase: 'audit' };
   if (/^audit\/codex_mission_micro_benchmark_v\d+\.json$/.test(relativePath)) return { artifactType: 'codex_mission_micro_benchmark_report', phase: 'audit', schemaName: 'CodexMissionMicroBenchmarkReportSchema' };

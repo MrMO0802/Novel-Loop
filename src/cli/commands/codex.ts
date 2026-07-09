@@ -11,6 +11,7 @@ import { runCodexProfileComparison, runCodexRuntimeBenchmark } from '../../app/c
 import { generateCodexRuntimeGapReport } from '../../app/codexRuntimeGap.js';
 import { generateCodexRuntimeOptimizationReport } from '../../app/codexRuntimeOptimization.js';
 import { profileCodexRuntime } from '../../app/codexRuntimeProfiler.js';
+import { runCodexRuntimeStageSampling } from '../../app/codexRuntimeSampling.js';
 import { runCodexSingleChapterSmoke } from '../../app/codexSingleChapterSmoke.js';
 import { inspectProvider } from '../../providers/providerRegistry.js';
 import { AppError } from '../../utils/AppError.js';
@@ -57,6 +58,8 @@ interface CodexCommandOptions {
   useCache?: boolean;
   warmCache?: boolean;
   chapter?: string;
+  stage?: string;
+  samples?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -458,6 +461,58 @@ export function registerCodexCommand(program: Command): void {
       );
     });
 
+  addCodexPilotOptions(addBoundaryOptions(codex.command('sample-stage').description('[experimental/internal] Run targeted Codex runtime samples for one stage without canonical writes')))
+    .argument('<projectId>', 'project id')
+    .requiredOption('--chapter <number>', 'chapter number')
+    .requiredOption('--stage <stage>', 'stage: chapter_mission, scene_cards, write_scene, canon_patch_proposal, diagnostics, final_chapter')
+    .option('--samples <count>', 'sample count', '1')
+    .option('--timeout-ms <ms>', 'alias for codex timeout', '180000')
+    .option('--prompt-root <path>', 'prompt root directory', './prompts')
+    .action(async (projectId: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexRuntimeStageSampling({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        promptRoot: options.promptRoot ?? './prompts',
+        chapterNumber: parsePositiveInteger(requiredOption(options.chapter, 'chapter'), 'chapter'),
+        stage: parseSamplingStage(requiredOption(options.stage, 'stage')),
+        samples: parsePositiveInteger(options.samples ?? '1', 'samples'),
+        ...resolveCodexCliOptions({
+          ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+          codexProfile: options.codexProfile ?? 'clean',
+          codexJsonRetries: options.codexJsonRetries ?? '2',
+          ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+          codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+          codexTimeoutMs: options.codexTimeoutMs ?? options.timeoutMs ?? '180000'
+        })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          'codexRuntimeSampling: success',
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `chapterNumber: ${result.report.chapterNumber}`,
+          `stage: ${result.report.stage}`,
+          `promptId: ${result.report.promptId}`,
+          `sampleCount: ${result.report.sampleCount}`,
+          `successCount: ${result.report.successCount}`,
+          `failureCount: ${result.report.failureCount}`,
+          `medianDurationMs: ${result.report.medianDurationMs}`,
+          `p95DurationMs: ${result.report.p95DurationMs}`,
+          `retryRate: ${result.report.retryRate}`,
+          `schemaValidRate: ${result.report.schemaValidRate}`,
+          `stableBottleneck: ${String(result.report.interpretation.stableBottleneck)}`,
+          `likelyRuntimeVariance: ${String(result.report.interpretation.likelyRuntimeVariance)}`,
+          `recommendation: ${result.report.recommendation}`
+        ].join('\n') + '\n'
+      );
+      if (result.report.failureCount > 0) process.exitCode = 1;
+    });
+
   addCodexPilotOptions(addBoundaryOptions(codex.command('mission-benchmark').description('[pilot diagnostic] Run only Codex chapter mission generation and record retry/schema diagnostics')))
     .argument('<projectId>', 'project id')
     .requiredOption('--chapter <number>', 'chapter number')
@@ -642,6 +697,14 @@ function parseCodexFinalMode(value: string): 'codex' | 'local-assemble' | 'light
   const allowed = ['codex', 'local-assemble', 'light-polish'] as const;
   if (!allowed.includes(value as (typeof allowed)[number])) {
     throw new AppError('INVALID_CODEX_FINAL_MODE', `Invalid codex final mode: ${value}`, 2);
+  }
+  return value as (typeof allowed)[number];
+}
+
+function parseSamplingStage(value: string): 'chapter_mission' | 'scene_cards' | 'write_scene' | 'canon_patch_proposal' | 'diagnostics' | 'final_chapter' {
+  const allowed = ['chapter_mission', 'scene_cards', 'write_scene', 'canon_patch_proposal', 'diagnostics', 'final_chapter'] as const;
+  if (!allowed.includes(value as (typeof allowed)[number])) {
+    throw new AppError('INVALID_CODEX_SAMPLING_STAGE', `Invalid sampling stage: ${value}`, 2);
   }
   return value as (typeof allowed)[number];
 }

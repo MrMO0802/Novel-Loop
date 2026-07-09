@@ -49,9 +49,7 @@ export async function refreshArtifactIndex(input: ArtifactIndexInput, fileStore 
 
 export async function listArtifacts(input: ListArtifactsInput, fileStore = new FileStore()): Promise<ListArtifactsResult> {
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
-  const index = (await fileStore.exists(paths.artifactIndex()))
-    ? await fileStore.readJson(paths.artifactIndex(), ArtifactIndexSchema)
-    : await scanArtifactIndex(paths, fileStore);
+  const index = await scanArtifactIndex(paths, fileStore);
   const artifacts = index.artifacts.filter((artifact) => {
     if (input.chapterNumber !== undefined && artifact.chapterNumber !== input.chapterNumber) return false;
     if (input.type !== undefined && artifact.artifactType !== input.type) return false;
@@ -258,6 +256,10 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^codex_commit_report_v\d+\.json$/.test(fileName)) return { artifactType: 'commit_report', phase: 'commit', schemaName: 'CodexCommitReportSchema' };
   if (/^codex_commit_consistency_report_v\d+\.json$/.test(fileName)) return { artifactType: 'state_diff', phase: 'commit', schemaName: 'CodexCommitConsistencyReportSchema' };
   if (/^codex_patch_failure_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_patch_failure_report', phase: 'commit', schemaName: 'CodexPatchFailureReportSchema' };
+  if (/^codex_preview_completeness_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_preview_completeness_report', phase: 'commit', schemaName: 'CodexPreviewCompletenessReportSchema' };
+  if (/^codex_preview_completeness_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_preview_completeness_report', phase: 'commit' };
+  if (/^codex_preview_failure_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_preview_failure_report', phase: 'commit', schemaName: 'CodexPreviewFailureReportSchema' };
+  if (/^codex_preview_failure_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_preview_failure_report', phase: 'commit' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };
   if (/^codex_chapter_quality_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality' };
   if (fileName === 'chapter_summary_for_context.json') return { artifactType: 'codex_chapter_context_summary', phase: 'context', schemaName: 'ChapterContextSummarySchema' };

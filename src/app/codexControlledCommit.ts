@@ -3,6 +3,12 @@ import path from 'node:path';
 import { ChapterQueueStore } from './chapterQueue.js';
 import { generateChapterContextSummary } from './chapterContextSummary.js';
 import { evaluateCodexChapterQuality } from './codexChapterQuality.js';
+import {
+  CodexPreviewSubStageTracker,
+  classifyCodexPreviewCompleteness,
+  writeCodexPreviewCompletenessReport,
+  writeCodexPreviewFailureReport
+} from './codexPreviewDiagnostics.js';
 import { assembleFinalLocally } from './finalAssembly.js';
 import { recordCommitJournalPhase, startCommitJournal } from './commitJournal.js';
 import type { CommitJournalHandle } from './commitJournal.js';
@@ -36,6 +42,8 @@ import type {
   ChapterQueueStage,
   CodexCommitConsistencyReport,
   CodexCommitReport,
+  CodexErrorType,
+  CodexPreviewSubStageName,
   CommitReport,
   ConflictReport,
   DiagnosticsReport,
@@ -150,7 +158,10 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
   const generatedArtifacts: string[] = [];
   const reusedArtifacts: string[] = [];
   let activeStage: ChapterQueueStage = 'diagnostics';
+  let activePreviewSubStage: CodexPreviewSubStageName = 'draft_ready_check';
   let commitJournal: CommitJournalHandle | undefined;
+  let previewTracker: CodexPreviewSubStageTracker | undefined;
+  let previewFailureArtifactsWritten = false;
 
   await ensureCodexPrerequisites(paths, fileStore, input.chapterNumber);
   const storyStateBefore = await fileStore.readJson(paths.storyState(), StoryStateSchema);
@@ -183,8 +194,14 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       codexProfile: input.codexProfile ?? 'default'
     }
   });
+  previewTracker = new CodexPreviewSubStageTracker(runLogger, runId, input.chapterNumber);
 
   try {
+    await previewTracker.start('draft_ready_check');
+    await previewTracker.complete('draft_ready_check', [
+      relativeChapterArtifact(input.chapterNumber, 'mission.json'),
+      relativeChapterArtifact(input.chapterNumber, 'draft_v1.md')
+    ]);
     const config = await fileStore.readJson(paths.config(), ConfigSchema);
     const reusablePreview =
       input.confirmCodexCommit === true && input.rerunCodexOnConfirm !== true
@@ -192,6 +209,8 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
         : undefined;
     const reusedPreviewArtifacts = reusablePreview !== undefined;
 
+    activePreviewSubStage = 'diagnostics';
+    await previewTracker.start('diagnostics');
     const diagnostics = reusablePreview?.diagnostics ?? (await generateCodexDiagnostics(input, paths, fileStore, runId));
     recordArtifact(artifacts, diagnostics.artifact, reusedPreviewArtifacts ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, diagnostics.artifact, reusedPreviewArtifacts ? 'reused' : 'generated');
@@ -199,6 +218,7 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
 
     const gate = qualityGate(diagnostics.value, config.qualityThreshold);
     if (!gate.passed) {
+      await previewTracker.fail('diagnostics', 'CODEX_PREVIEW_DIAGNOSTICS_HARD_FAIL', `Diagnostics quality gate failed: ${gate.failedHardChecks.join(', ') || 'soft scores'}`, [diagnostics.artifact]);
       const failed = await queueStore.markNeedsHumanReview(input.chapterNumber, 'diagnostics', runId);
       await runLogger.recordStateMutation(runId, {
         mutationType: 'codex_controlled_commit',
@@ -210,6 +230,28 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
         applied: false,
         blockedReason: `Diagnostics quality gate failed: ${gate.failedHardChecks.join(', ') || 'soft scores'}`
       });
+      const previewFailure = await writePreviewFailureArtifacts({
+        paths,
+        fileStore,
+        runLogger,
+        input,
+        runId,
+        previewTracker,
+        storyStateBefore,
+        errorCode: 'CODEX_PREVIEW_DIAGNOSTICS_HARD_FAIL',
+        failedSubStage: 'diagnostics',
+        lastSuccessfulSubStage: 'draft_ready_check',
+        error: new AppError('CODEX_PREVIEW_DIAGNOSTICS_HARD_FAIL', `Diagnostics quality gate failed: ${gate.failedHardChecks.join(', ') || 'soft scores'}`)
+      });
+      previewFailureArtifactsWritten = true;
+      for (const artifact of previewFailure.artifacts) {
+        recordArtifact(artifacts, artifact, generatedArtifacts);
+        await runLogger.recordArtifact(runId, artifact, {
+          action: 'generated',
+          stage: 'commit',
+          provenanceNote: 'codex-text controlled preview failure diagnostics'
+        });
+      }
       await runLogger.endRun(runId, 'human_review_required');
       return {
         projectId: paths.projectId,
@@ -227,13 +269,19 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
         commitStatus: 'needs_human_review'
       };
     }
+    await previewTracker.complete('diagnostics', [diagnostics.artifact]);
 
     activeStage = 'revision';
+    activePreviewSubStage = 'revision_plan';
+    await previewTracker.start('revision_plan');
     const revisionPlan = reusablePreview?.revisionPlan ?? (await generateCodexRevisionPlan(input, paths, fileStore, runId, diagnostics.value));
     recordArtifact(artifacts, revisionPlan.artifact, reusedPreviewArtifacts ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, revisionPlan.artifact, reusedPreviewArtifacts ? 'reused' : 'generated');
+    await previewTracker.complete('revision_plan', [revisionPlan.artifact]);
 
     activeStage = 'final';
+    activePreviewSubStage = 'final_generation_or_assembly';
+    await previewTracker.start('final_generation_or_assembly');
     const final =
       reusablePreview === undefined
         ? await generateFinal(input, paths, fileStore, runId, revisionPlan.value)
@@ -257,17 +305,35 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       });
     }
     await queueStore.markStageComplete(input.chapterNumber, 'final_ready', 'final', runId);
+    await previewTracker.complete('final_generation_or_assembly', [final.artifact]);
 
     activeStage = 'canon_patch';
+    activePreviewSubStage = 'canon_patch_proposal';
+    await previewTracker.start('canon_patch_proposal');
     const patchResult = reusablePreview?.patchResult ?? (await generateCodexCanonPatchProposal(input, paths, fileStore, runId, storyStateBefore));
     recordArtifact(artifacts, patchResult.artifact, reusedPreviewArtifacts ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, patchResult.artifact, reusedPreviewArtifacts ? 'reused' : 'generated');
+    await previewTracker.complete('canon_patch_proposal', [patchResult.artifact]);
     if (patchResult.normalizedArtifact !== undefined) {
+      activePreviewSubStage = 'patch_normalization';
+      await previewTracker.start('patch_normalization');
       recordArtifact(artifacts, patchResult.normalizedArtifact, reusedPreviewArtifacts ? reusedArtifacts : generatedArtifacts);
       await runLogger.recordArtifact(runId, patchResult.normalizedArtifact, reusedPreviewArtifacts ? 'reused' : 'generated');
+      await previewTracker.complete('patch_normalization', [patchResult.normalizedArtifact]);
     }
 
+    activePreviewSubStage = 'schema_validation';
+    await previewTracker.start('schema_validation');
+    await previewTracker.complete('schema_validation', [patchResult.normalizedArtifact ?? patchResult.artifact]);
+
+    activePreviewSubStage = 'conflict_check';
+    await previewTracker.start('conflict_check');
     const conflicts = checkPatchConflicts(storyStateBefore, patchResult.value);
+    if (conflicts.hard.length === 0) {
+      await previewTracker.complete('conflict_check', [patchResult.normalizedArtifact ?? patchResult.artifact]);
+    }
+    activePreviewSubStage = 'state_diff_preview';
+    await previewTracker.start('state_diff_preview');
     const diff =
       reusablePreview?.diff ??
       (await writePatchPreviewDiff(
@@ -289,6 +355,7 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       await runLogger.recordArtifact(runId, diff.relativeMarkdownPath, reusedPreviewArtifacts ? 'reused' : 'generated');
     }
     await queueStore.markStageComplete(input.chapterNumber, 'patch_extracted', 'canon_patch', runId);
+    await previewTracker.complete('state_diff_preview', [diff.relativeJsonPath, ...(diff.relativeMarkdownPath === undefined ? [] : [diff.relativeMarkdownPath])]);
 
     const consistencyReportPath =
       reusablePreview?.consistencyReportPath ??
@@ -305,6 +372,7 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     }
 
     if (conflicts.hard.length > 0) {
+      await previewTracker.fail('conflict_check', 'CODEX_PREVIEW_CONFLICT_DETECTED', `Codex patch proposal conflict: ${conflicts.hard.join('; ')}`, [patchResult.artifact]);
       const conflictReport = await writeCodexConflictReport(paths, fileStore, input.chapterNumber, storyStateBefore, patchResult.value, patchResult.artifact);
       recordArtifact(artifacts, conflictReport.path, generatedArtifacts);
       await runLogger.recordArtifact(runId, conflictReport.path, 'generated');
@@ -321,6 +389,28 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
         stateDiffPath: diff.relativeJsonPath,
         blockedReason: conflicts.hard.join('; ')
       });
+      const previewFailure = await writePreviewFailureArtifacts({
+        paths,
+        fileStore,
+        runLogger,
+        input,
+        runId,
+        previewTracker,
+        storyStateBefore,
+        errorCode: 'CODEX_PREVIEW_CONFLICT_DETECTED',
+        failedSubStage: 'conflict_check',
+        lastSuccessfulSubStage: 'schema_validation',
+        error: new AppError('CODEX_PREVIEW_CONFLICT_DETECTED', conflicts.hard.join('; '))
+      });
+      previewFailureArtifactsWritten = true;
+      for (const artifact of previewFailure.artifacts) {
+        recordArtifact(artifacts, artifact, generatedArtifacts);
+        await runLogger.recordArtifact(runId, artifact, {
+          action: 'generated',
+          stage: 'commit',
+          provenanceNote: 'codex-text controlled preview conflict diagnostics'
+        });
+      }
       await runLogger.endRun(runId, 'blocked');
       throw new AppError('CANON_PATCH_CONFLICT', `Codex patch proposal has ${conflicts.hard.length} blocking conflict(s).`, 2, {
         chapterNumber: input.chapterNumber,
@@ -330,6 +420,8 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
       });
     }
 
+    activePreviewSubStage = 'quality_report';
+    await previewTracker.start('quality_report');
     const quality = await evaluateCodexChapterQuality(
       {
         projectId: paths.projectId,
@@ -344,7 +436,9 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     );
     recordArtifact(artifacts, quality.reportPath, generatedArtifacts);
     recordArtifact(artifacts, quality.markdownPath, generatedArtifacts);
+    await previewTracker.complete('quality_report', [quality.reportPath, quality.markdownPath]);
     if (quality.blocking) {
+      await previewTracker.fail('quality_report', 'CODEX_PREVIEW_INCOMPLETE', `Codex chapter quality blocked commit: ${quality.criticalIssues.join('; ')}`, [quality.reportPath]);
       await queueStore.markFailed(input.chapterNumber, 'commit', runId, new AppError('CODEX_CHAPTER_QUALITY_BLOCKED', quality.criticalIssues.join('; '), 2));
       await runLogger.recordStateMutation(runId, {
         mutationType: 'codex_controlled_commit',
@@ -367,6 +461,31 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
     }
 
     if (input.confirmCodexCommit !== true) {
+      activePreviewSubStage = 'completeness_check';
+      await previewTracker.start('completeness_check');
+      await previewTracker.complete('completeness_check');
+      const stateAfterPreview = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+      const completeness = await writeCodexPreviewCompletenessReport({
+        paths,
+        fileStore,
+        runLogger,
+        chapterNumber: input.chapterNumber,
+        previewRunId: runId,
+        previewStage: 'controlled_commit_preview',
+        subStageTimeline: previewTracker.items(),
+        latestCommittedChapterBefore: storyStateBefore.latestCommittedChapter,
+        latestCommittedChapterAfter: stateAfterPreview.latestCommittedChapter,
+        storyStateHashBefore: hashJson(storyStateBefore),
+        storyStateHashAfter: hashJson(stateAfterPreview)
+      });
+      for (const artifact of [completeness.reportPath, completeness.markdownPath]) {
+        recordArtifact(artifacts, artifact, generatedArtifacts);
+        await runLogger.recordArtifact(runId, artifact, {
+          action: 'generated',
+          stage: 'commit',
+          provenanceNote: 'codex-text controlled preview completeness report'
+        });
+      }
       await runLogger.recordStateMutation(runId, {
         mutationType: 'codex_controlled_commit',
         chapterNumber: input.chapterNumber,
@@ -646,6 +765,37 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
         // Preserve the original failure if provenance recording itself is unavailable.
       }
     }
+    if (previewTracker !== undefined && !previewFailureArtifactsWritten) {
+      try {
+        const previewErrorCode = previewCodeForError(error, activePreviewSubStage);
+        await previewTracker.fail(activePreviewSubStage, previewErrorCode, getErrorMessage(error));
+        const lastSuccessfulSubStage = lastSuccessfulPreviewSubStage(previewTracker.items());
+        const previewFailure = await writePreviewFailureArtifacts({
+          paths,
+          fileStore,
+          runLogger,
+          input,
+          runId,
+          previewTracker,
+        storyStateBefore,
+        errorCode: previewErrorCode,
+        failedSubStage: activePreviewSubStage,
+        ...(lastSuccessfulSubStage === undefined ? {} : { lastSuccessfulSubStage }),
+        error
+      });
+        previewFailureArtifactsWritten = true;
+        for (const artifact of previewFailure.artifacts) {
+          recordArtifact(artifacts, artifact, generatedArtifacts);
+          await runLogger.recordArtifact(runId, artifact, {
+            action: 'generated',
+            stage: 'commit',
+            provenanceNote: 'codex-text controlled preview failure diagnostics'
+          });
+        }
+      } catch {
+        // Preserve the original controlled commit failure if diagnostics writing fails.
+      }
+    }
     if (!(error instanceof AppError && error.code === 'CANON_PATCH_CONFLICT')) {
       await queueStore.markFailed(input.chapterNumber, activeStage, runId, error);
     }
@@ -747,6 +897,83 @@ async function readFailureMessages(paths: ProjectPaths, fileStore: FileStore, re
   } catch {
     return [];
   }
+}
+
+async function writePreviewFailureArtifacts(input: {
+  paths: ProjectPaths;
+  fileStore: FileStore;
+  runLogger: RunLogger;
+  input: CodexControlledCommitInput;
+  runId: string;
+  previewTracker: CodexPreviewSubStageTracker;
+  storyStateBefore: StoryState;
+  errorCode: CodexErrorType;
+  failedSubStage: CodexPreviewSubStageName;
+  lastSuccessfulSubStage?: CodexPreviewSubStageName;
+  error: unknown;
+}): Promise<{ artifacts: string[]; completenessReportPath: string; failureReportPath: string; errorCode: CodexErrorType }> {
+  await input.previewTracker.start('completeness_check');
+  await input.previewTracker.complete('completeness_check');
+  const stateAfter = await input.fileStore.readJson(input.paths.storyState(), StoryStateSchema);
+  const completeness = await writeCodexPreviewCompletenessReport({
+    paths: input.paths,
+    fileStore: input.fileStore,
+    runLogger: input.runLogger,
+    chapterNumber: input.input.chapterNumber,
+    previewRunId: input.runId,
+    previewStage: 'controlled_commit_preview',
+    subStageTimeline: input.previewTracker.items(),
+    latestCommittedChapterBefore: input.storyStateBefore.latestCommittedChapter,
+    latestCommittedChapterAfter: stateAfter.latestCommittedChapter,
+    storyStateHashBefore: hashJson(input.storyStateBefore),
+    storyStateHashAfter: hashJson(stateAfter)
+  });
+  const primaryErrorCode = input.errorCode ?? classifyCodexPreviewCompleteness(completeness.report);
+  const failure = await writeCodexPreviewFailureReport({
+    paths: input.paths,
+    fileStore: input.fileStore,
+    runLogger: input.runLogger,
+    chapterNumber: input.input.chapterNumber,
+    previewRunId: input.runId,
+    previewStage: 'controlled_commit_preview',
+    subStageTimeline: input.previewTracker.items(),
+    latestCommittedChapterBefore: input.storyStateBefore.latestCommittedChapter,
+    latestCommittedChapterAfter: stateAfter.latestCommittedChapter,
+    storyStateHashBefore: hashJson(input.storyStateBefore),
+    storyStateHashAfter: hashJson(stateAfter),
+    completenessReportPath: completeness.reportPath,
+    completenessReport: completeness.report,
+    errorCode: primaryErrorCode,
+    failedSubStage: input.failedSubStage,
+    ...(input.lastSuccessfulSubStage === undefined ? {} : { lastSuccessfulSubStage: input.lastSuccessfulSubStage }),
+    error: input.error
+  });
+  return {
+    artifacts: [completeness.reportPath, completeness.markdownPath, failure.reportPath, failure.markdownPath],
+    completenessReportPath: completeness.reportPath,
+    failureReportPath: failure.reportPath,
+    errorCode: primaryErrorCode
+  };
+}
+
+function previewCodeForError(error: unknown, activePreviewSubStage: CodexPreviewSubStageName): CodexErrorType {
+  const code = errorCode(error);
+  if (code.startsWith('CODEX_PREVIEW_')) return code as CodexErrorType;
+  if (code === 'CODEX_EXEC_FAILED' || code === 'CODEX_TIMEOUT' || code === 'CODEX_NO_FINAL_MESSAGE') return code as CodexErrorType;
+  if (code === 'CANON_PATCH_CONFLICT') return 'CODEX_PREVIEW_CONFLICT_DETECTED';
+  if (/SCHEMA|VALIDATION|CANON_PATCH_SOURCE_MISMATCH/.test(code)) return 'CODEX_PREVIEW_PATCH_SCHEMA_INVALID';
+  if (activePreviewSubStage === 'conflict_check') return 'CODEX_PREVIEW_CONFLICT_DETECTED';
+  if (activePreviewSubStage === 'state_diff_preview') return 'CODEX_PREVIEW_STATE_DIFF_MISSING';
+  if (activePreviewSubStage === 'final_generation_or_assembly') return 'CODEX_PREVIEW_FINAL_MISSING';
+  if (activePreviewSubStage === 'canon_patch_proposal') return 'CODEX_PREVIEW_PATCH_PROPOSAL_MISSING';
+  if (activePreviewSubStage === 'patch_normalization') return 'CODEX_PREVIEW_PATCH_NORMALIZATION_FAILED';
+  if (activePreviewSubStage === 'schema_validation') return 'CODEX_PREVIEW_PATCH_SCHEMA_INVALID';
+  if (activePreviewSubStage === 'diagnostics') return 'CODEX_PREVIEW_DIAGNOSTICS_MISSING';
+  return 'CODEX_PREVIEW_INCOMPLETE';
+}
+
+function lastSuccessfulPreviewSubStage(timeline: Array<{ name: CodexPreviewSubStageName; status: string }>): CodexPreviewSubStageName | undefined {
+  return timeline.filter((item) => item.status === 'completed').map((item) => item.name).at(-1);
 }
 
 function errorCode(error: unknown): string {

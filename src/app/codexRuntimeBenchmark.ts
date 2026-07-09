@@ -9,6 +9,11 @@ import { planGlobal } from './planGlobal.js';
 import { runChapterUntilDraft } from './chapterDrafting.js';
 import { runChapterDryRun } from './chapterPlanning.js';
 import { runChapterFullProduction } from './chapterPipeline.js';
+import {
+  classifyCodexPreviewCompleteness,
+  readLatestCodexPreviewCompletenessReport,
+  readLatestCodexPreviewFailureReport
+} from './codexPreviewDiagnostics.js';
 import { generateCodexRealOptimizationBenchmarkReport } from './codexRealOptimizationBenchmark.js';
 import { hashJson } from '../logging/RunLogger.js';
 import type { CodexProfile } from '../providers/providerTypes.js';
@@ -29,7 +34,7 @@ import type {
 } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
-import { getErrorMessage } from '../utils/AppError.js';
+import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
 
 export interface RunCodexRuntimeBenchmarkInput {
@@ -425,7 +430,13 @@ async function ensureChapterPreview(context: StageContext, chapterNumber: number
       result.stateDiffPath === undefined ||
       result.qualityReportPath === undefined
     ) {
-      throw new Error(`Codex preview did not produce a complete controlled-commit preview for chapter ${chapterNumber}.`);
+      const completeness = await readLatestCodexPreviewCompletenessReport(context.paths, context.fileStore, chapterNumber);
+      const errorCode = completeness === undefined ? 'CODEX_PREVIEW_INCOMPLETE' : classifyCodexPreviewCompleteness(completeness.report);
+      throw new AppError(errorCode, `Codex preview did not produce a complete controlled-commit preview for chapter ${chapterNumber}.`, 2, {
+        chapterNumber,
+        stage: 'commit',
+        reason: completeness === undefined ? 'preview completeness report missing' : `previewCompletenessReportPath=${completeness.relativePath}`
+      });
     }
     return { runId: result.runId, artifacts: result.artifacts };
   });
@@ -526,6 +537,7 @@ async function runMeasuredStage(
     const latestAfter = (await readStoryStateOrZero(context.paths, context.fileStore)).latestCommittedChapter;
     const metrics = await collectRunMetrics(context.paths, context.fileStore, expectedRunId, 0);
     const errorCode = classifyRuntimeError(error);
+    const previewContext = await readPreviewFailureContext(context.paths, context.fileStore, stageName);
     const failure = await writeRuntimeFailureReport(context.paths, context.fileStore, {
       level,
       stageName,
@@ -533,7 +545,8 @@ async function runMeasuredStage(
       message: getErrorMessage(error),
       elapsedMs: Date.now() - startedAtMs,
       outputBytes: metrics.outputBytes,
-      suggestedRetryCommand: suggestedRetryCommand(context.projectId, level, true)
+      suggestedRetryCommand: suggestedRetryCommand(context.projectId, level, true),
+      ...previewContext
     });
     context.stages.push({
       level,
@@ -608,6 +621,8 @@ async function writeRuntimeFailureReport(
     elapsedMs: number;
     outputBytes: number;
     suggestedRetryCommand: string;
+    previewCompletenessReportPath?: string;
+    previewFailureReportPath?: string;
   }
 ): Promise<{ relativePath: string }> {
   await fileStore.ensureDir(paths.auditDir());
@@ -625,6 +640,8 @@ async function writeRuntimeFailureReport(
       outputBytes: input.outputBytes,
       stderrExcerptRedacted: redactMessage(input.message).slice(0, 4000),
       storyStateMutated: false,
+      ...(input.previewCompletenessReportPath === undefined ? {} : { previewCompletenessReportPath: input.previewCompletenessReportPath }),
+      ...(input.previewFailureReportPath === undefined ? {} : { previewFailureReportPath: input.previewFailureReportPath }),
       suggestedRetryCommand: input.suggestedRetryCommand,
       generatedAt: new Date().toISOString(),
       redacted: true
@@ -739,6 +756,7 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
 function classifyRuntimeError(error: unknown): CodexErrorType {
   const code = typeof error === 'object' && error !== null && 'code' in error && typeof (error as { code?: unknown }).code === 'string' ? (error as { code: string }).code : undefined;
   const message = getErrorMessage(error);
+  if (code !== undefined && code.startsWith('CODEX_PREVIEW_')) return code as CodexErrorType;
   if (code === 'CODEX_TIMEOUT' || /timeout|timed out/i.test(message)) return 'CODEX_TIMEOUT';
   if (code === 'CODEX_BINARY_NOT_FOUND') return 'CODEX_BINARY_MISSING';
   if (code === 'CODEX_OUTPUT_MISSING') return 'CODEX_NO_FINAL_MESSAGE';
@@ -747,6 +765,24 @@ function classifyRuntimeError(error: unknown): CodexErrorType {
   if (/prompt.*large/i.test(message)) return 'CODEX_PROMPT_TOO_LARGE';
   if (/repair/i.test(message)) return 'CODEX_REPAIR_LOOP_EXHAUSTED';
   return 'CODEX_EXEC_FAILED';
+}
+
+async function readPreviewFailureContext(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  stageName: string
+): Promise<{ previewCompletenessReportPath?: string; previewFailureReportPath?: string }> {
+  const match = /^chapter-(\d{3})-preview$/.exec(stageName);
+  if (match === null) return {};
+  const chapterNumber = Number.parseInt(match[1]!, 10);
+  const [completeness, failure] = await Promise.all([
+    readLatestCodexPreviewCompletenessReport(paths, fileStore, chapterNumber),
+    readLatestCodexPreviewFailureReport(paths, fileStore, chapterNumber)
+  ]);
+  return {
+    ...(completeness === undefined ? {} : { previewCompletenessReportPath: completeness.relativePath }),
+    ...(failure === undefined ? {} : { previewFailureReportPath: failure.relativePath })
+  };
 }
 
 function suggestedRetryCommand(projectId: string, level: Exclude<CodexBenchmarkLevel, 'all'>, resume: boolean): string {

@@ -336,6 +336,61 @@ export class RunLogger {
     return this.appendEvent(runId, eventType, input);
   }
 
+  async recordStageStatus(
+    runId: string,
+    input: {
+      stage: string;
+      status: 'started' | 'completed' | 'failed';
+      chapterNumber?: number;
+      payload?: unknown;
+      relatedArtifactPaths?: string[];
+      severity?: 'info' | 'warning' | 'error' | 'critical';
+    }
+  ): Promise<RunManifestV2> {
+    const manifest = await this.readManifestV2(runId);
+    const timestamp = this.now().toISOString();
+    const existing = manifest.stages.find((stage) => stage.name === input.stage);
+    if (existing === undefined) {
+      manifest.stages.push({
+        stage: input.stage,
+        name: input.stage,
+        status: input.status,
+        startedAt: timestamp,
+        ...(input.status === 'started' ? {} : { endedAt: timestamp }),
+        ...(input.chapterNumber === undefined ? {} : { chapterNumber: input.chapterNumber })
+      });
+    } else {
+      existing.status = input.status;
+      if (existing.startedAt === undefined) existing.startedAt = timestamp;
+      if (input.status !== 'started') {
+        existing.endedAt = timestamp;
+        existing.durationMs = Math.max(0, Date.parse(timestamp) - Date.parse(existing.startedAt));
+      }
+    }
+    updateSummary(manifest);
+    await this.writeManifest(manifest);
+    const eventType =
+      input.status === 'started'
+        ? input.stage.startsWith('preview.')
+          ? 'CODEX_PREVIEW_SUBSTAGE_STARTED'
+          : 'STAGE_STARTED'
+        : input.status === 'failed'
+          ? input.stage.startsWith('preview.')
+            ? 'CODEX_PREVIEW_SUBSTAGE_FAILED'
+            : 'STAGE_FAILED'
+          : input.stage.startsWith('preview.')
+            ? 'CODEX_PREVIEW_SUBSTAGE_COMPLETED'
+            : 'STAGE_COMPLETED';
+    await this.appendEvent(runId, eventType, {
+      stage: input.stage,
+      ...(input.chapterNumber === undefined ? {} : { chapterNumber: input.chapterNumber }),
+      payload: input.payload ?? { stage: input.stage, status: input.status },
+      relatedArtifactPaths: input.relatedArtifactPaths ?? [],
+      severity: input.severity ?? (input.status === 'failed' ? 'error' : 'info')
+    });
+    return manifest;
+  }
+
   async recordSnapshot(
     runId: string,
     snapshot: { snapshotId: string; path: string; reason?: string | undefined; sourceChapter?: number | undefined },
@@ -674,6 +729,10 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactLineage
   if (/^codex_commit_report_v\d+\.json$/.test(fileName)) return { artifactType: 'commit_report', phase: 'commit', schemaName: 'CodexCommitReportSchema' };
   if (/^codex_commit_consistency_report_v\d+\.json$/.test(fileName)) return { artifactType: 'state_diff', phase: 'commit', schemaName: 'CodexCommitConsistencyReportSchema' };
   if (/^codex_patch_failure_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_patch_failure_report', phase: 'commit', schemaName: 'CodexPatchFailureReportSchema' };
+  if (/^codex_preview_completeness_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_preview_completeness_report', phase: 'commit', schemaName: 'CodexPreviewCompletenessReportSchema' };
+  if (/^codex_preview_completeness_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_preview_completeness_report', phase: 'commit' };
+  if (/^codex_preview_failure_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_preview_failure_report', phase: 'commit', schemaName: 'CodexPreviewFailureReportSchema' };
+  if (/^codex_preview_failure_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_preview_failure_report', phase: 'commit' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };
   if (/^codex_chapter_quality_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality' };
   if (fileName === 'chapter_summary_for_context.json') return { artifactType: 'codex_chapter_context_summary', phase: 'context', schemaName: 'ChapterContextSummarySchema' };

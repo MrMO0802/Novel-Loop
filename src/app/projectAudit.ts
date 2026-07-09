@@ -18,6 +18,8 @@ import {
   CodexCrossChapterDriftReportSchema,
   CodexMultiChapterPilotReportSchema,
   CodexPatchFailureReportSchema,
+  CodexPreviewCompletenessReportSchema,
+  CodexPreviewFailureReportSchema,
   CodexRuntimeBenchmarkReportSchema,
   CodexRuntimeFailureReportSchema,
   CodexRuntimeGapReportSchema,
@@ -544,6 +546,14 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^codex_patch_failure_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_failure', relativePath, CodexPatchFailureReportSchema);
       }
+      if (/^codex_preview_completeness_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'codex_preview', relativePath, CodexPreviewCompletenessReportSchema);
+        await checkCodexPreviewCompletenessReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^codex_preview_failure_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'codex_preview', relativePath, CodexPreviewFailureReportSchema);
+        await checkCodexPreviewFailureReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
       if (/^codex_commit_consistency_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_commit', relativePath, CodexCommitConsistencyReportSchema);
       }
@@ -581,6 +591,122 @@ async function checkBuildBibleCacheReports(issues: AuditIssue[], paths: ProjectP
       // checkJson already recorded schema problems.
     }
   }
+}
+
+async function checkCodexPreviewCompletenessReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexPreviewCompletenessReportSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `codex_preview_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'codex_preview',
+        relativePath,
+        'Codex preview completeness report indicates Story State mutation.',
+        'Restore Story State from the pre-preview snapshot or rerun from a clean state.',
+        true
+      ));
+    }
+    if (!report.complete && report.failureReportPath === undefined) {
+      const failure = await findLatestChapterArtifact(paths, fileStore, report.chapterNumber, 'codex_preview_failure_report');
+      if (failure === undefined) {
+        issues.push(issue(
+          `codex_preview_failure_report_missing_ch${report.chapterNumber}_${sanitizeIssueId(relativePath)}`,
+          'error',
+          'codex_preview',
+          relativePath,
+          'Incomplete Codex preview has no preview failure report.',
+          'Rerun the codex preview to regenerate failure diagnostics.',
+          true
+        ));
+      }
+    }
+    const eventLog = paths.runEvents(report.previewRunId);
+    if (await fileStore.exists(eventLog)) {
+      const eventsText = await fileStore.readText(eventLog);
+      if (!eventsText.includes('CODEX_PREVIEW_SUBSTAGE_')) {
+        issues.push(issue(
+          `codex_preview_legacy_events_${sanitizeIssueId(report.previewRunId)}`,
+          'warning',
+          'codex_preview',
+          relativePath,
+          'Codex preview report exists but the run event log has no preview sub-stage events.',
+          'This may be a legacy run; rerun preview for full M27.9 sub-stage timeline.',
+          false
+        ));
+      }
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkCodexPreviewFailureReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexPreviewFailureReportSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `codex_preview_failure_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'codex_preview',
+        relativePath,
+        'Codex preview failure report indicates Story State mutation.',
+        'Restore Story State from the pre-preview snapshot before retrying.',
+        true
+      ));
+    }
+    const queue = await fileStore.readJson(paths.chapterQueue(), ChapterQueueSchema);
+    const chapter = queue.chapters.find((item) => item.chapterNumber === report.chapterNumber);
+    if (chapter?.status === 'committed') {
+      issues.push(issue(
+        `codex_preview_failure_marked_committed_ch${report.chapterNumber}`,
+        'critical',
+        'codex_preview',
+        relativePath,
+        'Chapter queue is committed even though a Codex preview failure report exists.',
+        'Inspect queue provenance and restore the chapter to a non-committed failure/review status.',
+        true
+      ));
+    }
+    if (!(await fileStore.exists(paths.projectArtifact(report.previewCompletenessReportPath)))) {
+      issues.push(issue(
+        `codex_preview_completeness_missing_for_failure_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'codex_preview',
+        relativePath,
+        'Codex preview failure report references a missing completeness report.',
+        'Restore the completeness report or rerun preview diagnostics.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function findLatestChapterArtifact(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterNumber: number,
+  baseName: string
+): Promise<string | undefined> {
+  const chapterDir = paths.chapterDir(chapterNumber);
+  if (!(await fileStore.exists(chapterDir))) return undefined;
+  const pattern = new RegExp(`^${baseName}_v\\d+\\.json$`);
+  const entry = (await fileStore.list(chapterDir)).filter((fileName) => pattern.test(fileName)).at(-1);
+  return entry === undefined ? undefined : path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, entry);
 }
 
 async function checkCodexContextManifests(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {

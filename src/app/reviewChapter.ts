@@ -4,6 +4,8 @@ import type { z } from 'zod';
 import {
   ChapterQueueSchema,
   CommitReportSchema,
+  CodexPreviewCompletenessReportSchema,
+  CodexPreviewFailureReportSchema,
   ConflictRepairReportSchema,
   ConflictReportSchema,
   DiagnosticsReportSchema,
@@ -76,6 +78,9 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'conflict_repair_report', ConflictRepairReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'commit_report', CommitReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'failure_report', FailureReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_preview_completeness_report', CodexPreviewCompletenessReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_preview_failure_report', CodexPreviewFailureReportSchema);
+    await appendPreviewCompleteness(lines, paths, fileStore, input.chapterNumber);
   }
 
   if (input.state === true) {
@@ -162,6 +167,17 @@ function suggestNextCommand(projectId: string, chapterNumber: number, status: st
     return `corepack pnpm novel-loop recommit ${projectId} ${chapterNumber} --from-final --confirm`;
   }
   return `corepack pnpm novel-loop review ${projectId} ${chapterNumber} --diagnostics --state --artifacts`;
+}
+
+async function appendPreviewCompleteness(lines: string[], paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<void> {
+  const reports = await readReports(paths, fileStore, chapterNumber, 'codex_preview_completeness_report', CodexPreviewCompletenessReportSchema);
+  const latest = reports.at(-1);
+  if (latest === undefined) return;
+  lines.push('', 'Preview completeness');
+  lines.push(`- path: ${latest.path}`);
+  lines.push(`- complete: ${String(latest.value.complete)}`);
+  lines.push(`- blockingReasons: ${latest.value.blockingReasons.join(', ') || 'none'}`);
+  lines.push(`- suggestedRetryCommand: ${latest.value.suggestedRetryCommand}`);
 }
 
 function highestSeverity(severities: ConflictSeverity[]): ConflictSeverity {

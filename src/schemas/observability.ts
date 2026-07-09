@@ -49,6 +49,8 @@ export const ArtifactTypeSchema = z.enum([
   'codex_parsed_json',
   'codex_context_manifest',
   'codex_patch_failure_report',
+  'codex_preview_completeness_report',
+  'codex_preview_failure_report',
   'codex_chapter_quality_report',
   'codex_chapter_context_summary',
   'final_assembly_report',

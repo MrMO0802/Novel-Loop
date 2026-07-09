@@ -7,6 +7,18 @@ export const CodexErrorTypeSchema = z.enum([
   'CODEX_NOT_LOGGED_IN',
   'CODEX_DOCTOR_UNHEALTHY_NON_BLOCKING',
   'CODEX_EXEC_FAILED',
+  'CODEX_PREVIEW_INCOMPLETE',
+  'CODEX_PREVIEW_FINAL_MISSING',
+  'CODEX_PREVIEW_DIAGNOSTICS_MISSING',
+  'CODEX_PREVIEW_DIAGNOSTICS_HARD_FAIL',
+  'CODEX_PREVIEW_PATCH_PROPOSAL_MISSING',
+  'CODEX_PREVIEW_PATCH_SCHEMA_INVALID',
+  'CODEX_PREVIEW_PATCH_NORMALIZATION_FAILED',
+  'CODEX_PREVIEW_CONFLICT_DETECTED',
+  'CODEX_PREVIEW_STATE_DIFF_MISSING',
+  'CODEX_PREVIEW_STATE_HASH_MISSING',
+  'CODEX_PREVIEW_RUN_MANIFEST_MISSING',
+  'CODEX_PREVIEW_EVENT_LOG_MISSING',
   'CODEX_HUNG',
   'CODEX_OUTPUT_MISSING',
   'CODEX_NO_FINAL_MESSAGE',
@@ -83,6 +95,99 @@ export const CodexPatchFailureReportSchema = z.object({
   suggestedRetryCommand: z.string(),
   generatedAt: z.string(),
   storyStateMutated: z.literal(false),
+  redacted: z.literal(true)
+});
+
+export const CodexPreviewArtifactCheckSchema = z.object({
+  artifactType: z.string(),
+  expectedPath: z.string(),
+  exists: z.boolean(),
+  schemaValid: z.boolean(),
+  reason: z.string(),
+  requiredForPreview: z.boolean(),
+  blocking: z.boolean()
+});
+
+export const CodexPreviewSubStageNameSchema = z.enum([
+  'draft_ready_check',
+  'diagnostics',
+  'revision_plan',
+  'final_generation_or_assembly',
+  'quality_report',
+  'canon_patch_proposal',
+  'patch_normalization',
+  'schema_validation',
+  'conflict_check',
+  'state_diff_preview',
+  'completeness_check'
+]);
+
+export const CodexPreviewSubStageTimelineItemSchema = z.object({
+  name: CodexPreviewSubStageNameSchema,
+  status: z.enum(['started', 'completed', 'failed', 'skipped']),
+  startedAt: z.string().optional(),
+  endedAt: z.string().optional(),
+  durationMs: z.number().int().nonnegative().optional(),
+  artifactPaths: z.array(z.string()).default([]),
+  errorCode: CodexErrorTypeSchema.optional(),
+  message: z.string().optional()
+});
+
+export const CodexPreviewCompletenessReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  generatedAt: z.string(),
+  provider: z.literal('codex-text'),
+  previewRunId: z.string(),
+  previewStage: z.string(),
+  complete: z.boolean(),
+  missingArtifacts: z.array(CodexPreviewArtifactCheckSchema),
+  invalidArtifacts: z.array(CodexPreviewArtifactCheckSchema),
+  blockingReasons: z.array(CodexErrorTypeSchema),
+  warnings: z.array(z.string()),
+  suggestedRetryCommand: z.string(),
+  suggestedInspectCommands: z.array(z.string()),
+  subStageTimeline: z.array(CodexPreviewSubStageTimelineItemSchema).default([]),
+  queueStatusBefore: z.string().optional(),
+  queueStatusAfter: z.string().optional(),
+  latestCommittedChapterBefore: z.number().int().nonnegative(),
+  latestCommittedChapterAfter: z.number().int().nonnegative(),
+  storyStateMutated: z.boolean(),
+  previewStateHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  previewStateHashRecorded: z.boolean(),
+  conflictCheckPassed: z.boolean().optional(),
+  failureReportPath: z.string().optional(),
+  redacted: z.literal(true)
+});
+
+export const CodexPreviewFailureReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  runId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  provider: z.literal('codex-text'),
+  generatedAt: z.string(),
+  failureStage: z.string(),
+  errorCode: CodexErrorTypeSchema,
+  previewCompletenessReportPath: z.string(),
+  failedSubStage: CodexPreviewSubStageNameSchema.optional(),
+  lastSuccessfulSubStage: CodexPreviewSubStageNameSchema.optional(),
+  rawOutputPaths: z.array(z.string()),
+  finalOutputPath: z.string().optional(),
+  parsedOutputPaths: z.array(z.string()),
+  schemaErrorPaths: z.array(z.string()),
+  normalizationErrorPaths: z.array(z.string()),
+  conflictReportPath: z.string().optional(),
+  stateDiffPath: z.string().optional(),
+  queueStatusBefore: z.string().optional(),
+  queueStatusAfter: z.string().optional(),
+  latestCommittedChapterBefore: z.number().int().nonnegative(),
+  latestCommittedChapterAfter: z.number().int().nonnegative(),
+  storyStateMutated: z.boolean(),
+  suggestedRetryCommand: z.string(),
+  suggestedResumeCommand: z.string(),
+  suggestedInspectCommands: z.array(z.string()),
   redacted: z.literal(true)
 });
 
@@ -399,6 +504,8 @@ export const CodexRuntimeFailureReportSchema = z.object({
   outputBytes: z.number().int().nonnegative(),
   stderrExcerptRedacted: z.string().default(''),
   storyStateMutated: z.literal(false),
+  previewCompletenessReportPath: z.string().optional(),
+  previewFailureReportPath: z.string().optional(),
   suggestedRetryCommand: z.string(),
   generatedAt: z.string(),
   redacted: z.literal(true)
@@ -1522,6 +1629,11 @@ export type CodexErrorType = z.infer<typeof CodexErrorTypeSchema>;
 export type CodexJsonFailureAttempt = z.infer<typeof CodexJsonFailureAttemptSchema>;
 export type CodexJsonFailureReport = z.infer<typeof CodexJsonFailureReportSchema>;
 export type CodexPatchFailureReport = z.infer<typeof CodexPatchFailureReportSchema>;
+export type CodexPreviewArtifactCheck = z.infer<typeof CodexPreviewArtifactCheckSchema>;
+export type CodexPreviewCompletenessReport = z.infer<typeof CodexPreviewCompletenessReportSchema>;
+export type CodexPreviewFailureReport = z.infer<typeof CodexPreviewFailureReportSchema>;
+export type CodexPreviewSubStageName = z.infer<typeof CodexPreviewSubStageNameSchema>;
+export type CodexPreviewSubStageTimelineItem = z.infer<typeof CodexPreviewSubStageTimelineItemSchema>;
 export type CodexChapterQualityReport = z.infer<typeof CodexChapterQualityReportSchema>;
 export type CodexMultiChapterPilotChapter = z.infer<typeof CodexMultiChapterPilotChapterSchema>;
 export type CodexMultiChapterPilotReport = z.infer<typeof CodexMultiChapterPilotReportSchema>;

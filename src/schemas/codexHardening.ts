@@ -1306,7 +1306,20 @@ const CodexRuntimeGapRunSchema = z.object({
   unattributedGapMs: z.number().int().nonnegative(),
   gapPercent: z.number(),
   status: z.string(),
-  suspectedSource: CodexRuntimeGapSourceSchema
+  suspectedSource: CodexRuntimeGapSourceSchema,
+  processStartupMs: z.number().int().nonnegative().default(0),
+  timeToFirstEventMs: z.number().int().nonnegative().default(0),
+  modelResponseMs: z.number().int().nonnegative().default(0),
+  finalMessageToExitMs: z.number().int().nonnegative().default(0),
+  artifactWriteMs: z.number().int().nonnegative().default(0),
+  parseMs: z.number().int().nonnegative().default(0),
+  schemaValidationMs: z.number().int().nonnegative().default(0),
+  measuredCodexBoundaryMs: z.number().int().nonnegative().default(0),
+  measuredLocalProcessingMs: z.number().int().nonnegative().default(0),
+  unexplainedMsAfterPrecision: z.number().int().nonnegative().default(0),
+  timingOverlapDetected: z.boolean().default(false),
+  timingOverlapWarning: z.string().default(''),
+  overlapExplanation: z.string().default('')
 });
 
 const CodexRuntimeGapStageSchema = z.object({
@@ -1348,6 +1361,19 @@ export const CodexRuntimeGapReportSchema = z.object({
   gapByStage: z.array(CodexRuntimeGapStageSchema),
   suspectedGapSources: z.array(CodexRuntimeGapSuspectedSourceSchema),
   recommendations: z.array(CodexRuntimeGapRecommendationSchema),
+  processStartupMs: z.number().int().nonnegative().default(0),
+  timeToFirstEventMs: z.number().int().nonnegative().default(0),
+  modelResponseMs: z.number().int().nonnegative().default(0),
+  finalMessageToExitMs: z.number().int().nonnegative().default(0),
+  artifactWriteMs: z.number().int().nonnegative().default(0),
+  parseMs: z.number().int().nonnegative().default(0),
+  schemaValidationMs: z.number().int().nonnegative().default(0),
+  measuredCodexBoundaryMs: z.number().int().nonnegative().default(0),
+  measuredLocalProcessingMs: z.number().int().nonnegative().default(0),
+  unexplainedMsAfterPrecision: z.number().int().nonnegative().default(0),
+  timingOverlapDetected: z.boolean().default(false),
+  timingOverlapWarning: z.string().default(''),
+  overlapExplanation: z.string().default(''),
   storyStateMutated: z.literal(false)
 });
 

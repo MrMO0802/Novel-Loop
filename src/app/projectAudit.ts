@@ -37,7 +37,7 @@ import {
   RunManifestSchema,
   StoryStateSchema
 } from '../schemas/index.js';
-import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexStageRuntimeProfileReport, RunManifest } from '../schemas/index.js';
+import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexStageRuntimeProfileReport, RunEvent, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -265,13 +265,15 @@ async function checkRunEvents(
     return;
   }
   const events = (await fileStore.readText(eventPath)).trim().split('\n').filter(Boolean);
+  const parsedEvents: RunEvent[] = [];
   for (const [index, line] of events.entries()) {
     try {
-      RunEventSchema.parse(JSON.parse(line));
+      parsedEvents.push(RunEventSchema.parse(JSON.parse(line)));
     } catch (error) {
       issues.push(issue(`events_invalid_${runId}_${index + 1}`, 'error', 'event_log', relativeEventPath, `Event ${index + 1} failed schema validation: ${String(error)}`, 'Repair or regenerate events.ndjson.', true));
     }
   }
+  checkCodexEventTiming(issues, relativeEventPath, manifest, parsedEvents);
   const expectedSummary = {
     generatedArtifactCount: manifest.artifacts.filter((artifact) => artifact.action === 'generated').length,
     reusedArtifactCount: manifest.artifacts.filter((artifact) => artifact.action === 'reused').length,
@@ -287,6 +289,103 @@ async function checkRunEvents(
       issues.push(issue(`summary_mismatch_${runId}_${key}`, 'error', 'event_log', relativeEventPath, `Run summary ${key}=${manifest.summary[key as keyof typeof expectedSummary]} does not match manifest aggregate ${value}.`, 'Rebuild the run manifest from event log or restore a valid manifest.', true));
     }
   }
+}
+
+const CODEX_PRECISION_EVENTS = [
+  'CODEX_PROCESS_SPAWN_STARTED',
+  'CODEX_PROCESS_SPAWNED',
+  'CODEX_STDIN_WRITTEN',
+  'CODEX_FIRST_JSONL_EVENT',
+  'CODEX_FINAL_MESSAGE_SEEN',
+  'CODEX_PROCESS_EXITED',
+  'CODEX_ARTIFACT_WRITE_STARTED',
+  'CODEX_ARTIFACT_WRITE_COMPLETED',
+  'CODEX_PARSE_STARTED',
+  'CODEX_PARSE_COMPLETED',
+  'CODEX_SCHEMA_VALIDATE_STARTED',
+  'CODEX_SCHEMA_VALIDATE_COMPLETED'
+] as const;
+
+function checkCodexEventTiming(issues: AuditIssue[], relativeEventPath: string, manifest: Extract<RunManifest, { schemaVersion: '2' }>, events: RunEvent[]): void {
+  if (!isCodexManifest(manifest)) return;
+  const precisionEvents = events.filter((event) => CODEX_PRECISION_EVENTS.includes(event.eventType as (typeof CODEX_PRECISION_EVENTS)[number]));
+  if (precisionEvents.length === 0) {
+    issues.push(issue(
+      `codex_event_timing_missing_${sanitizeIssueId(manifest.runId)}`,
+      'warning',
+      'codex_event_timing',
+      relativeEventPath,
+      'Legacy Codex run has no M27.8A precision timing events.',
+      'Regenerate this run with the M27.8A Codex boundary to capture process and JSONL timing.',
+      false
+    ));
+    return;
+  }
+  const missingEvents = CODEX_PRECISION_EVENTS.filter((eventType) => !events.some((event) => event.eventType === eventType));
+  if (missingEvents.length > 0) {
+    issues.push(issue(
+      `codex_event_timing_partial_${sanitizeIssueId(manifest.runId)}`,
+      'warning',
+      'codex_event_timing',
+      relativeEventPath,
+      `Codex precision timing is partial; missing ${missingEvents.join(', ')}.`,
+      'Regenerate this run if precise runtime attribution is required.',
+      false
+    ));
+  }
+  checkOrderedEvent(issues, relativeEventPath, manifest.runId, events, 'CODEX_PROCESS_SPAWN_STARTED', 'CODEX_PROCESS_SPAWNED');
+  checkOrderedEvent(issues, relativeEventPath, manifest.runId, events, 'CODEX_PROCESS_SPAWNED', 'CODEX_STDIN_WRITTEN');
+  checkOrderedEvent(issues, relativeEventPath, manifest.runId, events, 'CODEX_STDIN_WRITTEN', 'CODEX_FIRST_JSONL_EVENT');
+  checkOrderedEvent(issues, relativeEventPath, manifest.runId, events, 'CODEX_FIRST_JSONL_EVENT', 'CODEX_FINAL_MESSAGE_SEEN');
+  checkOrderedEvent(issues, relativeEventPath, manifest.runId, events, 'CODEX_FINAL_MESSAGE_SEEN', 'CODEX_PROCESS_EXITED');
+  checkPairedEvents(issues, relativeEventPath, manifest.runId, events, 'CODEX_ARTIFACT_WRITE_STARTED', 'CODEX_ARTIFACT_WRITE_COMPLETED');
+  checkPairedEvents(issues, relativeEventPath, manifest.runId, events, 'CODEX_PARSE_STARTED', 'CODEX_PARSE_COMPLETED');
+  checkPairedEvents(issues, relativeEventPath, manifest.runId, events, 'CODEX_SCHEMA_VALIDATE_STARTED', 'CODEX_SCHEMA_VALIDATE_COMPLETED');
+}
+
+function isCodexManifest(manifest: Extract<RunManifest, { schemaVersion: '2' }>): boolean {
+  if ((manifest.provider ?? '').includes('codex')) return true;
+  if (manifest.command.toLowerCase().includes('codex')) return true;
+  return manifest.promptCalls.some((call) => call.provider.includes('codex') || call.promptId.toLowerCase().includes('codex'));
+}
+
+function checkOrderedEvent(issues: AuditIssue[], relativeEventPath: string, runId: string, events: RunEvent[], beforeType: RunEvent['eventType'], afterType: RunEvent['eventType']): void {
+  const before = firstEventMs(events, beforeType);
+  const after = firstEventMs(events, afterType);
+  if (before === undefined || after === undefined || after >= before) return;
+  issues.push(issue(
+    `codex_event_order_${sanitizeIssueId(runId)}_${beforeType.toLowerCase()}_${afterType.toLowerCase()}`,
+    'error',
+    'codex_event_timing',
+    relativeEventPath,
+    `${beforeType} must be <= ${afterType}.`,
+    'Regenerate events.ndjson from a valid Codex run or repair event timestamps.',
+    true
+  ));
+}
+
+function checkPairedEvents(issues: AuditIssue[], relativeEventPath: string, runId: string, events: RunEvent[], startType: RunEvent['eventType'], completedType: RunEvent['eventType']): void {
+  const starts = events.filter((event) => event.eventType === startType).map((event) => Date.parse(event.timestamp)).filter(Number.isFinite);
+  const completed = events.filter((event) => event.eventType === completedType).map((event) => Date.parse(event.timestamp)).filter(Number.isFinite);
+  for (let index = 0; index < Math.min(starts.length, completed.length); index += 1) {
+    if (completed[index]! >= starts[index]!) continue;
+    issues.push(issue(
+      `codex_event_duration_${sanitizeIssueId(runId)}_${startType.toLowerCase()}_${index + 1}`,
+      'error',
+      'codex_event_timing',
+      relativeEventPath,
+      `${completedType} must be >= ${startType}; duration cannot be negative.`,
+      'Regenerate events.ndjson from a valid Codex run or repair event timestamps.',
+      true
+    ));
+  }
+}
+
+function firstEventMs(events: RunEvent[], eventType: RunEvent['eventType']): number | undefined {
+  const event = events.find((candidate) => candidate.eventType === eventType);
+  if (event === undefined) return undefined;
+  const parsed = Date.parse(event.timestamp);
+  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 async function checkRunLineage(

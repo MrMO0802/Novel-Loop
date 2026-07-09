@@ -13,6 +13,7 @@ import type {
   CodexRuntimeBenchmarkStage,
   CodexStageRuntimeProfileReport,
   RunManifest,
+  RunEvent,
   RunManifestV2
 } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
@@ -42,6 +43,32 @@ interface RunGapDraft {
   status: string;
   suspectedSource: CodexRuntimeGapReport['gapByRun'][number]['suspectedSource'];
   stage: string;
+  processStartupMs: number;
+  timeToFirstEventMs: number;
+  modelResponseMs: number;
+  finalMessageToExitMs: number;
+  artifactWriteMs: number;
+  parseMs: number;
+  schemaValidationMs: number;
+  measuredCodexBoundaryMs: number;
+  measuredLocalProcessingMs: number;
+  unexplainedMsAfterPrecision: number;
+  timingOverlapDetected: boolean;
+  timingOverlapWarning: string;
+  overlapExplanation: string;
+}
+
+interface TimingMetrics {
+  processStartupMs: number;
+  timeToFirstEventMs: number;
+  modelResponseMs: number;
+  finalMessageToExitMs: number;
+  artifactWriteMs: number;
+  parseMs: number;
+  schemaValidationMs: number;
+  measuredCodexBoundaryMs: number;
+  measuredLocalProcessingMs: number;
+  missingPrecisionTiming: boolean;
 }
 
 const DEFAULT_PROJECTS_ROOT = './projects';
@@ -52,7 +79,7 @@ export async function generateCodexRuntimeGapReport(input: GenerateCodexRuntimeG
   const storyStateBefore = await readOptionalText(paths.storyState(), fileStore);
   const benchmark = await readBestBenchmark(paths, fileStore);
   const profile = await readLatestProfile(paths, fileStore);
-  const runGaps = buildRunGaps(await readRunManifests(paths, fileStore));
+  const runGaps = await buildRunGaps(paths, fileStore, await readRunManifests(paths, fileStore));
   const gapByRun = runGaps
     .map(({ stage, ...run }) => {
       void stage;
@@ -65,6 +92,7 @@ export async function generateCodexRuntimeGapReport(input: GenerateCodexRuntimeG
   const totalPromptCallMs = profile?.report.businessRuntimeView.totalDurationMs ?? runGaps.reduce((sum, run) => sum + run.promptCallMs, 0);
   const totalLocalStageMs = runGaps.reduce((sum, run) => sum + run.localStageMs, 0);
   const totalUnattributedGapMs = Math.max(0, totalWallClockMs - totalPromptCallMs - totalLocalStageMs);
+  const precisionTotals = precisionTotalsFor(runGaps);
   const suspectedGapSources = buildSuspectedSources(runGaps);
   const artifact = await nextAuditArtifact(paths, fileStore, 'codex_runtime_gap_report');
   const report = await fileStore.writeJson(
@@ -84,6 +112,7 @@ export async function generateCodexRuntimeGapReport(input: GenerateCodexRuntimeG
       gapByStage,
       suspectedGapSources,
       recommendations: buildRecommendations(totalUnattributedGapMs, totalWallClockMs, suspectedGapSources),
+      ...precisionTotals,
       storyStateMutated: false
     },
     CodexRuntimeGapReportSchema
@@ -157,15 +186,23 @@ function isV2(manifest: RunManifest): manifest is RunManifestV2 {
   return 'schemaVersion' in manifest && manifest.schemaVersion === '2';
 }
 
-function buildRunGaps(manifests: RunManifestV2[]): RunGapDraft[] {
-  return manifests.map((manifest) => {
+async function buildRunGaps(paths: ProjectPaths, fileStore: FileStore, manifests: RunManifestV2[]): Promise<RunGapDraft[]> {
+  const runGaps: RunGapDraft[] = [];
+  for (const manifest of manifests) {
+    const events = await readRunEvents(paths, fileStore, manifest.runId);
+    const timing = timingMetricsFor(events);
     const wallClockMs = Math.round(manifest.durationMs ?? durationFromDates(manifest.startedAt, manifest.endedAt) ?? 0);
     const promptCallMs = Math.round(manifest.promptCalls.reduce((sum, call) => sum + call.latencyMs, 0));
     const localStageMs = Math.round(manifest.stages.reduce((sum, stage) => sum + (stage.durationMs ?? durationFromDates(stage.startedAt, stage.endedAt) ?? 0), 0));
     const eventDurationMs = wallClockMs;
     const unattributedGapMs = Math.max(0, wallClockMs - promptCallMs - localStageMs);
     const chapterNumber = manifest.resolvedContext.chapterNumber ?? manifest.resolvedContext.resolvedChapterNumber;
-    return {
+    const precisionApplicable = isCodexManifestForTiming(manifest);
+    const measuredLocalProcessingMs = timing.measuredLocalProcessingMs;
+    const hasPrecisionTiming = precisionApplicable && !timing.missingPrecisionTiming;
+    const unexplainedMsAfterPrecision = hasPrecisionTiming ? Math.max(0, wallClockMs - timing.measuredCodexBoundaryMs - measuredLocalProcessingMs) : 0;
+    const timingOverlapDetected = precisionApplicable && promptCallMs + localStageMs > wallClockMs;
+    runGaps.push({
       runId: manifest.runId,
       command: manifest.command,
       ...(chapterNumber === undefined ? {} : { chapterNumber }),
@@ -176,10 +213,116 @@ function buildRunGaps(manifests: RunManifestV2[]): RunGapDraft[] {
       unattributedGapMs,
       gapPercent: percent(unattributedGapMs, wallClockMs),
       status: manifest.status,
-      suspectedSource: suspectedSourceForRun(manifest, unattributedGapMs, wallClockMs),
-      stage: primaryStageForRun(manifest)
-    };
-  });
+      suspectedSource: precisionApplicable && timing.missingPrecisionTiming ? 'event_timing_missing' : suspectedSourceForRun(manifest, unattributedGapMs, wallClockMs),
+      stage: primaryStageForRun(manifest),
+      processStartupMs: timing.processStartupMs,
+      timeToFirstEventMs: timing.timeToFirstEventMs,
+      modelResponseMs: timing.modelResponseMs,
+      finalMessageToExitMs: timing.finalMessageToExitMs,
+      artifactWriteMs: timing.artifactWriteMs,
+      parseMs: timing.parseMs,
+      schemaValidationMs: timing.schemaValidationMs,
+      measuredCodexBoundaryMs: timing.measuredCodexBoundaryMs,
+      measuredLocalProcessingMs,
+      unexplainedMsAfterPrecision,
+      timingOverlapDetected,
+      timingOverlapWarning: timingOverlapDetected ? 'promptCallMs and localStageMs overlap wall-clock and must not be summed as total runtime.' : '',
+      overlapExplanation: timingOverlapDetected ? 'Run stage timings and prompt-call timings are nested within wall-clock; v2 precision metrics use Codex boundary events separately.' : ''
+    });
+  }
+  return runGaps;
+}
+
+function isCodexManifestForTiming(manifest: RunManifestV2): boolean {
+  if ((manifest.provider ?? '').includes('codex')) return true;
+  if (manifest.command.toLowerCase().includes('codex')) return true;
+  return manifest.promptCalls.some((call) => call.provider.includes('codex') || call.promptId.toLowerCase().includes('codex'));
+}
+
+async function readRunEvents(paths: ProjectPaths, fileStore: FileStore, runId: string): Promise<RunEvent[]> {
+  const eventPath = paths.runEvents(runId);
+  if (!(await fileStore.exists(eventPath))) return [];
+  return (await fileStore.readText(eventPath))
+    .trim()
+    .split('\n')
+    .filter(Boolean)
+    .flatMap((line) => {
+      try {
+        return [JSON.parse(line) as RunEvent];
+      } catch {
+        return [];
+      }
+    });
+}
+
+function timingMetricsFor(events: RunEvent[]): TimingMetrics {
+  const at = (eventType: string): number | undefined => {
+    const event = events.find((candidate) => candidate.eventType === eventType);
+    if (event === undefined) return undefined;
+    const parsed = Date.parse(event.timestamp);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  const diff = (start: string, end: string): number => {
+    const startMs = at(start);
+    const endMs = at(end);
+    if (startMs === undefined || endMs === undefined || endMs < startMs) return 0;
+    return endMs - startMs;
+  };
+  const processStartupMs = diff('CODEX_PROCESS_SPAWN_STARTED', 'CODEX_PROCESS_SPAWNED');
+  const timeToFirstEventMs = diff('CODEX_STDIN_WRITTEN', 'CODEX_FIRST_JSONL_EVENT');
+  const modelResponseMs = diff('CODEX_FIRST_JSONL_EVENT', 'CODEX_FINAL_MESSAGE_SEEN');
+  const finalMessageToExitMs = diff('CODEX_FINAL_MESSAGE_SEEN', 'CODEX_PROCESS_EXITED');
+  const artifactWriteMs = pairedDuration(events, 'CODEX_ARTIFACT_WRITE_STARTED', 'CODEX_ARTIFACT_WRITE_COMPLETED');
+  const parseMs = pairedDuration(events, 'CODEX_PARSE_STARTED', 'CODEX_PARSE_COMPLETED');
+  const schemaValidationMs = pairedDuration(events, 'CODEX_SCHEMA_VALIDATE_STARTED', 'CODEX_SCHEMA_VALIDATE_COMPLETED');
+  const measuredCodexBoundaryMs = diff('CODEX_PROCESS_SPAWN_STARTED', 'CODEX_PROCESS_EXITED');
+  const measuredLocalProcessingMs = artifactWriteMs + parseMs + schemaValidationMs;
+  const timingEventCount = events.filter((event) => event.eventType.startsWith('CODEX_')).length;
+  return {
+    processStartupMs,
+    timeToFirstEventMs,
+    modelResponseMs,
+    finalMessageToExitMs,
+    artifactWriteMs,
+    parseMs,
+    schemaValidationMs,
+    measuredCodexBoundaryMs,
+    measuredLocalProcessingMs,
+    missingPrecisionTiming: timingEventCount === 0 || measuredCodexBoundaryMs === 0
+  };
+}
+
+function pairedDuration(events: RunEvent[], startType: string, completedType: string): number {
+  const starts = events.filter((event) => event.eventType === startType).map((event) => Date.parse(event.timestamp)).filter(Number.isFinite);
+  const completed = events.filter((event) => event.eventType === completedType).map((event) => Date.parse(event.timestamp)).filter(Number.isFinite);
+  let total = 0;
+  for (let index = 0; index < Math.min(starts.length, completed.length); index += 1) {
+    total += Math.max(0, completed[index]! - starts[index]!);
+  }
+  return total;
+}
+
+function precisionTotalsFor(runs: RunGapDraft[]) {
+  const timingOverlapDetected = runs.some((run) => run.timingOverlapDetected);
+  return {
+    processStartupMs: sumRunMetric(runs, 'processStartupMs'),
+    timeToFirstEventMs: sumRunMetric(runs, 'timeToFirstEventMs'),
+    modelResponseMs: sumRunMetric(runs, 'modelResponseMs'),
+    finalMessageToExitMs: sumRunMetric(runs, 'finalMessageToExitMs'),
+    artifactWriteMs: sumRunMetric(runs, 'artifactWriteMs'),
+    parseMs: sumRunMetric(runs, 'parseMs'),
+    schemaValidationMs: sumRunMetric(runs, 'schemaValidationMs'),
+    measuredCodexBoundaryMs: sumRunMetric(runs, 'measuredCodexBoundaryMs'),
+    measuredLocalProcessingMs: sumRunMetric(runs, 'measuredLocalProcessingMs'),
+    unexplainedMsAfterPrecision: sumRunMetric(runs, 'unexplainedMsAfterPrecision'),
+    timingOverlapDetected,
+    timingOverlapWarning: timingOverlapDetected ? 'promptCallMs and localStageMs overlap wall-clock and must not be summed as total runtime.' : '',
+    overlapExplanation: timingOverlapDetected ? 'Run stage timings and prompt-call timings are nested within wall-clock; v2 precision metrics use Codex boundary events separately.' : ''
+  };
+}
+
+function sumRunMetric(runs: RunGapDraft[], key: keyof Pick<RunGapDraft, 'processStartupMs' | 'timeToFirstEventMs' | 'modelResponseMs' | 'finalMessageToExitMs' | 'artifactWriteMs' | 'parseMs' | 'schemaValidationMs' | 'measuredCodexBoundaryMs' | 'measuredLocalProcessingMs' | 'unexplainedMsAfterPrecision'>): number {
+  return runs.reduce((sum, run) => sum + run[key], 0);
 }
 
 function buildChapterGaps(
@@ -359,6 +502,11 @@ function renderMarkdown(report: CodexRuntimeGapReport): string {
     `totalPromptCallMs: ${report.totalPromptCallMs}`,
     `totalLocalStageMs: ${report.totalLocalStageMs}`,
     `totalUnattributedGapMs: ${report.totalUnattributedGapMs}`,
+    `measuredCodexBoundaryMs: ${report.measuredCodexBoundaryMs}`,
+    `measuredLocalProcessingMs: ${report.measuredLocalProcessingMs}`,
+    `unexplainedMsAfterPrecision: ${report.unexplainedMsAfterPrecision}`,
+    `timingOverlapDetected: ${String(report.timingOverlapDetected)}`,
+    report.timingOverlapWarning.length > 0 ? `timingOverlapWarning: ${report.timingOverlapWarning}` : '',
     '',
     '## Gap By Chapter',
     ...report.gapByChapter.map((chapter) => `- chapter ${chapter.chapterNumber}: gap=${chapter.unattributedGapMs}ms (${chapter.gapPercent}%)`),

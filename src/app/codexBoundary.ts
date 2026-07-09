@@ -9,7 +9,7 @@ import { JsonResponseParser } from '../llm/JsonResponseParser.js';
 import { RunLogger } from '../logging/RunLogger.js';
 import { shouldRedactPromptArtifacts } from '../logging/PromptArtifactWriter.js';
 import { CodexSafetyPolicySchema } from '../schemas/index.js';
-import type { CodexSafetyPolicy } from '../schemas/index.js';
+import type { CodexSafetyPolicy, RunEventType } from '../schemas/index.js';
 import type { CodexProfile } from '../providers/providerTypes.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -96,6 +96,13 @@ interface CodexCommandResult {
   stderr: string;
   exitCode: number;
   timedOut?: boolean;
+  timingEvents?: CodexTimingEvent[];
+}
+
+interface CodexTimingEvent {
+  eventType: RunEventType;
+  timestamp: string;
+  payload?: Record<string, unknown>;
 }
 
 interface ExecPromptInput extends CodexBoundaryInput {
@@ -212,9 +219,31 @@ export async function execCodexJsonPrompt(input: CodexExecPromptJsonInput): Prom
   });
   const paths = projectPaths(input);
   const finalText = await fileStore.readText(paths.projectArtifact(result.finalOutputPath));
+  await result.runLogger.recordEvent(result.runId, 'CODEX_PARSE_STARTED', {
+    stage: 'codex',
+    relatedArtifactPaths: [result.finalOutputPath],
+    payload: { artifactKind: 'final_output' }
+  });
   const parsedJson = new JsonResponseParser().parse(finalText);
+  await result.runLogger.recordEvent(result.runId, 'CODEX_PARSE_COMPLETED', {
+    stage: 'codex',
+    relatedArtifactPaths: [result.finalOutputPath],
+    payload: { artifactKind: 'final_output' }
+  });
+  await result.runLogger.recordEvent(result.runId, 'CODEX_SCHEMA_VALIDATE_STARTED', {
+    stage: 'codex',
+    relatedArtifactPaths: [result.finalOutputPath],
+    payload: { schemaPath: safePromptPath(input.schemaPath) }
+  });
   validateJsonSchemaSubset(parsedJson, schema);
+  await result.runLogger.recordEvent(result.runId, 'CODEX_SCHEMA_VALIDATE_COMPLETED', {
+    stage: 'codex',
+    relatedArtifactPaths: [result.finalOutputPath],
+    payload: { schemaPath: safePromptPath(input.schemaPath) }
+  });
+  await recordArtifactWriteEvent(result.runLogger, result.runId, 'started', result.parsedJsonPath, 'parsed_output');
   await fileStore.writeJson(paths.projectArtifact(result.parsedJsonPath), parsedJson, UnknownJsonSchema);
+  await recordArtifactWriteEvent(result.runLogger, result.runId, 'completed', result.parsedJsonPath, 'parsed_output');
   await result.runLogger.recordArtifact(result.runId, result.parsedJsonPath, {
     action: 'generated',
     derivedFrom: [result.finalOutputPath],
@@ -291,10 +320,13 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
   });
   try {
     const commandResult = await runCodexExecCommand(binaryPath, args, input, input.promptText);
+    await recordTimingEvents(runLogger, runId, commandResult.timingEvents ?? []);
     const endedAt = new Date().toISOString();
     const rawResponseRedacted = redactSensitive(commandResult.stdout);
     const stderrExcerpt = redactSensitive(commandResult.stderr).slice(0, 4000);
+    await recordArtifactWriteEvent(runLogger, runId, 'started', rawOutputPath, 'raw_output');
     await fileStore.writeText(paths.projectArtifact(rawOutputPath), rawResponseRedacted);
+    await recordArtifactWriteEvent(runLogger, runId, 'completed', rawOutputPath, 'raw_output');
     if (commandResult.timedOut === true) {
       throw new AppError('CODEX_TIMEOUT', `Codex CLI command timed out after ${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}ms: ${stderrExcerpt || 'no stderr'}`, 1, {
         reason: `timeoutMs=${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}`
@@ -312,10 +344,14 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
           reason: stderrExcerpt || 'missing final output'
         });
       }
+      await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
       await fileStore.writeText(paths.projectArtifact(finalOutputPath), extracted);
+      await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
     } else {
       const finalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
+      await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
       await fileStore.writeText(paths.projectArtifact(finalOutputPath), finalText.trim().length === 0 ? extractFinalMessage(commandResult.stdout) : redactSensitive(finalText));
+      await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
     }
     const finalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
     const latencyMs = Math.max(0, Date.now() - startedAtMs);
@@ -498,6 +534,11 @@ function buildCodexExecArgs(input: { outputFile: string; schemaPath?: string; pr
 
 async function runCodexExecCommand(binaryPath: string, args: string[], input: CodexBoundaryInput, stdinText: string): Promise<CodexCommandResult> {
   return new Promise((resolve) => {
+    const timingEvents: CodexTimingEvent[] = [];
+    const record = (eventType: RunEventType, payload: Record<string, unknown> = {}) => {
+      timingEvents.push({ eventType, timestamp: new Date().toISOString(), payload });
+    };
+    record('CODEX_PROCESS_SPAWN_STARTED', { sandbox: CODEX_SANDBOX });
     const child = execFile(
       binaryPath,
       args,
@@ -510,16 +551,95 @@ async function runCodexExecCommand(binaryPath: string, args: string[], input: Co
       (error, stdout, stderr) => {
         const childError = error as (Error & { code?: unknown; signal?: unknown; killed?: unknown }) | null;
         const timedOut = childError !== null && (childError.signal === 'SIGTERM' || childError.killed === true || /timed out|timeout/i.test(childError.message));
+        record('CODEX_PROCESS_EXITED', {
+          exitCode: error === null ? 0 : typeof childError?.code === 'number' ? childError.code : 1,
+          timedOut
+        });
         resolve({
           stdout: typeof stdout === 'string' ? stdout : String(stdout ?? ''),
           stderr: typeof stderr === 'string' ? stderr : String(stderr ?? childError?.message ?? ''),
           exitCode: error === null ? 0 : typeof childError?.code === 'number' ? childError.code : 1,
-          ...(timedOut ? { timedOut: true } : {})
+          ...(timedOut ? { timedOut: true } : {}),
+          timingEvents
         });
       }
     );
-    child.stdin?.end(stdinText);
+    record('CODEX_PROCESS_SPAWNED', {
+      pid: child.pid ?? 'unknown',
+      sandbox: CODEX_SANDBOX
+    });
+    let stdoutBuffer = '';
+    let firstJsonlSeen = false;
+    let finalMessageSeen = false;
+    child.stdout?.on('data', (chunk: Buffer | string) => {
+      stdoutBuffer += typeof chunk === 'string' ? chunk : chunk.toString('utf8');
+      const lines = stdoutBuffer.split(/\r?\n/);
+      stdoutBuffer = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (trimmed.length === 0) continue;
+        const parsed = parseJsonlEvent(trimmed);
+        if (parsed === undefined) continue;
+        if (!firstJsonlSeen) {
+          firstJsonlSeen = true;
+          record('CODEX_FIRST_JSONL_EVENT', { jsonlType: jsonlType(parsed) });
+        }
+        if (!finalMessageSeen && isFinalMessageEvent(parsed)) {
+          finalMessageSeen = true;
+          record('CODEX_FINAL_MESSAGE_SEEN', { jsonlType: jsonlType(parsed) });
+        }
+      }
+    });
+    child.stdin?.on('error', () => {
+      // The Codex process may exit before stdin is fully flushed in smoke/failure paths.
+    });
+    try {
+      child.stdin?.end(stdinText);
+    } catch {
+      // Callback resolution handles process failure; avoid leaking EPIPE as an uncaught exception.
+    }
+    record('CODEX_STDIN_WRITTEN', { bytes: byteLength(stdinText) });
   });
+}
+
+async function recordTimingEvents(runLogger: RunLogger, runId: string, events: CodexTimingEvent[]): Promise<void> {
+  for (const event of events) {
+    await runLogger.recordEvent(runId, event.eventType, {
+      stage: 'codex',
+      timestamp: event.timestamp,
+      payload: event.payload ?? {}
+    });
+  }
+}
+
+async function recordArtifactWriteEvent(runLogger: RunLogger, runId: string, status: 'started' | 'completed', artifactPath: string, artifactKind: string): Promise<void> {
+  await runLogger.recordEvent(runId, status === 'started' ? 'CODEX_ARTIFACT_WRITE_STARTED' : 'CODEX_ARTIFACT_WRITE_COMPLETED', {
+    stage: 'codex',
+    relatedArtifactPaths: [artifactPath],
+    payload: { artifactKind, path: artifactPath }
+  });
+}
+
+function parseJsonlEvent(line: string): unknown | undefined {
+  try {
+    return JSON.parse(line);
+  } catch {
+    return undefined;
+  }
+}
+
+function jsonlType(value: unknown): string {
+  if (!isRecord(value)) return 'unknown';
+  if (typeof value.type === 'string') return value.type;
+  return 'unknown';
+}
+
+function isFinalMessageEvent(value: unknown): boolean {
+  if (!isRecord(value)) return false;
+  if (typeof value.text === 'string') return true;
+  if (isRecord(value.message) && typeof value.message.content === 'string') return true;
+  if (!isRecord(value.item)) return false;
+  return value.item.type === 'agent_message' && (typeof value.item.text === 'string' || (isRecord(value.item.message) && typeof value.item.message.content === 'string'));
 }
 
 function projectPaths(input: CodexBoundaryInput): ProjectPaths {

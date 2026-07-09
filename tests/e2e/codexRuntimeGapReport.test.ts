@@ -74,7 +74,7 @@ describe('M27.7 Codex runtime gap report', () => {
         localStageMs: 10_000,
         eventDurationMs: 507_235,
         unattributedGapMs: 287_235,
-        suspectedSource: 'codex_provider_latency_variance'
+        suspectedSource: 'event_timing_missing'
       });
       expect(result.report.gapByStage).toEqual(
         expect.arrayContaining([
@@ -83,7 +83,7 @@ describe('M27.7 Codex runtime gap report', () => {
       );
       expect(result.report.suspectedGapSources).toEqual(
         expect.arrayContaining([
-          expect.objectContaining({ suspectedSource: 'codex_provider_latency_variance', evidence: expect.arrayContaining(['gapMs=287235']) })
+          expect.objectContaining({ suspectedSource: 'event_timing_missing', evidence: expect.arrayContaining(['gapMs=287235']) })
         ])
       );
       expect(result.report.recommendations).toEqual(

@@ -330,6 +330,7 @@ export class RunLogger {
       payload?: unknown;
       relatedArtifactPaths?: string[];
       severity?: 'info' | 'warning' | 'error' | 'critical';
+      timestamp?: string;
     } = {}
   ): Promise<RunEvent> {
     return this.appendEvent(runId, eventType, input);
@@ -430,13 +431,14 @@ export class RunLogger {
       payload?: unknown;
       relatedArtifactPaths?: string[];
       severity?: 'info' | 'warning' | 'error' | 'critical';
+      timestamp?: string;
     } = {}
   ): Promise<RunEvent> {
     const event = RunEventSchema.parse({
       eventId: `event_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`,
       runId,
       projectId: this.paths.projectId,
-      timestamp: this.now().toISOString(),
+      timestamp: input.timestamp ?? this.now().toISOString(),
       eventType,
       ...(input.stage === undefined ? {} : { stage: input.stage }),
       ...(input.chapterNumber === undefined ? {} : { chapterNumber: input.chapterNumber }),

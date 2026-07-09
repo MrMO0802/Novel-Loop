@@ -449,6 +449,10 @@ export function registerCodexCommand(program: Command): void {
           `totalPromptCallMs: ${result.report.totalPromptCallMs}`,
           `totalLocalStageMs: ${result.report.totalLocalStageMs}`,
           `totalUnattributedGapMs: ${result.report.totalUnattributedGapMs}`,
+          `measuredCodexBoundaryMs: ${result.report.measuredCodexBoundaryMs}`,
+          `measuredLocalProcessingMs: ${result.report.measuredLocalProcessingMs}`,
+          `unexplainedMsAfterPrecision: ${result.report.unexplainedMsAfterPrecision}`,
+          `timingOverlapDetected: ${String(result.report.timingOverlapDetected)}`,
           `largestGapRun: ${result.report.gapByRun[0]?.runId ?? 'none'}`
         ].join('\n') + '\n'
       );

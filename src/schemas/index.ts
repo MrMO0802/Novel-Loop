@@ -431,3 +431,32 @@ export type {
   TargetedRevisionProviderOutput,
   TargetedRevisionScopeValidation
 } from './codexTargetedRevision.js';
+
+export {
+  CandidateDispositionResultSchema,
+  CandidateDispositionSchema,
+  TargetCoverageClosureReportSchema,
+  TargetCoverageGraphEdgeSchema,
+  TargetCoverageGraphNodeSchema,
+  TargetCoverageGraphSchema,
+  TargetCoverageInitialTargetSchema,
+  TargetCoverageMetricsSchema,
+  TargetCoverageProposedTargetSchema,
+  TargetCoverageResidualClaimSchema,
+  TargetCoverageResidualEvidenceSchema,
+  TargetCoverageStatusSchema,
+  TargetExpansionApprovalPreviewSchema,
+  TargetExpansionApprovalRecordSchema
+} from './codexTargetCoverage.js';
+export type {
+  CandidateDisposition,
+  TargetCoverageClosureReport,
+  TargetCoverageGraph,
+  TargetCoverageInitialTarget,
+  TargetCoverageMetrics,
+  TargetCoverageProposedTarget,
+  TargetCoverageResidualClaim,
+  TargetCoverageResidualEvidence,
+  TargetExpansionApprovalPreview,
+  TargetExpansionApprovalRecord
+} from './codexTargetCoverage.js';

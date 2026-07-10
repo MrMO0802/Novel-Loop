@@ -34,6 +34,11 @@ describe('M21 Codex CLI', () => {
     expect(targetedRevision?.helpInformation()).toContain('--samples <count>');
     expect(targetedRevision?.helpInformation()).toContain('--context-mode <mode>');
     expect(targetedRevision?.helpInformation()).toContain('--timeout-ms <ms>');
+    const targetCoverage = codexCommand?.commands.find((command) => command.name() === 'diagnostics-target-coverage');
+    expect(targetCoverage?.description()).toContain('local/read-only');
+    const approveTargetExpansion = codexCommand?.commands.find((command) => command.name() === 'approve-target-expansion');
+    expect(approveTargetExpansion?.helpInformation()).toContain('--report <path|latest>');
+    expect(approveTargetExpansion?.helpInformation()).toContain('--confirm');
   });
 
   test('exec-json command prints parsed JSON artifact path and uses fake codex binary', async () => {

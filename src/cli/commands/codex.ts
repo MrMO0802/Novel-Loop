@@ -7,6 +7,7 @@ import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRe
 import { generateCodexDiagnosticsHardFailAnalysis, runCodexDiagnosticsBenchmark } from '../../app/codexDiagnosticsHardFailAnalysis.js';
 import { runCodexDiagnosticsSchemaBenchmark } from '../../app/codexDiagnosticsSchemaCompliance.js';
 import { runCodexDiagnosticsEvidenceAdjudication } from '../../app/codexDiagnosticsEvidenceAdjudication.js';
+import { approveCodexTargetExpansion, runCodexDiagnosticsTargetCoverage } from '../../app/codexTargetCoverage.js';
 import { runCodexTargetedRevisionExperiment } from '../../app/codexTargetedRevisionExperiment.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
@@ -66,6 +67,8 @@ interface CodexCommandOptions {
   stage?: string;
   samples?: string;
   adjudication?: string;
+  report?: string;
+  operator?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -767,6 +770,81 @@ export function registerCodexCommand(program: Command): void {
         `storyStateMutated: ${String(result.report.storyStateMutated)}`,
         `recommendation: ${result.report.recommendation}`
       ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('diagnostics-target-coverage').description('[local/read-only] Close residual evidence coverage for a rejected targeted revision candidate'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexDiagnosticsTargetCoverage({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber')
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      const uncovered = [...new Set(result.report.residualClaims.flatMap((claim) => claim.uncoveredParagraphs))].sort((left, right) => left - right);
+      process.stdout.write([
+        'codexDiagnosticsTargetCoverage: success',
+        `dispositionPath: ${result.dispositionPath}`,
+        `disposition: ${result.disposition.result}`,
+        `coverageReportPath: ${result.reportPath}`,
+        `coverageGraphPath: ${result.graphPath}`,
+        `approvalPreviewPath: ${result.approvalPreviewPath}`,
+        `residualClaims: ${result.report.residualClaims.map((claim) => claim.normalizedClaim).join(', ')}`,
+        `uncoveredParagraphs: ${uncovered.join(', ') || 'none'}`,
+        `proposedAdditionalTargets: ${result.report.proposedAdditionalTargets.map((target) => target.targetId).join(', ') || 'none'}`,
+        `claimCoverage: ${result.report.claimCoverageBefore} -> ${result.report.projectedClaimCoverageAfter}`,
+        `contradictionEdgeCoverage: ${result.report.contradictionEdgeCoverageBefore} -> ${result.report.projectedContradictionEdgeCoverageAfter}`,
+        `eventOccurrenceCoverage: ${result.report.eventOccurrenceCoverageBefore} -> ${result.report.projectedEventOccurrenceCoverageAfter}`,
+        `coverageClosed: ${String(result.report.coverageClosed)}`,
+        `approved: ${String(result.approvalPreview.approved)}`,
+        `suggestedApprovalCommand: ${result.approvalPreview.suggestedApprovalCommand}`,
+        `storyStateMutated: ${String(result.report.storyStateMutated)}`,
+        'codexInvoked: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('approve-target-expansion').description('[local/read-only] Explicitly approve a closed target expansion set without generating a candidate'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--report <path|latest>', 'target coverage closure report path or latest', 'latest')
+    .option('--confirm', 'confirm the target expansion approval', false)
+    .option('--operator <name>', 'operator recorded in the approval artifact')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await approveCodexTargetExpansion({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        report: options.report ?? 'latest',
+        confirm: options.confirm === true,
+        ...(options.operator === undefined ? {} : { operator: options.operator })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(result.previewOnly
+        ? [
+            'targetExpansionApproval: preview-only',
+            `coverageReportPath: ${result.preview.coverageReportPath}`,
+            `approved: ${String(result.preview.approved)}`,
+            `proposedTargetIds: ${result.preview.proposedTargetIds.join(', ')}`,
+            'message: No approval was recorded. Re-run with --confirm.'
+          ].join('\n') + '\n'
+        : [
+            'targetExpansionApproval: approved',
+            `recordPath: ${result.recordPath}`,
+            `approved: ${String(result.record?.approved ?? false)}`,
+            `operator: ${result.record?.operator ?? 'none'}`,
+            `candidateGenerated: ${String(result.record?.candidateGenerated ?? false)}`,
+            `storyStateMutated: ${String(result.record?.storyStateMutated ?? false)}`,
+            'codexInvoked: false'
+          ].join('\n') + '\n');
     });
 
   program

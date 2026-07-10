@@ -9,10 +9,13 @@ import { PromptService } from '../prompts/PromptService.js';
 import {
   ChapterMissionSchema,
   ChapterQueueSchema,
+  CandidateDispositionSchema,
   CodexDiagnosticsEvidenceAdjudicationSchema,
   DiagnosticsReportSchema,
   RunManifestV2Schema,
   StoryStateSchema,
+  TargetCoverageClosureReportSchema,
+  TargetExpansionApprovalRecordSchema,
   TargetedRevisionDiagnosticsSampleSchema,
   TargetedRevisionDiffSchema,
   TargetedRevisionExperimentReportSchema,
@@ -125,6 +128,7 @@ export async function runCodexTargetedRevisionExperiment(
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
   const chapterNumber = input.chapterNumber;
   const sampleCount = Math.max(1, input.samples ?? 3);
+  await assertTargetExpansionGate(paths, fileStore, chapterNumber);
   if ((input.contextMode ?? 'enhanced') !== 'enhanced') {
     throw new AppError('INVALID_DIAGNOSTICS_CONTEXT_MODE', 'targeted-revision-experiment requires context-mode enhanced', 2);
   }
@@ -334,6 +338,34 @@ export async function runCodexTargetedRevisionExperiment(
     await runLogger.endRun(runId, 'failed');
     throw error;
   }
+}
+
+async function assertTargetExpansionGate(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<void> {
+  const entries = await fileStore.list(paths.chapterDir(chapterNumber));
+  const dispositionEntry = latestVersionedEntry(entries, 'targeted_revision_candidate_disposition');
+  if (dispositionEntry === undefined) return;
+  const disposition = await fileStore.readJson(paths.chapterArtifact(chapterNumber, dispositionEntry), CandidateDispositionSchema);
+  if (!disposition.result.startsWith('rejected_')) return;
+  const coverageEntry = latestVersionedEntry(entries, 'target_coverage_closure_report');
+  if (coverageEntry === undefined) {
+    throw new AppError('CODEX_TARGET_EXPANSION_APPROVAL_REQUIRED', 'Rejected candidate requires target coverage closure and explicit approval before another experiment.', 2);
+  }
+  const coveragePath = relativeChapterArtifact(chapterNumber, coverageEntry);
+  await fileStore.readJson(paths.projectArtifact(coveragePath), TargetCoverageClosureReportSchema);
+  const approvalEntries = entries.filter((entry) => /^target_expansion_approval_v\d+\.json$/.test(entry)).sort().reverse();
+  for (const approvalEntry of approvalEntries) {
+    const approval = await fileStore.readJson(paths.chapterArtifact(chapterNumber, approvalEntry), TargetExpansionApprovalRecordSchema);
+    if (approval.coverageReportPath !== coveragePath) continue;
+    throw new AppError('CODEX_TARGET_EXPANSION_EXPERIMENT_NOT_AVAILABLE', 'Target expansion is approved, but M27.12D1 does not generate a second candidate. Use the future D2 experiment command.', 2);
+  }
+  throw new AppError('CODEX_TARGET_EXPANSION_APPROVAL_REQUIRED', 'Target coverage closure exists, but its expanded target set has not been explicitly approved.', 2);
+}
+
+function latestVersionedEntry(entries: string[], baseName: string): string | undefined {
+  const pattern = new RegExp(`^${baseName}_v(\\d+)\\.json$`);
+  return entries.map((entry) => ({ entry, version: Number.parseInt(pattern.exec(entry)?.[1] ?? '0', 10) }))
+    .filter((item) => item.version > 0)
+    .sort((left, right) => right.version - left.version)[0]?.entry;
 }
 
 async function loadFreshSource(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number, requestedPath: string): Promise<FreshSource> {

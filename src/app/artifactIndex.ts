@@ -289,6 +289,16 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^targeted_revision_diff_v\d+\.md$/.test(fileName)) return { artifactType: 'targeted_revision_diff', phase: 'revision' };
   if (/^targeted_revision_experiment_v\d+\.json$/.test(fileName)) return { artifactType: 'targeted_revision_experiment', phase: 'diagnostics', schemaName: 'TargetedRevisionExperimentReportSchema' };
   if (/^targeted_revision_experiment_v\d+\.md$/.test(fileName)) return { artifactType: 'targeted_revision_experiment', phase: 'diagnostics' };
+  if (/^targeted_revision_candidate_disposition_v\d+\.json$/.test(fileName)) return { artifactType: 'targeted_revision_candidate_disposition', phase: 'revision', schemaName: 'CandidateDispositionSchema' };
+  if (/^targeted_revision_candidate_disposition_v\d+\.md$/.test(fileName)) return { artifactType: 'targeted_revision_candidate_disposition', phase: 'revision' };
+  if (/^target_coverage_graph_v\d+\.json$/.test(fileName)) return { artifactType: 'target_coverage_graph', phase: 'diagnostics', schemaName: 'TargetCoverageGraphSchema' };
+  if (/^target_coverage_graph_v\d+\.md$/.test(fileName)) return { artifactType: 'target_coverage_graph', phase: 'diagnostics' };
+  if (/^target_coverage_closure_report_v\d+\.json$/.test(fileName)) return { artifactType: 'target_coverage_closure_report', phase: 'diagnostics', schemaName: 'TargetCoverageClosureReportSchema' };
+  if (/^target_coverage_closure_report_v\d+\.md$/.test(fileName)) return { artifactType: 'target_coverage_closure_report', phase: 'diagnostics' };
+  if (/^target_expansion_approval_preview_v\d+\.json$/.test(fileName)) return { artifactType: 'target_expansion_approval_preview', phase: 'diagnostics', schemaName: 'TargetExpansionApprovalPreviewSchema' };
+  if (/^target_expansion_approval_preview_v\d+\.md$/.test(fileName)) return { artifactType: 'target_expansion_approval_preview', phase: 'diagnostics' };
+  if (/^target_expansion_approval_v\d+\.json$/.test(fileName)) return { artifactType: 'target_expansion_approval', phase: 'diagnostics', schemaName: 'TargetExpansionApprovalRecordSchema' };
+  if (/^target_expansion_approval_v\d+\.md$/.test(fileName)) return { artifactType: 'target_expansion_approval', phase: 'diagnostics' };
   if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision', schemaName: 'RevisionOpportunityReportSchema' };
   if (/^revision_opportunity_report_v\d+\.md$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };

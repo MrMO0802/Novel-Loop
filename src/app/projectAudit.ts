@@ -50,6 +50,11 @@ import {
   RunManifestV2Schema,
   RevisionOpportunityReportSchema,
   StoryStateSchema,
+  CandidateDispositionSchema,
+  TargetCoverageClosureReportSchema,
+  TargetCoverageGraphSchema,
+  TargetExpansionApprovalPreviewSchema,
+  TargetExpansionApprovalRecordSchema,
   TargetedRevisionDiffSchema,
   TargetedRevisionExperimentReportSchema,
   TargetedRevisionPlanSchema,
@@ -624,6 +629,26 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^targeted_revision_experiment_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionExperimentReportSchema);
         await checkTargetedRevisionExperiment(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^targeted_revision_candidate_disposition_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, CandidateDispositionSchema);
+        await checkCandidateDisposition(issues, absolutePath, relativePath, fileStore);
+      }
+      if (/^target_coverage_graph_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetCoverageGraphSchema);
+        await checkTargetCoverageGraph(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^target_coverage_closure_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetCoverageClosureReportSchema);
+        await checkTargetCoverageReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^target_expansion_approval_preview_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetExpansionApprovalPreviewSchema);
+        await checkTargetExpansionApprovalPreview(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^target_expansion_approval_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetExpansionApprovalRecordSchema);
+        await checkTargetExpansionApprovalRecord(issues, paths, fileStore, absolutePath, relativePath);
       }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
@@ -1597,6 +1622,228 @@ async function checkTargetedRevisionExperiment(
   } catch {
     // checkJson or source checks already record schema and reference failures.
   }
+}
+
+async function checkCandidateDisposition(
+  issues: AuditIssue[],
+  absolutePath: string,
+  relativePath: string,
+  fileStore: FileStore
+): Promise<void> {
+  try {
+    const disposition = await fileStore.readJson(absolutePath, CandidateDispositionSchema);
+    if (!disposition.result.startsWith('rejected_') || disposition.adopted || disposition.eligibleAsNextRevisionBase || !disposition.retainForProvenance) {
+      issues.push(issue(
+        `target_coverage_invalid_disposition_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'target_coverage',
+        relativePath,
+        'Rejected targeted candidate disposition permits adoption, reuse as a revision base, or provenance deletion.',
+        'Restore the rejected disposition and keep candidate v1 only as immutable provenance.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson records schema failures.
+  }
+}
+
+async function checkTargetCoverageGraph(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const graph = await fileStore.readJson(absolutePath, TargetCoverageGraphSchema);
+    const draftPath = paths.projectArtifact(graph.sourceDraftPath);
+    if (!(await fileStore.exists(draftPath)) || sha256(await fileStore.readText(draftPath)) !== graph.sourceDraftHash) {
+      issues.push(issue(
+        `target_coverage_graph_source_stale_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'target_coverage',
+        relativePath,
+        'Target coverage graph source draft is missing or its hash changed.',
+        'Regenerate coverage closure from the unchanged original draft and discard stale approval artifacts.',
+        true
+      ));
+      return;
+    }
+    const paragraphs = parseMarkdownEvidenceParagraphs(await fileStore.readText(draftPath));
+    for (const node of graph.nodes.filter((item) => item.nodeType === 'paragraph_evidence')) {
+      const paragraph = node.paragraphIndex === null ? undefined : paragraphs[node.paragraphIndex - 1];
+      if (paragraph !== undefined && node.snippetHash === sha256(paragraph.text.slice(0, 600))) continue;
+      issues.push(issue(
+        `target_coverage_graph_evidence_invalid_${sanitizeIssueId(node.nodeId)}`,
+        'error',
+        'target_coverage',
+        relativePath,
+        `Coverage graph node ${node.nodeId} references a missing paragraph or mismatched snippet hash.`,
+        'Regenerate the coverage graph from the original draft.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson records schema failures.
+  }
+}
+
+async function checkTargetCoverageReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, TargetCoverageClosureReportSchema);
+    const hashedPaths: Array<[string, string]> = [
+      [report.sourceDraftPath, report.sourceDraftHash],
+      [report.sourceAdjudicationPath, report.sourceAdjudicationHash],
+      [report.sourceTimelineMapPath, report.sourceTimelineMapHash],
+      [report.sourceExperimentPath, report.sourceExperimentHash],
+      [report.sourceRevisionPlanPath, report.sourceRevisionPlanHash],
+      [report.sourceRevisionDiffPath, report.sourceRevisionDiffHash],
+      [report.rejectedCandidatePath, report.rejectedCandidateHash],
+      [report.candidateDispositionPath, report.candidateDispositionHash],
+      [report.targetCoverageGraphPath, report.targetCoverageGraphHash]
+    ];
+    const stalePaths: string[] = [];
+    for (const [artifactPath, expectedHash] of hashedPaths) {
+      const targetPath = paths.projectArtifact(artifactPath);
+      if (!(await fileStore.exists(targetPath)) || sha256(await fileStore.readText(targetPath)) !== expectedHash) stalePaths.push(artifactPath);
+    }
+    const sourceDraft = await fileStore.readText(paths.projectArtifact(report.sourceDraftPath));
+    const paragraphs = parseMarkdownEvidenceParagraphs(sourceDraft);
+    const invalidTargets = [...report.initialTargets, ...report.proposedAdditionalTargets].filter((target) => {
+      const paragraph = paragraphs[target.paragraphIndex - 1];
+      return paragraph === undefined || !paragraph.text.includes(target.snippet) || sha256(target.snippet) !== target.snippetHash;
+    });
+    const disposition = await fileStore.readJson(paths.projectArtifact(report.candidateDispositionPath), CandidateDispositionSchema);
+    const graph = await fileStore.readJson(paths.projectArtifact(report.targetCoverageGraphPath), TargetCoverageGraphSchema);
+    const protectedChanged: string[] = [];
+    for (const artifact of report.protectedArtifacts) {
+      const targetPath = paths.projectArtifact(artifact.path);
+      if (!(await fileStore.exists(targetPath)) || sha256(await fileStore.readText(targetPath)) !== artifact.afterSha256 || artifact.beforeSha256 !== artifact.afterSha256) protectedChanged.push(artifact.path);
+    }
+    if (
+      stalePaths.length > 0 ||
+      invalidTargets.length > 0 ||
+      disposition.adopted ||
+      disposition.eligibleAsNextRevisionBase ||
+      report.candidateUsedAsRevisionBase ||
+      graph.coverageClosed !== report.coverageClosed ||
+      protectedChanged.length > 0 ||
+      (!report.coverageClosed && /approve-target-expansion/.test(report.recommendedNextStep))
+    ) {
+      issues.push(issue(
+        `target_coverage_cross_artifact_invalid_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'target_coverage',
+        relativePath,
+        `Target coverage sources, hashes, metrics, graph, disposition, or protected artifacts are inconsistent. Stale: ${stalePaths.join(', ') || 'none'}; invalid targets: ${invalidTargets.map((target) => target.targetId).join(', ') || 'none'}; changed protected: ${protectedChanged.join(', ') || 'none'}.`,
+        'Discard stale coverage and approval artifacts, restore canonical files, and regenerate diagnostics-target-coverage.',
+        true
+      ));
+    }
+    const chapterEntries = await fileStore.list(paths.chapterDir(report.chapterNumber));
+    const experimentVersion = versionFromArtifactPath(report.sourceExperimentPath);
+    const newerExperimentExists = chapterEntries.some((entry) => {
+      const match = /^targeted_revision_experiment_v(\d+)\.json$/.exec(entry);
+      return match !== null && Number.parseInt(match[1]!, 10) > experimentVersion;
+    });
+    const approvalExists = await hasApprovalForCoverage(paths, fileStore, report.chapterNumber, relativePath);
+    if (newerExperimentExists && !approvalExists) {
+      issues.push(issue(
+        `target_coverage_unapproved_candidate_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'target_coverage',
+        relativePath,
+        'A newer targeted revision experiment exists without approval of the expanded target set.',
+        'Remove the unauthorized candidate artifacts and restore the approval gate.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson records schema failures.
+  }
+}
+
+async function checkTargetExpansionApprovalPreview(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const preview = await fileStore.readJson(absolutePath, TargetExpansionApprovalPreviewSchema);
+    const reportPath = paths.projectArtifact(preview.coverageReportPath);
+    if (!(await fileStore.exists(reportPath)) || sha256(await fileStore.readText(reportPath)) !== preview.coverageReportHash) {
+      issues.push(issue(
+        `target_coverage_approval_preview_stale_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'target_coverage',
+        relativePath,
+        'Target expansion approval preview references a missing or changed coverage report.',
+        'Regenerate diagnostics-target-coverage before approval.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson records schema failures.
+  }
+}
+
+async function checkTargetExpansionApprovalRecord(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const record = await fileStore.readJson(absolutePath, TargetExpansionApprovalRecordSchema);
+    const reportPath = paths.projectArtifact(record.coverageReportPath);
+    const previewPath = paths.projectArtifact(record.sourceApprovalPreviewPath);
+    if (
+      !(await fileStore.exists(reportPath)) ||
+      sha256(await fileStore.readText(reportPath)) !== record.coverageReportHash ||
+      !(await fileStore.exists(previewPath)) ||
+      sha256(await fileStore.readText(previewPath)) !== record.sourceApprovalPreviewHash
+    ) {
+      issues.push(issue(
+        `target_coverage_approval_record_stale_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'target_coverage',
+        relativePath,
+        'Approved target expansion record references changed source artifacts.',
+        'Invalidate this approval and regenerate target coverage from fresh sources.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson records schema failures.
+  }
+}
+
+async function hasApprovalForCoverage(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number, coveragePath: string): Promise<boolean> {
+  const entries = await fileStore.list(paths.chapterDir(chapterNumber));
+  for (const entry of entries.filter((value) => /^target_expansion_approval_v\d+\.json$/.test(value))) {
+    try {
+      const record = await fileStore.readJson(paths.chapterArtifact(chapterNumber, entry), TargetExpansionApprovalRecordSchema);
+      if (record.coverageReportPath === coveragePath) return true;
+    } catch {
+      // Schema validation reports the malformed approval separately.
+    }
+  }
+  return false;
+}
+
+function versionFromArtifactPath(artifactPath: string): number {
+  const match = /_v(\d+)\.json$/.exec(artifactPath);
+  return match === null ? 0 : Number.parseInt(match[1]!, 10);
 }
 
 async function checkRevisionOpportunityReport(issues: AuditIssue[], absolutePath: string, relativePath: string, fileStore: FileStore): Promise<void> {

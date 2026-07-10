@@ -19,6 +19,7 @@ export type FakeCodexMode =
   | 'codex-controlled-diagnostics-fail'
   | 'codex-controlled-normalization-warning'
   | 'codex-targeted-revision'
+  | 'codex-targeted-revision-no-improvement'
   | 'codex-targeted-revision-scope-violation';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
@@ -160,7 +161,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       ]
     };
   }
-  if (promptId === 'revision.targeted_revision_operations_slim' && mode === 'codex-targeted-revision') {
+  if (promptId === 'revision.targeted_revision_operations_slim' && (mode === 'codex-targeted-revision' || mode === 'codex-targeted-revision-no-improvement')) {
     const targetIds = [...stdin.matchAll(/"targetId"\\s*:\\s*"([^"]+)"/g)].map((match) => match[1]);
     const first = targetIds[0] || 'target_p002';
     const duplicate = targetIds[Math.min(2, Math.max(0, targetIds.length - 1))] || first;
@@ -193,6 +194,9 @@ function jsonFor(promptId, mode, repairMode, stdin) {
   }
   if (promptId === 'diagnostics.diagnose_chapter_slim' && mode === 'codex-targeted-revision') {
     return targetedDiagnostics(chapterNumber, /EXPERIMENT_ARM:\\s*A\\d+/.test(stdin));
+  }
+  if (promptId === 'diagnostics.diagnose_chapter_slim' && mode === 'codex-targeted-revision-no-improvement') {
+    return targetedDiagnostics(chapterNumber, true, /EXPERIMENT_ARM:\\s*B\\d+/.test(stdin));
   }
   const json = {
     'planning.generate_arc_map_minimal_json': {
@@ -435,13 +439,16 @@ function jsonFor(promptId, mode, repairMode, stdin) {
   return json[promptId] || { title: 'Codex Boundary Smoke', ok: true, summary: 'Fake Codex returned schema-constrained JSON.' };
 }
 
-function targetedDiagnostics(chapterNumber, baseline) {
-  const timelinePassed = !baseline;
+function targetedDiagnostics(chapterNumber, timelineFailed, residualCandidate = false) {
+  const timelinePassed = !timelineFailed;
+  const timelineEvidence = residualCandidate
+    ? '任务要求白天送餐，但出门时间仍为二十三点二十九分；十六楼的门又开了，住户再次接过同一个餐袋并再次关门。'
+    : '同一订单先在午高峰交付，随后记录二十三点十七分和二十三点二十九分；住户接餐关门后又重复开门、接餐和关门。';
   const hardChecks = ['timeline_consistency', 'character_knowledge_consistency', 'world_rule_consistency', 'no_unplanned_reveal'].map((checkName) => ({
     checkName,
     result: checkName === 'timeline_consistency' && !timelinePassed ? 'fail' : 'pass',
     blocking: checkName === 'timeline_consistency' && !timelinePassed,
-    evidence: checkName === 'timeline_consistency' && !timelinePassed ? 'same delivery has incompatible time and duplicate handoff' : '',
+    evidence: checkName === 'timeline_consistency' && !timelinePassed ? timelineEvidence : '',
     explanation: checkName === 'timeline_consistency' && !timelinePassed ? 'confirmed contradiction in baseline draft' : 'No contradiction found.'
   }));
   return {

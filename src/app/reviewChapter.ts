@@ -18,13 +18,26 @@ import {
   FailureReportSchema,
   RevisionOpportunityReportSchema,
   StoryStateSchema,
+  CandidateDispositionSchema,
+  TargetCoverageClosureReportSchema,
+  TargetCoverageGraphSchema,
+  TargetExpansionApprovalPreviewSchema,
+  TargetExpansionApprovalRecordSchema,
   TargetedRevisionDiffSchema,
   TargetedRevisionExperimentReportSchema,
   TargetedRevisionPlanSchema,
   TargetedRevisionScopeValidationSchema,
   TimelineContradictionMapSchema
 } from '../schemas/index.js';
-import type { CodexDiagnosticsEvidenceAdjudication, ConflictSeverity, TargetedRevisionExperimentReport } from '../schemas/index.js';
+import type {
+  CandidateDisposition,
+  CodexDiagnosticsEvidenceAdjudication,
+  ConflictSeverity,
+  TargetCoverageClosureReport,
+  TargetExpansionApprovalPreview,
+  TargetExpansionApprovalRecord,
+  TargetedRevisionExperimentReport
+} from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 
@@ -62,6 +75,34 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     'targeted_revision_experiment',
     TargetedRevisionExperimentReportSchema
   )).at(-1);
+  const latestDisposition = (await readReports(
+    paths,
+    fileStore,
+    input.chapterNumber,
+    'targeted_revision_candidate_disposition',
+    CandidateDispositionSchema
+  )).at(-1);
+  const latestCoverage = (await readReports(
+    paths,
+    fileStore,
+    input.chapterNumber,
+    'target_coverage_closure_report',
+    TargetCoverageClosureReportSchema
+  )).at(-1);
+  const latestApprovalPreview = (await readReports(
+    paths,
+    fileStore,
+    input.chapterNumber,
+    'target_expansion_approval_preview',
+    TargetExpansionApprovalPreviewSchema
+  )).at(-1);
+  const latestApproval = (await readReports(
+    paths,
+    fileStore,
+    input.chapterNumber,
+    'target_expansion_approval',
+    TargetExpansionApprovalRecordSchema
+  )).at(-1);
   const finalPath = relativeChapterArtifact(input.chapterNumber, 'final.md');
   const lines = [
     `Project: ${paths.projectId}`,
@@ -86,6 +127,7 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     }
     appendDiagnosticsEvidenceAdjudication(lines, latestAdjudication);
     appendTargetedRevisionExperiment(lines, latestTargetedExperiment);
+    appendTargetCoverage(lines, latestDisposition, latestCoverage, latestApprovalPreview, latestApproval);
   }
 
   if (input.conflicts === true) {
@@ -120,6 +162,11 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_scope_validation', TargetedRevisionScopeValidationSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_diff', TargetedRevisionDiffSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_experiment', TargetedRevisionExperimentReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_candidate_disposition', CandidateDispositionSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_coverage_graph', TargetCoverageGraphSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_coverage_closure_report', TargetCoverageClosureReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_expansion_approval_preview', TargetExpansionApprovalPreviewSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_expansion_approval', TargetExpansionApprovalRecordSchema);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^draft_targeted_revision_candidate_v\d+\.md$/);
     await appendPreviewCompleteness(lines, paths, fileStore, input.chapterNumber);
     await appendDiagnosticsHardFailAnalysis(lines, paths, fileStore, input.chapterNumber);
@@ -142,7 +189,16 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
 
   if (input.suggestNext === true) {
     lines.push('', 'Suggested command:');
-    lines.push(suggestNextCommand(paths.projectId, input.chapterNumber, queueItem?.status, latestAdjudication?.value, latestTargetedExperiment?.value));
+    lines.push(suggestNextCommand(
+      paths.projectId,
+      input.chapterNumber,
+      queueItem?.status,
+      latestAdjudication?.value,
+      latestTargetedExperiment?.value,
+      latestCoverage?.value,
+      latestApprovalPreview?.value,
+      latestApproval?.value
+    ));
   }
 
   return `${lines.join('\n')}\n`;
@@ -224,8 +280,19 @@ function suggestNextCommand(
   chapterNumber: number,
   status: string | undefined,
   adjudication: CodexDiagnosticsEvidenceAdjudication | undefined,
-  experiment: TargetedRevisionExperimentReport | undefined
+  experiment: TargetedRevisionExperimentReport | undefined,
+  coverage: TargetCoverageClosureReport | undefined,
+  approvalPreview: TargetExpansionApprovalPreview | undefined,
+  approval: TargetExpansionApprovalRecord | undefined
 ): string {
+  if (coverage !== undefined && approval === undefined) {
+    return coverage.coverageClosed
+      ? approvalPreview?.suggestedApprovalCommand ?? `corepack pnpm novel-loop codex approve-target-expansion ${projectId} ${chapterNumber} --report latest --confirm`
+      : 'Target coverage remains open. Do not approve or run a second targeted revision experiment.';
+  }
+  if (coverage !== undefined && approval !== undefined) {
+    return 'Expanded targets are approved. Keep candidate v1 rejected and wait for the M27.12D2 second-round experiment command.';
+  }
   if (experiment?.result === 'candidate_clears_timeline_failure') {
     return `human review the isolated candidate ${experiment.candidateDraftPath} and ${experiment.revisionDiffPath}; candidate adoption, preview, and commit remain disabled`;
   }
@@ -245,6 +312,49 @@ function suggestNextCommand(
     return `corepack pnpm novel-loop recommit ${projectId} ${chapterNumber} --from-final --confirm`;
   }
   return `corepack pnpm novel-loop review ${projectId} ${chapterNumber} --diagnostics --state --artifacts`;
+}
+
+function appendTargetCoverage(
+  lines: string[],
+  disposition: { path: string; value: CandidateDisposition } | undefined,
+  coverage: { path: string; value: TargetCoverageClosureReport } | undefined,
+  approvalPreview: { path: string; value: TargetExpansionApprovalPreview } | undefined,
+  approval: { path: string; value: TargetExpansionApprovalRecord } | undefined
+): void {
+  if (disposition !== undefined) {
+    lines.push('', 'Candidate disposition');
+    lines.push(`- path: ${disposition.path}`);
+    lines.push(`- result: ${disposition.value.result}`);
+    lines.push(`- adopted: ${String(disposition.value.adopted)}`);
+    lines.push(`- eligibleAsNextRevisionBase: ${String(disposition.value.eligibleAsNextRevisionBase)}`);
+    lines.push(`- retainForProvenance: ${String(disposition.value.retainForProvenance)}`);
+  }
+  if (coverage !== undefined) {
+    const uncovered = [...new Set(coverage.value.residualClaims.flatMap((claim) => claim.uncoveredParagraphs))].sort((left, right) => left - right);
+    lines.push('', 'Target coverage closure');
+    lines.push(`- path: ${coverage.path}`);
+    lines.push(`- residualClaims: ${coverage.value.residualClaims.map((claim) => claim.normalizedClaim).join(', ')}`);
+    lines.push(`- uncoveredParagraphs: ${uncovered.join(', ') || 'none'}`);
+    lines.push(`- proposedAdditionalTargets: ${coverage.value.proposedAdditionalTargets.map((target) => `${target.targetId}(p${target.paragraphIndex})`).join(', ') || 'none'}`);
+    lines.push(`- claimCoverage: ${coverage.value.claimCoverageBefore} -> ${coverage.value.projectedClaimCoverageAfter}`);
+    lines.push(`- contradictionEdgeCoverage: ${coverage.value.contradictionEdgeCoverageBefore} -> ${coverage.value.projectedContradictionEdgeCoverageAfter}`);
+    lines.push(`- eventOccurrenceCoverage: ${coverage.value.eventOccurrenceCoverageBefore} -> ${coverage.value.projectedEventOccurrenceCoverageAfter}`);
+    lines.push(`- coverageClosed: ${String(coverage.value.coverageClosed)}`);
+  }
+  if (approval !== undefined) {
+    lines.push('', 'Target expansion approval');
+    lines.push(`- path: ${approval.path}`);
+    lines.push(`- approved: ${String(approval.value.approved)}`);
+    lines.push(`- operator: ${approval.value.operator}`);
+    lines.push(`- confirmedAt: ${approval.value.confirmedAt}`);
+    return;
+  }
+  if (approvalPreview !== undefined) {
+    lines.push('', 'Target expansion approval');
+    lines.push(`- path: ${approvalPreview.path}`);
+    lines.push(`- approved: ${String(approvalPreview.value.approved)}`);
+    lines.push(`- suggestedApprovalCommand: ${approvalPreview.value.suggestedApprovalCommand}`);
+  }
 }
 
 function appendTargetedRevisionExperiment(

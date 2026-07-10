@@ -4,12 +4,16 @@ import type { z } from 'zod';
 import {
   ChapterQueueSchema,
   CommitReportSchema,
+  CodexDiagnosticsBenchmarkReportSchema,
+  CodexDiagnosticsContextAuditSchema,
+  CodexDiagnosticsHardFailAnalysisSchema,
   CodexPreviewCompletenessReportSchema,
   CodexPreviewFailureReportSchema,
   ConflictRepairReportSchema,
   ConflictReportSchema,
   DiagnosticsReportSchema,
   FailureReportSchema,
+  RevisionOpportunityReportSchema,
   StoryStateSchema
 } from '../schemas/index.js';
 import type { ConflictSeverity } from '../schemas/index.js';
@@ -80,7 +84,12 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'failure_report', FailureReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_preview_completeness_report', CodexPreviewCompletenessReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_preview_failure_report', CodexPreviewFailureReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_hard_fail_analysis', CodexDiagnosticsHardFailAnalysisSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'diagnostics_context_audit', CodexDiagnosticsContextAuditSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_benchmark', CodexDiagnosticsBenchmarkReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'revision_opportunity_report', RevisionOpportunityReportSchema);
     await appendPreviewCompleteness(lines, paths, fileStore, input.chapterNumber);
+    await appendDiagnosticsHardFailAnalysis(lines, paths, fileStore, input.chapterNumber);
   }
 
   if (input.state === true) {
@@ -177,6 +186,21 @@ async function appendPreviewCompleteness(lines: string[], paths: ProjectPaths, f
   lines.push(`- path: ${latest.path}`);
   lines.push(`- complete: ${String(latest.value.complete)}`);
   lines.push(`- blockingReasons: ${latest.value.blockingReasons.join(', ') || 'none'}`);
+  lines.push(`- suggestedRetryCommand: ${latest.value.suggestedRetryCommand}`);
+}
+
+async function appendDiagnosticsHardFailAnalysis(lines: string[], paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<void> {
+  const reports = await readReports(paths, fileStore, chapterNumber, 'codex_diagnostics_hard_fail_analysis', CodexDiagnosticsHardFailAnalysisSchema);
+  const latest = reports.at(-1);
+  if (latest === undefined) return;
+  const contextAudit = (await readReports(paths, fileStore, chapterNumber, 'diagnostics_context_audit', CodexDiagnosticsContextAuditSchema)).at(-1);
+  const opportunity = (await readReports(paths, fileStore, chapterNumber, 'revision_opportunity_report', RevisionOpportunityReportSchema)).at(-1);
+  lines.push('', 'Diagnostics hard-fail analysis');
+  lines.push(`- path: ${latest.path}`);
+  lines.push(`- hardFailures: ${latest.value.hardFailures.length}`);
+  lines.push(`- falsePositiveRisk: ${latest.value.falsePositiveRisk.level}`);
+  lines.push(`- contextAuditPath: ${contextAudit?.path ?? 'none'}`);
+  lines.push(`- revisionOpportunityPath: ${opportunity?.path ?? 'none'}`);
   lines.push(`- suggestedRetryCommand: ${latest.value.suggestedRetryCommand}`);
 }
 

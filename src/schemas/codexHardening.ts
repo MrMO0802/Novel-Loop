@@ -191,6 +191,196 @@ export const CodexPreviewFailureReportSchema = z.object({
   redacted: z.literal(true)
 });
 
+export const CodexDiagnosticsHardCheckNameSchema = z.enum([
+  'timeline_consistency',
+  'character_knowledge_consistency',
+  'world_rule_consistency',
+  'no_unplanned_reveal'
+]);
+
+export const CodexDiagnosticsFailureClassificationSchema = z.enum([
+  'true_positive_draft_issue',
+  'diagnostics_false_positive',
+  'diagnostics_context_missing',
+  'draft_context_missing',
+  'schema_or_normalizer_issue',
+  'insufficient_evidence',
+  'unknown'
+]);
+
+export const CodexDiagnosticsLikelyCauseSchema = z.enum([
+  'timeline_conflict',
+  'character_knowledge_conflict',
+  'world_rule_conflict',
+  'unplanned_reveal',
+  'missing_chapter_goal',
+  'weak_continuity',
+  'reader_state_mismatch',
+  'canon_patch_risk',
+  'diagnostics_prompt_overstrict',
+  'diagnostics_missing_context',
+  'unknown'
+]);
+
+export const CodexDiagnosticsEvidenceSchema = z.object({
+  source: z.enum(['draft', 'plan', 'mission', 'story_state', 'reader_state', 'character_states', 'narrative_debts', 'foreshadowing', 'timeline']),
+  path: z.string(),
+  excerpt: z.string(),
+  relatedIds: z.array(z.string()).default([]),
+  confidence: z.enum(['low', 'medium', 'high'])
+});
+
+export const CodexDiagnosticsHardFailureAnalysisSchema = z.object({
+  checkName: CodexDiagnosticsHardCheckNameSchema,
+  failed: z.literal(true),
+  severity: z.enum(['critical', 'high', 'medium', 'low']),
+  diagnosticsMessage: z.string(),
+  evidenceFromDraft: z.array(CodexDiagnosticsEvidenceSchema),
+  evidenceFromPlan: z.array(CodexDiagnosticsEvidenceSchema),
+  evidenceFromStoryState: z.array(CodexDiagnosticsEvidenceSchema),
+  missingEvidence: z.array(z.string()),
+  likelyCause: CodexDiagnosticsLikelyCauseSchema,
+  classification: CodexDiagnosticsFailureClassificationSchema
+});
+
+export const CodexDiagnosticsSoftScoreSummarySchema = z.object({
+  averageScore: z.number().min(0).max(10),
+  minScore: z.number().min(0).max(10),
+  maxScore: z.number().min(0).max(10),
+  scores: z.record(z.string(), z.number().min(0).max(10))
+});
+
+export const CodexDiagnosticsContextAvailabilityItemSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  present: z.boolean(),
+  includedInDiagnosticsPrompt: z.boolean(),
+  bytes: z.number().int().nonnegative(),
+  note: z.string()
+});
+
+export const CodexDiagnosticsContextAvailabilitySchema = z.object({
+  requiredArtifacts: z.array(CodexDiagnosticsContextAvailabilityItemSchema),
+  missingRequiredArtifacts: z.array(z.string()),
+  contextTruncated: z.boolean(),
+  possibleContextLoss: z.array(z.string())
+});
+
+export const CodexDiagnosticsFalsePositiveRiskSchema = z.object({
+  level: z.enum(['low', 'medium', 'high']),
+  reasons: z.array(z.string())
+});
+
+export const CodexDiagnosticsHardFailAnalysisSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  generatedAt: z.string(),
+  sourceDiagnosticsPath: z.string(),
+  sourceDraftPath: z.string(),
+  sourceFinalPath: z.string(),
+  sourceMissionPath: z.string(),
+  sourceSelectedPlanPath: z.string(),
+  sourceStoryStatePath: z.string(),
+  sourceReaderStateSummary: z.string(),
+  hardFailures: z.array(CodexDiagnosticsHardFailureAnalysisSchema),
+  softScoreSummary: CodexDiagnosticsSoftScoreSummarySchema,
+  suspectedRootCauses: z.array(CodexDiagnosticsLikelyCauseSchema),
+  evidenceMap: z.array(CodexDiagnosticsEvidenceSchema),
+  contextAvailability: CodexDiagnosticsContextAvailabilitySchema,
+  falsePositiveRisk: CodexDiagnosticsFalsePositiveRiskSchema,
+  recommendedFixes: z.array(z.string()),
+  suggestedRetryCommand: z.string(),
+  suggestedReviewCommand: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexDiagnosticsContextAuditArtifactSchema = z.object({
+  name: z.string(),
+  path: z.string(),
+  bytes: z.number().int().nonnegative(),
+  reason: z.string()
+});
+
+export const CodexDiagnosticsContextAuditSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  diagnosticsPromptPath: z.string(),
+  contextManifestPath: z.string(),
+  includedArtifacts: z.array(CodexDiagnosticsContextAuditArtifactSchema),
+  excludedArtifacts: z.array(CodexDiagnosticsContextAuditArtifactSchema),
+  requiredArtifacts: z.array(z.string()),
+  missingRequiredArtifacts: z.array(z.string()),
+  contextBytes: z.number().int().nonnegative(),
+  contextBudgetBytes: z.number().int().nonnegative(),
+  contextTruncated: z.boolean(),
+  possibleContextLoss: z.array(z.string()),
+  generatedAt: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexDiagnosticsBenchmarkSampleSchema = z.object({
+  sampleId: z.string(),
+  runId: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  schemaValid: z.boolean(),
+  hardChecks: z.record(z.string(), z.object({ passed: z.boolean(), message: z.string() })),
+  averageScore: z.number().min(0).max(10),
+  passed: z.boolean(),
+  retryCount: z.number().int().nonnegative(),
+  repairCount: z.number().int().nonnegative(),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexDiagnosticsBenchmarkReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  sampleCount: z.number().int().positive(),
+  successCount: z.number().int().nonnegative(),
+  failureCount: z.number().int().nonnegative(),
+  hardFailRate: z.number().min(0).max(1),
+  hardCheckResultsDistribution: z.record(z.string(), z.object({ passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative() })),
+  averageScoreDistribution: z.object({
+    min: z.number().min(0).max(10),
+    max: z.number().min(0).max(10),
+    mean: z.number().min(0).max(10)
+  }),
+  retryRate: z.number().min(0).max(1),
+  repairRate: z.number().min(0).max(1),
+  schemaValidRate: z.number().min(0).max(1),
+  samples: z.array(CodexDiagnosticsBenchmarkSampleSchema),
+  stableFailure: z.boolean(),
+  likelyFalsePositive: z.boolean(),
+  recommendation: z.string(),
+  generatedAt: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
+export const RevisionOpportunityTargetSchema = z.object({
+  target: z.string(),
+  reason: z.string(),
+  affectedHardChecks: z.array(CodexDiagnosticsHardCheckNameSchema),
+  suggestedChange: z.string(),
+  riskLevel: z.enum(['low', 'medium', 'high'])
+});
+
+export const RevisionOpportunityReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  hardFailures: z.array(CodexDiagnosticsHardFailureAnalysisSchema),
+  proposedRevisionTargets: z.array(RevisionOpportunityTargetSchema),
+  canRepairByLocalInstruction: z.boolean(),
+  requiresRegenerateDraft: z.boolean(),
+  requiresHumanReview: z.boolean(),
+  suggestedRevisionPromptAddendum: z.string(),
+  suggestedRetryCommand: z.string(),
+  generatedAt: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
 const QualityScoreSchema = z.number().min(0).max(10);
 const StageMetricMapSchema = z.record(z.string(), z.number().int().nonnegative());
 const CodexContextModeSchema = z.enum(['compact', 'balanced', 'rich']);
@@ -1634,6 +1824,17 @@ export type CodexPreviewCompletenessReport = z.infer<typeof CodexPreviewComplete
 export type CodexPreviewFailureReport = z.infer<typeof CodexPreviewFailureReportSchema>;
 export type CodexPreviewSubStageName = z.infer<typeof CodexPreviewSubStageNameSchema>;
 export type CodexPreviewSubStageTimelineItem = z.infer<typeof CodexPreviewSubStageTimelineItemSchema>;
+export type CodexDiagnosticsHardCheckName = z.infer<typeof CodexDiagnosticsHardCheckNameSchema>;
+export type CodexDiagnosticsFailureClassification = z.infer<typeof CodexDiagnosticsFailureClassificationSchema>;
+export type CodexDiagnosticsLikelyCause = z.infer<typeof CodexDiagnosticsLikelyCauseSchema>;
+export type CodexDiagnosticsEvidence = z.infer<typeof CodexDiagnosticsEvidenceSchema>;
+export type CodexDiagnosticsHardFailureAnalysis = z.infer<typeof CodexDiagnosticsHardFailureAnalysisSchema>;
+export type CodexDiagnosticsHardFailAnalysis = z.infer<typeof CodexDiagnosticsHardFailAnalysisSchema>;
+export type CodexDiagnosticsContextAudit = z.infer<typeof CodexDiagnosticsContextAuditSchema>;
+export type CodexDiagnosticsBenchmarkSample = z.infer<typeof CodexDiagnosticsBenchmarkSampleSchema>;
+export type CodexDiagnosticsBenchmarkReport = z.infer<typeof CodexDiagnosticsBenchmarkReportSchema>;
+export type RevisionOpportunityReport = z.infer<typeof RevisionOpportunityReportSchema>;
+export type RevisionOpportunityTarget = z.infer<typeof RevisionOpportunityTargetSchema>;
 export type CodexChapterQualityReport = z.infer<typeof CodexChapterQualityReportSchema>;
 export type CodexMultiChapterPilotChapter = z.infer<typeof CodexMultiChapterPilotChapterSchema>;
 export type CodexMultiChapterPilotReport = z.infer<typeof CodexMultiChapterPilotReportSchema>;

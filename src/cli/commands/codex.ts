@@ -4,6 +4,7 @@ import { checkCodexStatus, execCodexJson, execCodexText, runCodexSmoke } from '.
 import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
+import { generateCodexDiagnosticsHardFailAnalysis, runCodexDiagnosticsBenchmark } from '../../app/codexDiagnosticsHardFailAnalysis.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
 import { evaluateCodexCrossChapterDrift, runCodexMultiChapterPilot } from '../../app/codexMultiChapterPilot.js';
@@ -551,6 +552,74 @@ export function registerCodexCommand(program: Command): void {
         ].join('\n') + '\n'
       );
       if (!result.report.success) process.exitCode = 1;
+    });
+
+  addBoundaryOptions(codex.command('diagnostics-analysis').description('[experimental/internal] Analyze an existing Codex diagnostics hard fail without executing Codex'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await generateCodexDiagnosticsHardFailAnalysis({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber')
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          'codexDiagnosticsAnalysis: success',
+          `analysisPath: ${result.analysisPath}`,
+          `contextAuditPath: ${result.contextAuditPath}`,
+          `revisionOpportunityPath: ${result.revisionOpportunityPath}`,
+          `hardFailures: ${result.analysis.hardFailures.length}`,
+          `falsePositiveRisk: ${result.analysis.falsePositiveRisk.level}`,
+          `suggestedRetryCommand: ${result.analysis.suggestedRetryCommand}`
+        ].join('\n') + '\n'
+      );
+    });
+
+  addCodexPilotOptions(addBoundaryOptions(codex.command('diagnostics-benchmark').description('[pilot diagnostic] Re-run only Codex diagnostics samples without canonical writes')))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--samples <count>', 'sample count', '1')
+    .option('--timeout-ms <ms>', 'alias for codex timeout', '180000')
+    .option('--prompt-root <path>', 'prompt root directory', './prompts')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexDiagnosticsBenchmark({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        promptRoot: options.promptRoot ?? './prompts',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        samples: parsePositiveInteger(options.samples ?? '1', 'samples'),
+        ...resolveCodexCliOptions({
+          ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+          codexProfile: options.codexProfile ?? 'clean',
+          codexJsonRetries: options.codexJsonRetries ?? '2',
+          ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+          codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+          codexTimeoutMs: options.codexTimeoutMs ?? options.timeoutMs ?? '180000'
+        })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          'codexDiagnosticsBenchmark: success',
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `sampleCount: ${result.report.sampleCount}`,
+          `hardFailRate: ${result.report.hardFailRate}`,
+          `schemaValidRate: ${result.report.schemaValidRate}`,
+          `stableFailure: ${String(result.report.stableFailure)}`,
+          `recommendation: ${result.report.recommendation}`
+        ].join('\n') + '\n'
+      );
     });
 
   program

@@ -14,6 +14,9 @@ import {
   CodexBusinessOptimizationPlanSchema,
   CodexCommitConsistencyReportSchema,
   CodexContextManifestSchema,
+  CodexDiagnosticsBenchmarkReportSchema,
+  CodexDiagnosticsContextAuditSchema,
+  CodexDiagnosticsHardFailAnalysisSchema,
   CodexCrossChapterContinuityReportSchema,
   CodexCrossChapterDriftReportSchema,
   CodexMultiChapterPilotReportSchema,
@@ -38,6 +41,7 @@ import {
   ProjectAuditReportSchema,
   RunEventSchema,
   RunManifestSchema,
+  RevisionOpportunityReportSchema,
   StoryStateSchema
 } from '../schemas/index.js';
 import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexRuntimeSamplingReport, CodexStageRuntimeProfileReport, RunEvent, RunManifest } from '../schemas/index.js';
@@ -554,6 +558,22 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, absolutePath, 'codex_preview', relativePath, CodexPreviewFailureReportSchema);
         await checkCodexPreviewFailureReport(issues, paths, fileStore, absolutePath, relativePath);
       }
+      if (/^codex_diagnostics_hard_fail_analysis_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'codex_diagnostics_analysis', relativePath, CodexDiagnosticsHardFailAnalysisSchema);
+        await checkCodexDiagnosticsHardFailAnalysis(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^diagnostics_context_audit_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'codex_diagnostics_context', relativePath, CodexDiagnosticsContextAuditSchema);
+        await checkCodexDiagnosticsContextAudit(issues, absolutePath, relativePath, fileStore);
+      }
+      if (/^codex_diagnostics_benchmark_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'codex_diagnostics_benchmark', relativePath, CodexDiagnosticsBenchmarkReportSchema);
+        await checkCodexDiagnosticsBenchmark(issues, absolutePath, relativePath, fileStore);
+      }
+      if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
+        await checkRevisionOpportunityReport(issues, absolutePath, relativePath, fileStore);
+      }
       if (/^codex_commit_consistency_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_commit', relativePath, CodexCommitConsistencyReportSchema);
       }
@@ -688,6 +708,128 @@ async function checkCodexPreviewFailureReport(
         relativePath,
         'Codex preview failure report references a missing completeness report.',
         'Restore the completeness report or rerun preview diagnostics.',
+        true
+      ));
+    }
+    if (report.errorCode === 'CODEX_PREVIEW_DIAGNOSTICS_HARD_FAIL') {
+      const analysis = await findLatestChapterArtifact(paths, fileStore, report.chapterNumber, 'codex_diagnostics_hard_fail_analysis');
+      if (analysis === undefined) {
+        issues.push(issue(
+          `codex_diagnostics_analysis_missing_ch${report.chapterNumber}_${sanitizeIssueId(relativePath)}`,
+          'warning',
+          'codex_diagnostics_analysis',
+          relativePath,
+          'Codex diagnostics hard fail has no hard-fail analysis report.',
+          `Run novel-loop codex diagnostics-analysis ${paths.projectId} ${report.chapterNumber}.`,
+          false
+        ));
+      }
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkCodexDiagnosticsHardFailAnalysis(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexDiagnosticsHardFailAnalysisSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `codex_diagnostics_analysis_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'codex_diagnostics_analysis',
+        relativePath,
+        'Diagnostics hard-fail analysis report indicates Story State mutation.',
+        'Restore Story State and regenerate diagnostics-analysis from existing artifacts.',
+        true
+      ));
+    }
+    for (const sourcePath of [report.sourceDiagnosticsPath, report.sourceDraftPath, report.sourceStoryStatePath]) {
+      if (sourcePath.length > 0 && !(await fileStore.exists(paths.projectArtifact(sourcePath)))) {
+        issues.push(issue(
+          `codex_diagnostics_analysis_missing_source_${sanitizeIssueId(relativePath)}_${sanitizeIssueId(sourcePath)}`,
+          'error',
+          'codex_diagnostics_analysis',
+          relativePath,
+          `Diagnostics hard-fail analysis references missing source ${sourcePath}.`,
+          'Restore the source artifact or regenerate diagnostics-analysis.',
+          true
+        ));
+      }
+    }
+    const queue = await fileStore.readJson(paths.chapterQueue(), ChapterQueueSchema);
+    const chapter = queue.chapters.find((item) => item.chapterNumber === report.chapterNumber);
+    if (chapter?.status === 'committed' && report.hardFailures.length > 0) {
+      issues.push(issue(
+        `codex_diagnostics_hard_fail_committed_ch${report.chapterNumber}`,
+        'critical',
+        'codex_diagnostics_analysis',
+        relativePath,
+        'Chapter is committed while diagnostics hard-fail analysis still contains hard failures.',
+        'Inspect commit provenance; do not treat hard-failed diagnostics as committed without an explicit recovery path.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkCodexDiagnosticsContextAudit(issues: AuditIssue[], absolutePath: string, relativePath: string, fileStore: FileStore): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexDiagnosticsContextAuditSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `codex_diagnostics_context_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'codex_diagnostics_context',
+        relativePath,
+        'Diagnostics context audit report indicates Story State mutation.',
+        'Regenerate context audit from existing artifacts without state writes.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkCodexDiagnosticsBenchmark(issues: AuditIssue[], absolutePath: string, relativePath: string, fileStore: FileStore): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexDiagnosticsBenchmarkReportSchema);
+    if (report.storyStateMutated || report.samples.some((sample) => sample.storyStateMutated)) {
+      issues.push(issue(
+        `codex_diagnostics_benchmark_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'codex_diagnostics_benchmark',
+        relativePath,
+        'Diagnostics benchmark report indicates Story State mutation.',
+        'Restore Story State and discard benchmark artifacts generated by the mutating run.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkRevisionOpportunityReport(issues: AuditIssue[], absolutePath: string, relativePath: string, fileStore: FileStore): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, RevisionOpportunityReportSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `revision_opportunity_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'revision_opportunity',
+        relativePath,
+        'Revision opportunity report indicates Story State mutation.',
+        'Regenerate revision opportunity report from existing artifacts only.',
         true
       ));
     }

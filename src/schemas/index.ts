@@ -235,6 +235,15 @@ export {
   CodexPreviewFailureReportSchema,
   CodexPreviewSubStageNameSchema,
   CodexPreviewSubStageTimelineItemSchema,
+  CodexDiagnosticsBenchmarkReportSchema,
+  CodexDiagnosticsBenchmarkSampleSchema,
+  CodexDiagnosticsContextAuditSchema,
+  CodexDiagnosticsEvidenceSchema,
+  CodexDiagnosticsFailureClassificationSchema,
+  CodexDiagnosticsHardCheckNameSchema,
+  CodexDiagnosticsHardFailAnalysisSchema,
+  CodexDiagnosticsHardFailureAnalysisSchema,
+  CodexDiagnosticsLikelyCauseSchema,
   CodexPromptAuditIssueSchema,
   CodexPromptAuditReportSchema,
   CodexProfileComparisonItemSchema,
@@ -257,7 +266,9 @@ export {
   CodexSingleChapterSmokeStageSchema,
   CodexStageRuntimeOptimizationCandidateSchema,
   CodexStageRuntimeProfileReportSchema,
-  MissionSchemaDiagnosticsReportSchema
+  MissionSchemaDiagnosticsReportSchema,
+  RevisionOpportunityReportSchema,
+  RevisionOpportunityTargetSchema
 } from './codexHardening.js';
 export type {
   CodexBudgetReport,
@@ -286,6 +297,15 @@ export type {
   CodexPreviewFailureReport,
   CodexPreviewSubStageName,
   CodexPreviewSubStageTimelineItem,
+  CodexDiagnosticsBenchmarkReport,
+  CodexDiagnosticsBenchmarkSample,
+  CodexDiagnosticsContextAudit,
+  CodexDiagnosticsEvidence,
+  CodexDiagnosticsFailureClassification,
+  CodexDiagnosticsHardCheckName,
+  CodexDiagnosticsHardFailAnalysis,
+  CodexDiagnosticsHardFailureAnalysis,
+  CodexDiagnosticsLikelyCause,
   CodexPromptAuditIssue,
   CodexPromptAuditReport,
   CodexProfileComparisonItem,
@@ -305,7 +325,9 @@ export type {
   CodexSingleChapterSmokeReport,
   CodexSingleChapterSmokeStage,
   CodexStageRuntimeProfileReport,
-  MissionSchemaDiagnosticsReport
+  MissionSchemaDiagnosticsReport,
+  RevisionOpportunityReport,
+  RevisionOpportunityTarget
 } from './codexHardening.js';
 
 export { ArcMapSchema, ChapterQueueSchema, ChapterQueueStageSchema, ChapterQueueStatusSchema } from './planningArtifacts.js';

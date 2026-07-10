@@ -733,6 +733,12 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactLineage
   if (/^codex_preview_completeness_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_preview_completeness_report', phase: 'commit' };
   if (/^codex_preview_failure_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_preview_failure_report', phase: 'commit', schemaName: 'CodexPreviewFailureReportSchema' };
   if (/^codex_preview_failure_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_preview_failure_report', phase: 'commit' };
+  if (/^diagnostics_schema_compliance_report_v\d+\.json$/.test(fileName)) return { artifactType: 'diagnostics_schema_compliance_report', phase: 'diagnostics', schemaName: 'DiagnosticsSchemaComplianceReportSchema' };
+  if (/^diagnostics_schema_compliance_report_v\d+\.md$/.test(fileName)) return { artifactType: 'diagnostics_schema_compliance_report', phase: 'diagnostics' };
+  if (/^diagnostics_normalization_report_v\d+\.json$/.test(fileName)) return { artifactType: 'diagnostics_normalization_report', phase: 'diagnostics', schemaName: 'DiagnosticsNormalizationReportSchema' };
+  if (/^diagnostics_normalization_report_v\d+\.md$/.test(fileName)) return { artifactType: 'diagnostics_normalization_report', phase: 'diagnostics' };
+  if (/^codex_diagnostics_schema_benchmark_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_diagnostics_schema_benchmark', phase: 'diagnostics', schemaName: 'CodexDiagnosticsSchemaBenchmarkReportSchema' };
+  if (/^codex_diagnostics_schema_benchmark_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_diagnostics_schema_benchmark', phase: 'diagnostics' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };
   if (/^codex_chapter_quality_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality' };
   if (fileName === 'chapter_summary_for_context.json') return { artifactType: 'codex_chapter_context_summary', phase: 'context', schemaName: 'ChapterContextSummarySchema' };

@@ -12,6 +12,14 @@ import {
   SceneCardsSchema
 } from '../../schemas/index.js';
 import type { ArcMap, CanonPatch, ChapterMission, ChapterPlanRanking, ChapterQueue, DiagnosticsReport, PlanCandidates, RevisionPlan, SceneCards } from '../../schemas/index.js';
+import { normalizeDiagnosticsWithReport } from './diagnosticsNormalizer.js';
+
+export {
+  CodexDiagnosticsProviderOutputSchema,
+  DiagnosticsSemanticContradictionError,
+  normalizeDiagnosticsWithReport,
+  validateDiagnosticsProviderOutput
+} from './diagnosticsNormalizer.js';
 
 export interface CodexNormalizationContext {
   projectId: string;
@@ -81,22 +89,6 @@ const SlimSceneCardsSchema = z.object({
       characters: z.array(z.string()).default(['char_lincheng'])
     })
   )
-});
-
-const SlimDiagnosticsSchema = z.object({
-  chapterNumber: z.number().int().positive(),
-  draftVersion: z.number().int().positive(),
-  passed: z.boolean(),
-  averageScore: z.number().min(0).max(10),
-  issues: z.array(z.string()).default([]),
-  hardChecks: z
-    .object({
-      timeline_consistency: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional(),
-      character_knowledge_consistency: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional(),
-      world_rule_consistency: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional(),
-      no_unplanned_reveal: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional()
-    })
-    .optional()
 });
 
 const SlimRevisionPlanSchema = z.object({
@@ -357,63 +349,7 @@ export function normalizeSceneCards(value: unknown, context: CodexNormalizationC
 }
 
 export function normalizeDiagnostics(value: unknown, context: CodexNormalizationContext): DiagnosticsReport {
-  const slim = SlimDiagnosticsSchema.parse(value);
-  const score = slim.passed ? Math.max(slim.averageScore, 8.5) : slim.averageScore;
-  const normalizationWarnings =
-    slim.passed && slim.averageScore < 8.5
-      ? [
-          {
-            field: 'averageScore',
-            originalValue: slim.averageScore,
-            normalizedValue: score,
-            reason: 'Codex slim diagnostics returned passed=true below the local quality gate floor; local normalizer raised score while preserving a traceable warning.',
-            promptId: 'diagnostics.diagnose_chapter_slim',
-            artifactPath: ''
-          }
-        ]
-      : [];
-  return DiagnosticsReportSchema.parse({
-    chapterNumber: context.chapterNumber ?? slim.chapterNumber,
-    draftVersion: slim.draftVersion,
-    hard_checks: {
-      timeline_consistency: slim.hardChecks?.timeline_consistency ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
-      character_knowledge_consistency: slim.hardChecks?.character_knowledge_consistency ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
-      world_rule_consistency: slim.hardChecks?.world_rule_consistency ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
-      no_unplanned_reveal: slim.hardChecks?.no_unplanned_reveal ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' }
-    },
-    soft_scores: {
-      plot_progression: score,
-      character_consistency: score,
-      tension_curve: score,
-      emotional_impact: score,
-      chapter_hook: score,
-      style_match: score,
-      genre_satisfaction: score,
-      reader_curiosity: score
-    },
-    scores: {
-      total: score,
-      plotProgression: score,
-      characterConsistency: score,
-      tensionCurve: score,
-      emotionalImpact: score,
-      hookStrength: score,
-      styleMatch: score,
-      genreSatisfaction: score,
-      readerCuriosity: score,
-      proseQuality: score
-    },
-    missionSatisfaction: {
-      allRequiredSatisfied: slim.passed,
-      objectiveResults: []
-    },
-    issues: slim.issues.map((issue) => ({
-      type: 'prose',
-      severity: 'medium',
-      message: issue
-    })),
-    normalizationWarnings
-  });
+  return normalizeDiagnosticsWithReport(value, context).report;
 }
 
 export function normalizeRevisionPlan(value: unknown, context: CodexNormalizationContext): RevisionPlan {

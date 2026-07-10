@@ -186,27 +186,64 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       draftVersion: 1,
       passed: mode !== 'codex-controlled-diagnostics-fail',
       averageScore: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
-      issues:
+      hardChecks: [
+        {
+          checkName: 'timeline_consistency',
+          result: mode === 'codex-controlled-diagnostics-fail' ? 'fail' : 'pass',
+          blocking: mode === 'codex-controlled-diagnostics-fail',
+          evidence: mode === 'codex-controlled-diagnostics-fail' && enhancedDiagnosticsContext ? 'draft timestamps conflict with chapter mission sequence' : '',
+          explanation:
+            mode === 'codex-controlled-diagnostics-fail'
+              ? enhancedDiagnosticsContext
+                ? 'confirmed contradiction: timeline conflict remains after enhanced context'
+                : 'timeline hard check failed without detailed evidence'
+              : 'No timeline contradiction found.'
+        },
+        {
+          checkName: 'character_knowledge_consistency',
+          result: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext ? 'fail' : 'pass',
+          blocking: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext,
+          evidence: '',
+          explanation: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext ? 'character knowledge hard check failed without detailed evidence' : 'No character knowledge contradiction found.'
+        },
+        {
+          checkName: 'world_rule_consistency',
+          result: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext ? 'fail' : 'pass',
+          blocking: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext,
+          evidence: '',
+          explanation: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext ? 'world rule hard check failed without detailed evidence' : 'No world rule contradiction found.'
+        },
+        {
+          checkName: 'no_unplanned_reveal',
+          result: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext ? 'fail' : 'pass',
+          blocking: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext,
+          evidence: '',
+          explanation: mode === 'codex-controlled-diagnostics-fail' && !enhancedDiagnosticsContext ? 'unplanned reveal hard check failed without detailed evidence' : 'No unplanned reveal found.'
+        }
+      ],
+      softScores: {
+        plot_progression: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        character_consistency: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        tension_curve: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        emotional_impact: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        chapter_hook: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        style_match: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        genre_satisfaction: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
+        reader_curiosity: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6
+      },
+      diagnostics:
         mode === 'codex-controlled-diagnostics-fail'
-          ? enhancedDiagnosticsContext
-            ? ['timeline inconsistency confirmed by draft timestamps and mission context']
-            : ['timeline hard check failed']
+          ? [
+              {
+                type: 'timeline',
+                severity: enhancedDiagnosticsContext ? 'high' : 'medium',
+                message: enhancedDiagnosticsContext ? 'timeline inconsistency confirmed by draft timestamps and mission context' : 'timeline evidence is incomplete',
+                evidence: enhancedDiagnosticsContext ? 'draft timestamps conflict with chapter mission sequence' : '',
+                recommendation: enhancedDiagnosticsContext ? 'Align the draft timestamps before commit.' : 'Collect canonical timeline evidence.'
+              }
+            ]
           : [],
-      ...(mode === 'codex-controlled-diagnostics-fail' && enhancedDiagnosticsContext
-        ? {
-            hardChecks: {
-              timeline_consistency: {
-                passed: false,
-                severity: 'high',
-                message: 'confirmed contradiction: timeline conflict remains after enhanced context',
-                evidence: 'draft timestamps conflict with chapter mission sequence'
-              },
-              character_knowledge_consistency: { passed: true, message: 'ok: enhanced context supplies character knowledge' },
-              world_rule_consistency: { passed: true, message: 'ok: enhanced context supplies world rules' },
-              no_unplanned_reveal: { passed: true, message: 'ok: enhanced context supplies reveal constraints' }
-            }
-          }
-        : {})
+      revisionRequired: mode === 'codex-controlled-diagnostics-fail'
     },
     'revision.create_revision_plan_slim': {
       chapterNumber,

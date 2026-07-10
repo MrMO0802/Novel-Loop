@@ -267,7 +267,7 @@ export async function runCodexDiagnosticsBenchmark(
   const artifact = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_diagnostics_benchmark');
   let report = await fileStore.writeJson(
     artifact.jsonPath,
-    buildBenchmarkReport(paths.projectId, input.chapterNumber, samples, artifact.version, contextMode, contextManifest.manifestPath),
+    buildCodexDiagnosticsBenchmarkReport(paths.projectId, input.chapterNumber, samples, artifact.version, contextMode, contextManifest.manifestPath),
     CodexDiagnosticsBenchmarkReportSchema
   );
   await fileStore.writeText(artifact.mdPath, renderBenchmarkMarkdown(report));
@@ -663,12 +663,7 @@ async function runDiagnosticsSample(
   if (stateAfter !== stateBefore) {
     throw new Error('diagnostics-benchmark sample mutated Story State');
   }
-  const hardChecks = diagnostics?.hard_checks ?? {
-    timeline_consistency: { passed: false, message: 'sample failed before diagnostics schema validation' },
-    character_knowledge_consistency: { passed: false, message: 'sample failed before diagnostics schema validation' },
-    world_rule_consistency: { passed: false, message: 'sample failed before diagnostics schema validation' },
-    no_unplanned_reveal: { passed: false, message: 'sample failed before diagnostics schema validation' }
-  };
+  const hardChecks = diagnostics?.hard_checks ?? {};
   const averageScore = diagnostics === undefined ? 0 : average(Object.values(diagnostics.soft_scores));
   return CodexDiagnosticsBenchmarkReportSchema.shape.samples.element.parse({
     sampleId,
@@ -680,6 +675,13 @@ async function runDiagnosticsSample(
     passed: diagnostics === undefined ? false : Object.values(diagnostics.hard_checks).every((check) => check.passed),
     retryCount,
     repairCount,
+    rawOutputPath: metrics.rawOutputPath,
+    finalOutputPath: metrics.finalOutputPath,
+    parsedOutputPath: metrics.parsedOutputPath,
+    providerSchemaValid: schemaValid,
+    normalizationSucceeded: schemaValid,
+    internalSchemaValid: schemaValid,
+    semanticConsistency: schemaValid,
     storyStateMutated: false
   });
 }
@@ -696,7 +698,7 @@ async function renderDiagnosticsPrompt(input: RunCodexDiagnosticsBenchmarkInput,
   });
 }
 
-function buildBenchmarkReport(
+export function buildCodexDiagnosticsBenchmarkReport(
   projectIdValue: string,
   chapterNumber: number,
   samples: CodexDiagnosticsBenchmarkSample[],
@@ -705,18 +707,21 @@ function buildBenchmarkReport(
   diagnosticsContextManifestPath: string
 ): CodexDiagnosticsBenchmarkReport {
   const sampleCount = samples.length;
-  const successCount = samples.filter((sample) => sample.schemaValid).length;
+  const schemaValidSamples = samples.filter((sample) => sample.schemaValid);
+  const successCount = schemaValidSamples.length;
   const failureCount = sampleCount - successCount;
-  const hardFailCount = samples.filter((sample) => !sample.passed).length;
+  const observedFailureCountAllSamples = samples.filter((sample) => !sample.passed).length;
+  const hardFailCountAmongSchemaValidSamples = schemaValidSamples.filter((sample) => !sample.passed).length;
   const hardCheckResultsDistribution = HARD_CHECKS.reduce<Record<string, { passed: number; failed: number }>>((accumulator, checkName) => {
     accumulator[checkName] = {
-      passed: samples.filter((sample) => sample.hardChecks[checkName]?.passed === true).length,
-      failed: samples.filter((sample) => sample.hardChecks[checkName]?.passed !== true).length
+      passed: schemaValidSamples.filter((sample) => sample.hardChecks[checkName]?.passed === true).length,
+      failed: schemaValidSamples.filter((sample) => sample.hardChecks[checkName]?.passed === false).length
     };
     return accumulator;
   }, {});
   const scores = samples.map((sample) => sample.averageScore);
-  const hardFailRate = rate(hardFailCount, sampleCount);
+  const observedFailureRateAllSamples = rate(observedFailureCountAllSamples, sampleCount);
+  const hardFailRateAmongSchemaValidSamples = successCount === 0 ? null : rate(hardFailCountAmongSchemaValidSamples, successCount);
   const schemaValidRate = rate(successCount, sampleCount);
   return CodexDiagnosticsBenchmarkReportSchema.parse({
     reportId: `codex_diagnostics_benchmark_ch${formatChapterNumber(chapterNumber)}_v${version}`,
@@ -725,7 +730,16 @@ function buildBenchmarkReport(
     sampleCount,
     successCount,
     failureCount,
-    hardFailRate,
+    totalSampleCount: sampleCount,
+    schemaValidSampleCount: successCount,
+    schemaInvalidSampleCount: failureCount,
+    schemaInvalidRate: rate(failureCount, sampleCount),
+    observedFailureCountAllSamples,
+    observedFailureRateAllSamples,
+    hardFailCountAmongSchemaValidSamples,
+    hardFailRateAmongSchemaValidSamples,
+    experimentValid: successCount > 0,
+    experimentInvalidReason: successCount === 0 ? 'diagnostics_schema_noncompliance' : null,
     hardCheckResultsDistribution,
     averageScoreDistribution: {
       min: scores.length === 0 ? 0 : Math.min(...scores),
@@ -736,9 +750,14 @@ function buildBenchmarkReport(
     repairRate: rate(samples.filter((sample) => sample.repairCount > 0).length, sampleCount),
     schemaValidRate,
     samples,
-    stableFailure: sampleCount > 0 && hardFailRate === 1 && schemaValidRate === 1,
-    likelyFalsePositive: sampleCount > 0 && hardFailRate > 0 && schemaValidRate === 1 && samples.every((sample) => sample.retryCount === 0),
-    recommendation: hardFailRate === 1 ? 'Run diagnostics-analysis and review evidence before retrying revision.' : 'Diagnostics result varies; collect more samples before changing prompts.',
+    stableFailure: sampleCount > 0 && hardFailRateAmongSchemaValidSamples === 1 && schemaValidRate === 1,
+    likelyFalsePositive: sampleCount > 0 && (hardFailRateAmongSchemaValidSamples ?? 0) > 0 && schemaValidRate === 1 && samples.every((sample) => sample.retryCount === 0),
+    recommendation:
+      successCount === 0
+        ? 'Fix diagnostics structured-output schema compliance before interpreting hard-check results.'
+        : hardFailRateAmongSchemaValidSamples === 1
+          ? 'Run diagnostics-analysis and review evidence before retrying revision.'
+          : 'Diagnostics result varies; collect more schema-valid samples before changing prompts.',
     contextMode,
     diagnosticsContextManifestPath,
     generatedAt: new Date().toISOString(),
@@ -759,14 +778,14 @@ async function maybeWriteContextFixReport(
   const artifact = await nextVersionedChapterArtifact(paths, fileStore, chapterNumber, 'codex_diagnostics_context_fix_report');
   const report = await fileStore.writeJson(
     artifact.jsonPath,
-    buildContextFixReport(paths.projectId, chapterNumber, baseline.value, baseline.relativePath, enhancedReport, enhancedReportPath, contextManifestPath, artifact.version),
+    buildCodexDiagnosticsContextFixReport(paths.projectId, chapterNumber, baseline.value, baseline.relativePath, enhancedReport, enhancedReportPath, contextManifestPath, artifact.version),
     CodexDiagnosticsContextFixReportSchema
   );
   await fileStore.writeText(artifact.mdPath, renderContextFixMarkdown(report));
   return { report, reportPath: artifact.relativeJsonPath, markdownPath: artifact.relativeMdPath };
 }
 
-function buildContextFixReport(
+export function buildCodexDiagnosticsContextFixReport(
   projectIdValue: string,
   chapterNumber: number,
   baseline: CodexDiagnosticsBenchmarkReport,
@@ -799,10 +818,20 @@ function buildContextFixReport(
     generatedAt: new Date().toISOString(),
     baselineBenchmarkPath: baselinePath,
     enhancedBenchmarkPath: enhancedPath,
-    baselineHardFailRate: baseline.hardFailRate,
-    enhancedHardFailRate: enhanced.hardFailRate,
-    baselineFalsePositiveRisk: falsePositiveRiskLevel(baselineInsufficientEvidenceCount, baseline.hardFailRate),
-    enhancedFalsePositiveRisk: falsePositiveRiskLevel(enhancedInsufficientEvidenceCount, enhanced.hardFailRate),
+    totalSampleCount: enhanced.samples.length,
+    schemaValidSampleCount: enhanced.samples.filter((sample) => sample.schemaValid).length,
+    schemaInvalidSampleCount: enhanced.samples.filter((sample) => !sample.schemaValid).length,
+    schemaInvalidRate: rate(enhanced.samples.filter((sample) => !sample.schemaValid).length, enhanced.samples.length),
+    observedFailureCountAllSamples: enhanced.samples.filter((sample) => !sample.passed).length,
+    observedFailureRateAllSamples: rate(enhanced.samples.filter((sample) => !sample.passed).length, enhanced.samples.length),
+    hardFailCountAmongSchemaValidSamples: validHardFailCount(enhanced),
+    hardFailRateAmongSchemaValidSamples: validHardFailRate(enhanced),
+    experimentValid: experimentInvalidReason(baseline, enhanced) === null,
+    experimentInvalidReason: experimentInvalidReason(baseline, enhanced),
+    baselineHardFailRateAmongSchemaValidSamples: validHardFailRate(baseline),
+    enhancedHardFailRateAmongSchemaValidSamples: validHardFailRate(enhanced),
+    baselineFalsePositiveRisk: falsePositiveRiskLevel(baselineInsufficientEvidenceCount, validHardFailRate(baseline)),
+    enhancedFalsePositiveRisk: falsePositiveRiskLevel(enhancedInsufficientEvidenceCount, validHardFailRate(enhanced)),
     baselineInsufficientEvidenceCount,
     enhancedInsufficientEvidenceCount,
     hardCheckComparison,
@@ -818,7 +847,10 @@ function classifyBenchmarkCheck(report: CodexDiagnosticsBenchmarkReport, checkNa
   classification: CodexDiagnosticsHardFailureAnalysis['classification'];
   note: string;
 } {
-  const checkResults = report.samples.map((sample) => sample.hardChecks[checkName]).filter((check): check is { passed: boolean; message: string; evidence?: string } => check !== undefined);
+  const checkResults = report.samples.filter((sample) => sample.schemaValid).map((sample) => sample.hardChecks[checkName]).filter((check): check is { passed: boolean; message: string; evidence?: string } => check !== undefined);
+  if (checkResults.length === 0) {
+    return { result: 'schema-invalid', classification: 'schema_or_normalizer_issue', note: 'No schema-valid sample exists for this hard check.' };
+  }
   const failed = checkResults.filter((check) => !check.passed);
   if (failed.length === 0) {
     return { result: 'passed', classification: 'diagnostics_false_positive', note: 'Enhanced diagnostics passed this hard check or no failure remained.' };
@@ -837,9 +869,9 @@ function classifyBenchmarkCheck(report: CodexDiagnosticsBenchmarkReport, checkNa
   return { result: `failed: ${combined}`, classification: 'unknown', note: 'Failure is specific but could not be confidently classified.' };
 }
 
-function falsePositiveRiskLevel(insufficientEvidenceCount: number, hardFailRate: number): 'low' | 'medium' | 'high' {
-  if (insufficientEvidenceCount >= 3 && hardFailRate > 0) return 'high';
-  if (insufficientEvidenceCount > 0 && hardFailRate > 0) return 'medium';
+function falsePositiveRiskLevel(insufficientEvidenceCount: number, hardFailRate: number | null): 'low' | 'medium' | 'high' {
+  if (insufficientEvidenceCount >= 3 && (hardFailRate ?? 0) > 0) return 'high';
+  if (insufficientEvidenceCount > 0 && (hardFailRate ?? 0) > 0) return 'medium';
   return 'low';
 }
 
@@ -850,24 +882,28 @@ function contextFixConclusion(
   enhancedInsufficientEvidenceCount: number,
   comparisons: Array<{ classificationAfter: CodexDiagnosticsHardFailureAnalysis['classification']; evidenceImproved: boolean }>
 ): CodexDiagnosticsContextFixReport['conclusion'] {
-  if (baseline.schemaValidRate < 1 || enhanced.schemaValidRate < 1) return 'requires_human_review';
+  const invalidReason = experimentInvalidReason(baseline, enhanced);
+  if (invalidReason === 'diagnostics_schema_noncompliance') return 'diagnostics_schema_noncompliance';
+  if (invalidReason === 'insufficient_valid_samples') return 'insufficient_valid_samples';
   if (comparisons.some((comparison) => comparison.classificationAfter === 'true_positive_draft_issue')) return 'true_positive_draft_issue_confirmed';
-  if (enhanced.hardFailRate === 0 && enhancedInsufficientEvidenceCount < baselineInsufficientEvidenceCount) return 'diagnostics_context_fix_helped';
-  if (enhancedInsufficientEvidenceCount < baselineInsufficientEvidenceCount) return 'diagnostics_context_fix_helped';
-  if (enhanced.hardFailRate > 0 && enhancedInsufficientEvidenceCount > 0) return 'diagnostics_prompt_still_overstrict';
-  if (enhanced.hardFailRate > 0) return 'requires_revision';
-  if (baseline.hardFailRate === enhanced.hardFailRate) return 'diagnostics_context_fix_no_change';
+  const baselineRate = validHardFailRate(baseline);
+  const enhancedRate = validHardFailRate(enhanced);
+  if (enhancedRate === 0 && (baselineRate ?? 0) > 0) return 'context_fix_helped';
+  if (enhancedInsufficientEvidenceCount < baselineInsufficientEvidenceCount) return 'context_fix_helped';
+  if ((enhancedRate ?? 0) > 0 && enhancedInsufficientEvidenceCount > 0) return 'diagnostics_prompt_overstrict';
+  if ((enhancedRate ?? 0) > 0) return 'requires_revision';
+  if (baselineRate === enhancedRate) return 'context_fix_no_change';
   return 'requires_human_review';
 }
 
 function recommendedNextStepForContextFix(enhanced: CodexDiagnosticsBenchmarkReport, comparisons: Array<{ classificationAfter: CodexDiagnosticsHardFailureAnalysis['classification'] }>): string {
-  if (enhanced.schemaValidRate < 1) {
+  if (enhanced.samples.every((sample) => !sample.schemaValid)) {
     return 'Fix diagnostics JSON schema compliance before interpreting enhanced context impact.';
   }
   if (comparisons.some((comparison) => comparison.classificationAfter === 'true_positive_draft_issue')) {
     return 'Treat the remaining hard failure as a draft issue; do not commit until a revision clears diagnostics.';
   }
-  if (enhanced.hardFailRate === 0) {
+  if (validHardFailRate(enhanced) === 0) {
     return 'Rerun chapter diagnostics with enhanced context before continuing the controlled commit.';
   }
   return 'Send the chapter to human review or refine diagnostics prompt evidence requirements.';
@@ -879,8 +915,11 @@ function renderContextFixMarkdown(report: CodexDiagnosticsContextFixReport): str
     '',
     `projectId: ${report.projectId}`,
     `chapterNumber: ${report.chapterNumber}`,
-    `baselineHardFailRate: ${report.baselineHardFailRate}`,
-    `enhancedHardFailRate: ${report.enhancedHardFailRate}`,
+    `baselineHardFailRateAmongSchemaValidSamples: ${report.baselineHardFailRateAmongSchemaValidSamples ?? 'null'}`,
+    `enhancedHardFailRateAmongSchemaValidSamples: ${report.enhancedHardFailRateAmongSchemaValidSamples ?? 'null'}`,
+    `schemaInvalidRate: ${report.schemaInvalidRate}`,
+    `experimentValid: ${String(report.experimentValid)}`,
+    `experimentInvalidReason: ${report.experimentInvalidReason ?? 'none'}`,
     `baselineFalsePositiveRisk: ${report.baselineFalsePositiveRisk}`,
     `enhancedFalsePositiveRisk: ${report.enhancedFalsePositiveRisk}`,
     `conclusion: ${report.conclusion}`,
@@ -908,17 +947,31 @@ async function latestBenchmarkByMode(
   return candidates.at(-1);
 }
 
-async function readPromptMetrics(paths: ProjectPaths, fileStore: FileStore, runId: string): Promise<{ retryCount: number; repairCount: number }> {
+async function readPromptMetrics(paths: ProjectPaths, fileStore: FileStore, runId: string): Promise<{
+  retryCount: number;
+  repairCount: number;
+  rawOutputPath: string;
+  finalOutputPath: string;
+  parsedOutputPath: string;
+}> {
   try {
     const manifest = await fileStore.readJson(paths.runManifest(runId), RunManifestSchema);
-    if (!isV2(manifest)) return { retryCount: 0, repairCount: 0 };
+    if (!isV2(manifest)) return emptyPromptMetrics();
+    const latestCall = manifest.promptCalls.at(-1);
     return {
       retryCount: manifest.promptCalls.reduce((sum, call) => sum + (call.retryCount ?? 0), 0),
-      repairCount: manifest.promptCalls.filter((call) => call.finishReason === 'repaired').length
+      repairCount: manifest.promptCalls.filter((call) => call.finishReason === 'repaired').length,
+      rawOutputPath: latestCall?.rawOutputPath ?? '',
+      finalOutputPath: latestCall?.finalOutputPath ?? '',
+      parsedOutputPath: latestCall?.parsedOutputPath ?? ''
     };
   } catch {
-    return { retryCount: 0, repairCount: 0 };
+    return emptyPromptMetrics();
   }
+}
+
+function emptyPromptMetrics() {
+  return { retryCount: 0, repairCount: 0, rawOutputPath: '', finalOutputPath: '', parsedOutputPath: '' };
 }
 
 async function findLatestDiagnosticsPrompt(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<{
@@ -1125,7 +1178,10 @@ function renderBenchmarkMarkdown(report: CodexDiagnosticsBenchmarkReport): strin
     `diagnosticsContextManifestPath: ${report.diagnosticsContextManifestPath ?? 'none'}`,
     `contextFixReportPath: ${report.contextFixReportPath ?? 'none'}`,
     `sampleCount: ${report.sampleCount}`,
-    `hardFailRate: ${report.hardFailRate}`,
+    `observedFailureRateAllSamples: ${report.observedFailureRateAllSamples}`,
+    `hardFailRateAmongSchemaValidSamples: ${report.hardFailRateAmongSchemaValidSamples ?? 'null'}`,
+    `experimentValid: ${String(report.experimentValid)}`,
+    `experimentInvalidReason: ${report.experimentInvalidReason ?? 'none'}`,
     `schemaValidRate: ${report.schemaValidRate}`,
     `stableFailure: ${String(report.stableFailure)}`,
     `recommendation: ${report.recommendation}`
@@ -1166,6 +1222,28 @@ function summarizeText(text: string, limit = 6000): string {
 
 function average(values: number[]): number {
   return values.length === 0 ? 0 : values.reduce((sum, value) => sum + value, 0) / values.length;
+}
+
+function validHardFailCount(report: CodexDiagnosticsBenchmarkReport): number {
+  return report.samples.filter((sample) => sample.schemaValid && !sample.passed).length;
+}
+
+function validHardFailRate(report: CodexDiagnosticsBenchmarkReport): number | null {
+  const validCount = report.samples.filter((sample) => sample.schemaValid).length;
+  return validCount === 0 ? null : rate(validHardFailCount(report), validCount);
+}
+
+function experimentInvalidReason(
+  baseline: CodexDiagnosticsBenchmarkReport,
+  enhanced: CodexDiagnosticsBenchmarkReport
+): 'diagnostics_schema_noncompliance' | 'insufficient_valid_samples' | null {
+  const baselineValidCount = baseline.samples.filter((sample) => sample.schemaValid).length;
+  const enhancedValidCount = enhanced.samples.filter((sample) => sample.schemaValid).length;
+  if (baselineValidCount === 0 || enhancedValidCount === 0) return 'diagnostics_schema_noncompliance';
+  if (baselineValidCount < Math.min(2, baseline.samples.length) || enhancedValidCount < Math.min(2, enhanced.samples.length)) {
+    return 'insufficient_valid_samples';
+  }
+  return null;
 }
 
 function rate(count: number, total: number): number {

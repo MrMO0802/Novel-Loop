@@ -1,34 +1,146 @@
 {
   "type": "object",
-  "required": ["chapterNumber", "draftVersion", "passed", "averageScore", "issues"],
+  "required": [
+    "chapterNumber",
+    "draftVersion",
+    "passed",
+    "averageScore",
+    "hardChecks",
+    "softScores",
+    "diagnostics",
+    "revisionRequired"
+  ],
   "properties": {
-    "chapterNumber": { "type": "integer" },
-    "draftVersion": { "type": "integer" },
-    "passed": { "type": "boolean" },
-    "averageScore": { "type": "number" },
-    "issues": { "type": "array", "items": { "type": "string" } },
+    "chapterNumber": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "draftVersion": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "passed": {
+      "type": "boolean"
+    },
+    "averageScore": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 10
+    },
     "hardChecks": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "required": [
+          "checkName",
+          "result",
+          "blocking",
+          "evidence",
+          "explanation"
+        ],
+        "properties": {
+          "checkName": {
+            "type": "string",
+            "enum": [
+              "timeline_consistency",
+              "character_knowledge_consistency",
+              "world_rule_consistency",
+              "no_unplanned_reveal"
+            ]
+          },
+          "result": {
+            "type": "string",
+            "enum": [
+              "pass",
+              "fail",
+              "insufficient_evidence",
+              "possible_risk"
+            ]
+          },
+          "blocking": {
+            "type": "boolean"
+          },
+          "evidence": {
+            "type": "string"
+          },
+          "explanation": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      }
+    },
+    "softScores": {
       "type": "object",
+      "required": [
+        "plot_progression",
+        "character_consistency",
+        "tension_curve",
+        "emotional_impact",
+        "chapter_hook",
+        "style_match",
+        "genre_satisfaction",
+        "reader_curiosity"
+      ],
       "properties": {
-        "timeline_consistency": { "$ref": "#/$defs/hardCheck" },
-        "character_knowledge_consistency": { "$ref": "#/$defs/hardCheck" },
-        "world_rule_consistency": { "$ref": "#/$defs/hardCheck" },
-        "no_unplanned_reveal": { "$ref": "#/$defs/hardCheck" }
+        "plot_progression": { "type": "number", "minimum": 0, "maximum": 10 },
+        "character_consistency": { "type": "number", "minimum": 0, "maximum": 10 },
+        "tension_curve": { "type": "number", "minimum": 0, "maximum": 10 },
+        "emotional_impact": { "type": "number", "minimum": 0, "maximum": 10 },
+        "chapter_hook": { "type": "number", "minimum": 0, "maximum": 10 },
+        "style_match": { "type": "number", "minimum": 0, "maximum": 10 },
+        "genre_satisfaction": { "type": "number", "minimum": 0, "maximum": 10 },
+        "reader_curiosity": { "type": "number", "minimum": 0, "maximum": 10 }
       },
       "additionalProperties": false
-    }
-  },
-  "$defs": {
-    "hardCheck": {
-      "type": "object",
-      "required": ["passed", "message"],
-      "properties": {
-        "passed": { "type": "boolean" },
-        "message": { "type": "string" },
-        "evidence": { "type": "string" },
-        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
-      },
-      "additionalProperties": false
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "type",
+          "severity",
+          "message",
+          "evidence",
+          "recommendation"
+        ],
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "timeline",
+              "character",
+              "knowledge",
+              "world_rule",
+              "pacing",
+              "style",
+              "hook",
+              "debt",
+              "reveal",
+              "prose"
+            ]
+          },
+          "severity": {
+            "type": "string",
+            "enum": [
+              "low",
+              "medium",
+              "high",
+              "critical"
+            ]
+          },
+          "message": { "type": "string" },
+          "evidence": { "type": "string" },
+          "recommendation": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
+    "revisionRequired": {
+      "type": "boolean"
     }
   },
   "additionalProperties": false

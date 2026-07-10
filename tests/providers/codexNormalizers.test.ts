@@ -11,7 +11,24 @@ describe('Codex slim normalizers', () => {
         draftVersion: 1,
         passed: true,
         averageScore: 8,
-        issues: []
+        hardChecks: [
+          { checkName: 'timeline_consistency', result: 'pass', blocking: false, evidence: '', explanation: 'ok' },
+          { checkName: 'character_knowledge_consistency', result: 'pass', blocking: false, evidence: '', explanation: 'ok' },
+          { checkName: 'world_rule_consistency', result: 'pass', blocking: false, evidence: '', explanation: 'ok' },
+          { checkName: 'no_unplanned_reveal', result: 'pass', blocking: false, evidence: '', explanation: 'ok' }
+        ],
+        softScores: {
+          plot_progression: 8,
+          character_consistency: 8,
+          tension_curve: 8,
+          emotional_impact: 8,
+          chapter_hook: 8,
+          style_match: 8,
+          genre_satisfaction: 8,
+          reader_curiosity: 8
+        },
+        diagnostics: [],
+        revisionRequired: false
       },
       { projectId: 'demo-novel', chapterNumber: 1 }
     );

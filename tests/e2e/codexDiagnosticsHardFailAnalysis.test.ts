@@ -103,7 +103,9 @@ describe('M27.10 Codex diagnostics hard-fail analysis', () => {
     const report = await store.readJson(paths.chapterArtifact(1, 'codex_diagnostics_benchmark_v1.json'), CodexDiagnosticsBenchmarkReportSchema);
     expect(report.sampleCount).toBe(2);
     expect(report.schemaValidRate).toBe(1);
-    expect(report.hardFailRate).toBe(1);
+    expect(report.observedFailureRateAllSamples).toBe(1);
+    expect(report.hardFailRateAmongSchemaValidSamples).toBe(1);
+    expect(report.experimentValid).toBe(true);
     expect(report.samples.every((sample) => sample.storyStateMutated === false)).toBe(true);
     expect(report.stableFailure).toBe(true);
     await expect(store.readJson(paths.storyState(), StoryStateSchema)).resolves.toEqual(beforeState);

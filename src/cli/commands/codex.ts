@@ -5,6 +5,7 @@ import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOp
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
 import { generateCodexDiagnosticsHardFailAnalysis, runCodexDiagnosticsBenchmark } from '../../app/codexDiagnosticsHardFailAnalysis.js';
+import { runCodexDiagnosticsSchemaBenchmark } from '../../app/codexDiagnosticsSchemaCompliance.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
 import { evaluateCodexCrossChapterDrift, runCodexMultiChapterPilot } from '../../app/codexMultiChapterPilot.js';
@@ -624,12 +625,64 @@ export function registerCodexCommand(program: Command): void {
           `contextMode: ${result.report.contextMode}`,
           `diagnosticsContextManifestPath: ${result.report.diagnosticsContextManifestPath ?? 'none'}`,
           `contextFixReportPath: ${result.report.contextFixReportPath ?? 'none'}`,
-          `hardFailRate: ${result.report.hardFailRate}`,
+          `observedFailureRateAllSamples: ${result.report.observedFailureRateAllSamples}`,
+          `hardFailRateAmongSchemaValidSamples: ${result.report.hardFailRateAmongSchemaValidSamples ?? 'null'}`,
           `schemaValidRate: ${result.report.schemaValidRate}`,
+          `experimentValid: ${String(result.report.experimentValid)}`,
+          `experimentInvalidReason: ${result.report.experimentInvalidReason ?? 'none'}`,
           `stableFailure: ${String(result.report.stableFailure)}`,
           `recommendation: ${result.report.recommendation}`
         ].join('\n') + '\n'
       );
+    });
+
+  addCodexPilotOptions(addBoundaryOptions(codex.command('diagnostics-schema-benchmark').description('[pilot diagnostic] Test only the Codex diagnostics structured-output contract')))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--samples <count>', 'sample count', '5')
+    .option('--context-mode <mode>', 'diagnostics context mode: baseline|enhanced', 'enhanced')
+    .option('--timeout-ms <ms>', 'alias for codex timeout', '180000')
+    .option('--prompt-root <path>', 'prompt root directory', './prompts')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexDiagnosticsSchemaBenchmark({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        promptRoot: options.promptRoot ?? './prompts',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        samples: parsePositiveInteger(options.samples ?? '5', 'samples'),
+        contextMode: parseDiagnosticsContextMode(options.contextMode ?? 'enhanced'),
+        ...resolveCodexCliOptions({
+          ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+          codexProfile: options.codexProfile ?? 'clean',
+          codexJsonRetries: options.codexJsonRetries ?? '2',
+          ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+          codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+          codexTimeoutMs: options.codexTimeoutMs ?? options.timeoutMs ?? '180000'
+        })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write(
+        [
+          `codexDiagnosticsSchemaBenchmark: ${result.report.releaseGatePassed ? 'pass' : 'fail'}`,
+          `reportPath: ${result.reportPath}`,
+          `markdownPath: ${result.markdownPath}`,
+          `complianceReportPath: ${result.complianceReportPath}`,
+          `sampleCount: ${result.report.sampleCount}`,
+          `parseValidRate: ${result.report.parseValidRate}`,
+          `providerSchemaValidRate: ${result.report.providerSchemaValidRate}`,
+          `normalizationSuccessRate: ${result.report.normalizationSuccessRate}`,
+          `internalSchemaValidRate: ${result.report.internalSchemaValidRate}`,
+          `semanticConsistencyRate: ${result.report.semanticConsistencyRate}`,
+          `repairRate: ${result.report.repairRate}`,
+          `retryRate: ${result.report.retryRate}`,
+          `releaseGatePassed: ${String(result.report.releaseGatePassed)}`
+        ].join('\n') + '\n'
+      );
+      if (!result.report.releaseGatePassed) process.exitCode = 1;
     });
 
   program

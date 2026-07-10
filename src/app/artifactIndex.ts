@@ -270,6 +270,12 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^codex_diagnostics_benchmark_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_diagnostics_benchmark', phase: 'diagnostics' };
   if (/^codex_diagnostics_context_fix_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_diagnostics_context_fix_report', phase: 'diagnostics', schemaName: 'CodexDiagnosticsContextFixReportSchema' };
   if (/^codex_diagnostics_context_fix_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_diagnostics_context_fix_report', phase: 'diagnostics' };
+  if (/^diagnostics_schema_compliance_report_v\d+\.json$/.test(fileName)) return { artifactType: 'diagnostics_schema_compliance_report', phase: 'diagnostics', schemaName: 'DiagnosticsSchemaComplianceReportSchema' };
+  if (/^diagnostics_schema_compliance_report_v\d+\.md$/.test(fileName)) return { artifactType: 'diagnostics_schema_compliance_report', phase: 'diagnostics' };
+  if (/^diagnostics_normalization_report_v\d+\.json$/.test(fileName)) return { artifactType: 'diagnostics_normalization_report', phase: 'diagnostics', schemaName: 'DiagnosticsNormalizationReportSchema' };
+  if (/^diagnostics_normalization_report_v\d+\.md$/.test(fileName)) return { artifactType: 'diagnostics_normalization_report', phase: 'diagnostics' };
+  if (/^codex_diagnostics_schema_benchmark_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_diagnostics_schema_benchmark', phase: 'diagnostics', schemaName: 'CodexDiagnosticsSchemaBenchmarkReportSchema' };
+  if (/^codex_diagnostics_schema_benchmark_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_diagnostics_schema_benchmark', phase: 'diagnostics' };
   if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision', schemaName: 'RevisionOpportunityReportSchema' };
   if (/^revision_opportunity_report_v\d+\.md$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };

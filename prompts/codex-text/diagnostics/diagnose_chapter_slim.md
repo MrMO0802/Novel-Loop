@@ -15,9 +15,15 @@ Rules:
 - No explanation.
 - Set `passed` false if any hard continuity problem is present.
 - If `passed` is true, set `averageScore` to 8.5 or higher.
-- Include issues as an array; use an empty array if there are no issues.
-- If enhanced context is provided, cite concrete evidence in `hardChecks` when a hard check fails.
-- If evidence is missing, prefer an issue that says insufficient evidence instead of inventing a contradiction.
+- Return all required top-level fields: `chapterNumber`, `draftVersion`, `passed`, `averageScore`, `hardChecks`, `softScores`, `diagnostics`, and `revisionRequired`.
+- Return exactly four `hardChecks`, one for each schema-defined `checkName`; never invent a check name.
+- Every hard check must contain `checkName`, `result`, `blocking`, `evidence`, and `explanation`.
+- Use `fail` with `blocking=true` only for a concrete hard contradiction supported by evidence.
+- Use `insufficient_evidence` or `possible_risk` with `blocking=false` when evidence is incomplete; these are not hard failures.
+- Include `diagnostics` as an array; use an empty array if there are no issues.
+- Every diagnostics item must contain `type`, `severity`, `message`, `evidence`, and `recommendation`.
+- If enhanced context is provided, cite concrete evidence in the matching hard check.
+- Do not add properties that are absent from the output schema.
 
 <chapter_number>
 {{CHAPTER_NUMBER}}

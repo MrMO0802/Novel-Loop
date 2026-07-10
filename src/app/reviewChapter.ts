@@ -215,8 +215,10 @@ async function appendDiagnosticsContextFix(lines: string[], paths: ProjectPaths,
   if (latest === undefined) return;
   lines.push('', 'Diagnostics context fix');
   lines.push(`- path: ${latest.path}`);
-  lines.push(`- baselineHardFailRate: ${latest.value.baselineHardFailRate}`);
-  lines.push(`- enhancedHardFailRate: ${latest.value.enhancedHardFailRate}`);
+  lines.push(`- baselineHardFailRateAmongSchemaValidSamples: ${latest.value.baselineHardFailRateAmongSchemaValidSamples ?? 'null'}`);
+  lines.push(`- enhancedHardFailRateAmongSchemaValidSamples: ${latest.value.enhancedHardFailRateAmongSchemaValidSamples ?? 'null'}`);
+  lines.push(`- experimentValid: ${String(latest.value.experimentValid)}`);
+  lines.push(`- experimentInvalidReason: ${latest.value.experimentInvalidReason ?? 'none'}`);
   lines.push(`- baselineFalsePositiveRisk: ${latest.value.baselineFalsePositiveRisk}`);
   lines.push(`- enhancedFalsePositiveRisk: ${latest.value.enhancedFalsePositiveRisk}`);
   lines.push(`- conclusion: ${latest.value.conclusion}`);

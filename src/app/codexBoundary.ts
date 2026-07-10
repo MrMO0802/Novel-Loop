@@ -332,6 +332,17 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
         reason: `timeoutMs=${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}`
       });
     }
+    if (commandResult.exitCode !== 0) {
+      if (await fileStore.exists(paths.projectArtifact(finalOutputPath))) {
+        const failedFinalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
+        await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
+        await fileStore.writeText(paths.projectArtifact(finalOutputPath), redactSensitive(failedFinalText));
+        await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
+      }
+      throw new AppError('CODEX_EXEC_FAILED', `Codex CLI command failed: ${stderrExcerpt || 'non-zero exit; inspect redacted raw JSONL'}`, 1, {
+        reason: `exit=${commandResult.exitCode}`
+      });
+    }
     if (!(await fileStore.exists(paths.projectArtifact(finalOutputPath)))) {
       const extracted = extractFinalMessage(commandResult.stdout);
       if (extracted.trim().length === 0) {

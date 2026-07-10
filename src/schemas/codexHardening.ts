@@ -374,6 +374,19 @@ export const CodexDiagnosticsBenchmarkSampleSchema = z.object({
   passed: z.boolean(),
   retryCount: z.number().int().nonnegative(),
   repairCount: z.number().int().nonnegative(),
+  rawOutputPath: z.string().default(''),
+  finalOutputPath: z.string().default(''),
+  parsedOutputPath: z.string().default(''),
+  providerSchemaValid: z.boolean().default(false),
+  normalizationSucceeded: z.boolean().default(false),
+  internalSchemaValid: z.boolean().default(false),
+  semanticConsistency: z.boolean().default(false),
+  providerSchemaErrors: z.array(z.string()).default([]),
+  parseErrors: z.array(z.string()).default([]),
+  normalizationErrors: z.array(z.string()).default([]),
+  internalSchemaErrors: z.array(z.string()).default([]),
+  semanticContradictions: z.array(z.string()).default([]),
+  normalizationReportPath: z.string().optional(),
   storyStateMutated: z.literal(false)
 });
 
@@ -384,7 +397,17 @@ export const CodexDiagnosticsBenchmarkReportSchema = z.object({
   sampleCount: z.number().int().positive(),
   successCount: z.number().int().nonnegative(),
   failureCount: z.number().int().nonnegative(),
-  hardFailRate: z.number().min(0).max(1),
+  hardFailRate: z.number().min(0).max(1).optional(),
+  totalSampleCount: z.number().int().positive().default(1),
+  schemaValidSampleCount: z.number().int().nonnegative().default(0),
+  schemaInvalidSampleCount: z.number().int().nonnegative().default(0),
+  schemaInvalidRate: z.number().min(0).max(1).default(0),
+  observedFailureCountAllSamples: z.number().int().nonnegative().default(0),
+  observedFailureRateAllSamples: z.number().min(0).max(1).default(0),
+  hardFailCountAmongSchemaValidSamples: z.number().int().nonnegative().default(0),
+  hardFailRateAmongSchemaValidSamples: z.number().min(0).max(1).nullable().default(null),
+  experimentValid: z.boolean().default(false),
+  experimentInvalidReason: z.string().nullable().default(null),
   hardCheckResultsDistribution: z.record(z.string(), z.object({ passed: z.number().int().nonnegative(), failed: z.number().int().nonnegative() })),
   averageScoreDistribution: z.object({
     min: z.number().min(0).max(10),
@@ -423,8 +446,20 @@ export const CodexDiagnosticsContextFixReportSchema = z.object({
   generatedAt: z.string(),
   baselineBenchmarkPath: z.string(),
   enhancedBenchmarkPath: z.string(),
-  baselineHardFailRate: z.number().min(0).max(1),
-  enhancedHardFailRate: z.number().min(0).max(1),
+  baselineHardFailRate: z.number().min(0).max(1).optional(),
+  enhancedHardFailRate: z.number().min(0).max(1).optional(),
+  totalSampleCount: z.number().int().nonnegative().default(0),
+  schemaValidSampleCount: z.number().int().nonnegative().default(0),
+  schemaInvalidSampleCount: z.number().int().nonnegative().default(0),
+  schemaInvalidRate: z.number().min(0).max(1).default(0),
+  observedFailureCountAllSamples: z.number().int().nonnegative().default(0),
+  observedFailureRateAllSamples: z.number().min(0).max(1).default(0),
+  hardFailCountAmongSchemaValidSamples: z.number().int().nonnegative().default(0),
+  hardFailRateAmongSchemaValidSamples: z.number().min(0).max(1).nullable().default(null),
+  experimentValid: z.boolean().default(false),
+  experimentInvalidReason: z.string().nullable().default(null),
+  baselineHardFailRateAmongSchemaValidSamples: z.number().min(0).max(1).nullable().default(null),
+  enhancedHardFailRateAmongSchemaValidSamples: z.number().min(0).max(1).nullable().default(null),
   baselineFalsePositiveRisk: z.enum(['low', 'medium', 'high']),
   enhancedFalsePositiveRisk: z.enum(['low', 'medium', 'high']),
   baselineInsufficientEvidenceCount: z.number().int().nonnegative(),
@@ -432,14 +467,141 @@ export const CodexDiagnosticsContextFixReportSchema = z.object({
   hardCheckComparison: z.array(CodexDiagnosticsContextFixHardCheckComparisonSchema),
   contextManifestPath: z.string(),
   conclusion: z.enum([
+    'diagnostics_schema_noncompliance',
+    'insufficient_valid_samples',
+    'context_fix_helped',
+    'context_fix_no_change',
     'diagnostics_context_fix_helped',
     'diagnostics_context_fix_no_change',
     'true_positive_draft_issue_confirmed',
+    'diagnostics_prompt_overstrict',
     'diagnostics_prompt_still_overstrict',
     'requires_revision',
     'requires_human_review'
   ]),
   recommendedNextStep: z.string(),
+  storyStateMutated: z.literal(false)
+});
+
+export const DiagnosticsSchemaFailureLayerSchema = z.enum([
+  'codex_final_output',
+  'provider_json_schema',
+  'json_parser',
+  'provider_normalizer',
+  'internal_zod_schema',
+  'cross_layer_schema_drift',
+  'unknown'
+]);
+
+export const DiagnosticsSchemaViolationSampleSchema = z.object({
+  sampleId: z.string(),
+  runId: z.string(),
+  rawOutputPath: z.string(),
+  finalOutputPath: z.string(),
+  parsedOutputPath: z.string(),
+  providerSchemaValid: z.boolean(),
+  normalizationSucceeded: z.boolean(),
+  internalSchemaValid: z.boolean(),
+  providerSchemaErrors: z.array(z.string()),
+  parseErrors: z.array(z.string()),
+  normalizationErrors: z.array(z.string()),
+  internalSchemaErrors: z.array(z.string()),
+  unexpectedProperties: z.array(z.string()),
+  missingRequiredFields: z.array(z.string()),
+  invalidEnumValues: z.array(z.string()),
+  invalidTypes: z.array(z.string()),
+  semanticContradictions: z.array(z.string())
+});
+
+export const DiagnosticsSchemaViolationSummarySchema = z.object({
+  providerSchemaViolationCount: z.number().int().nonnegative(),
+  parseErrorCount: z.number().int().nonnegative(),
+  normalizationErrorCount: z.number().int().nonnegative(),
+  internalSchemaErrorCount: z.number().int().nonnegative(),
+  semanticContradictionCount: z.number().int().nonnegative(),
+  missingRequiredFieldCount: z.number().int().nonnegative(),
+  unexpectedPropertyCount: z.number().int().nonnegative(),
+  invalidEnumValueCount: z.number().int().nonnegative(),
+  invalidTypeCount: z.number().int().nonnegative()
+});
+
+export const DiagnosticsSchemaComplianceReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  contextMode: DiagnosticsContextModeSchema,
+  generatedAt: z.string(),
+  providerSchemaPath: z.string(),
+  internalSchemaName: z.literal('DiagnosticsReportSchema'),
+  sampleCount: z.number().int().positive(),
+  validSampleCount: z.number().int().nonnegative(),
+  invalidSampleCount: z.number().int().nonnegative(),
+  violationsBySample: z.array(DiagnosticsSchemaViolationSampleSchema),
+  violationSummary: DiagnosticsSchemaViolationSummarySchema,
+  likelyFailureLayer: DiagnosticsSchemaFailureLayerSchema,
+  recommendedFixes: z.array(z.string()),
+  storyStateMutated: z.literal(false)
+});
+
+export const DiagnosticsNormalizationReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  contextMode: DiagnosticsContextModeSchema,
+  sampleId: z.string(),
+  runId: z.string(),
+  parsedOutputPath: z.string(),
+  generatedAt: z.string(),
+  normalizationSucceeded: z.boolean(),
+  internalSchemaValid: z.boolean(),
+  normalizationWarnings: z.array(DiagnosticsNormalizationWarningSchema),
+  normalizationErrors: z.array(z.string()),
+  internalSchemaErrors: z.array(z.string()),
+  semanticContradictions: z.array(z.string()),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexDiagnosticsSchemaBenchmarkSampleSchema = z.object({
+  sampleId: z.string(),
+  runId: z.string(),
+  durationMs: z.number().int().nonnegative(),
+  rawOutputPath: z.string(),
+  finalOutputPath: z.string(),
+  parsedOutputPath: z.string(),
+  normalizationReportPath: z.string(),
+  parseValid: z.boolean(),
+  providerSchemaValid: z.boolean(),
+  normalizationSucceeded: z.boolean(),
+  internalSchemaValid: z.boolean(),
+  semanticConsistent: z.boolean(),
+  retryCount: z.number().int().nonnegative(),
+  repairUsed: z.boolean(),
+  errors: z.array(z.string()),
+  storyStateMutated: z.literal(false)
+});
+
+export const CodexDiagnosticsSchemaBenchmarkReportSchema = z.object({
+  reportId: z.string(),
+  projectId: z.string(),
+  chapterNumber: z.number().int().positive(),
+  contextMode: DiagnosticsContextModeSchema,
+  generatedAt: z.string(),
+  providerSchemaPath: z.string(),
+  internalSchemaName: z.literal('DiagnosticsReportSchema'),
+  diagnosticsContextManifestPath: z.string(),
+  complianceReportPath: z.string(),
+  sampleCount: z.number().int().positive(),
+  parseValidRate: z.number().min(0).max(1),
+  providerSchemaValidRate: z.number().min(0).max(1),
+  normalizationSuccessRate: z.number().min(0).max(1),
+  internalSchemaValidRate: z.number().min(0).max(1),
+  semanticConsistencyRate: z.number().min(0).max(1),
+  repairRate: z.number().min(0).max(1),
+  retryRate: z.number().min(0).max(1),
+  samples: z.array(CodexDiagnosticsSchemaBenchmarkSampleSchema),
+  releaseGatePassed: z.boolean(),
+  releaseGateReasons: z.array(z.string()),
+  canonicalDiagnosticsMutated: z.literal(false),
   storyStateMutated: z.literal(false)
 });
 
@@ -1923,6 +2085,12 @@ export type CodexDiagnosticsBenchmarkSample = z.infer<typeof CodexDiagnosticsBen
 export type CodexDiagnosticsBenchmarkReport = z.infer<typeof CodexDiagnosticsBenchmarkReportSchema>;
 export type CodexDiagnosticsContextFixHardCheckComparison = z.infer<typeof CodexDiagnosticsContextFixHardCheckComparisonSchema>;
 export type CodexDiagnosticsContextFixReport = z.infer<typeof CodexDiagnosticsContextFixReportSchema>;
+export type DiagnosticsSchemaFailureLayer = z.infer<typeof DiagnosticsSchemaFailureLayerSchema>;
+export type DiagnosticsSchemaViolationSample = z.infer<typeof DiagnosticsSchemaViolationSampleSchema>;
+export type DiagnosticsSchemaComplianceReport = z.infer<typeof DiagnosticsSchemaComplianceReportSchema>;
+export type DiagnosticsNormalizationReport = z.infer<typeof DiagnosticsNormalizationReportSchema>;
+export type CodexDiagnosticsSchemaBenchmarkSample = z.infer<typeof CodexDiagnosticsSchemaBenchmarkSampleSchema>;
+export type CodexDiagnosticsSchemaBenchmarkReport = z.infer<typeof CodexDiagnosticsSchemaBenchmarkReportSchema>;
 export type RevisionOpportunityReport = z.infer<typeof RevisionOpportunityReportSchema>;
 export type RevisionOpportunityTarget = z.infer<typeof RevisionOpportunityTargetSchema>;
 export type CodexChapterQualityReport = z.infer<typeof CodexChapterQualityReportSchema>;

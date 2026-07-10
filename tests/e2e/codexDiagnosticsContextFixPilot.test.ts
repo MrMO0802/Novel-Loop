@@ -119,8 +119,9 @@ describe('M27.11 diagnostics context fix pilot', () => {
     expect(fix.baselineBenchmarkPath).toBe('chapters/chapter_001/codex_diagnostics_benchmark_v1.json');
     expect(fix.enhancedBenchmarkPath).toBe('chapters/chapter_001/codex_diagnostics_benchmark_v2.json');
     expect(fix.contextManifestPath).toBe('chapters/chapter_001/diagnostics_context_manifest_v2.json');
-    expect(fix.baselineHardFailRate).toBe(1);
-    expect(fix.enhancedHardFailRate).toBe(1);
+    expect(fix.baselineHardFailRateAmongSchemaValidSamples).toBe(1);
+    expect(fix.enhancedHardFailRateAmongSchemaValidSamples).toBe(1);
+    expect(fix.experimentValid).toBe(true);
     expect(fix.enhancedInsufficientEvidenceCount).toBeLessThan(fix.baselineInsufficientEvidenceCount);
     expect(fix.hardCheckComparison.find((item) => item.checkName === 'timeline_consistency')?.classificationAfter).toBe('true_positive_draft_issue');
     expect(fix.conclusion).toBe('true_positive_draft_issue_confirmed');
@@ -136,12 +137,23 @@ describe('M27.11 diagnostics context fix pilot', () => {
 
     const review = await reviewChapter({ projectId, projectsRoot: tempRoot, chapterNumber: 1, diagnostics: true, artifacts: true, suggestNext: true }, store);
     expect(review).toContain('Diagnostics context fix');
-    expect(review).toContain('baselineHardFailRate: 1');
-    expect(review).toContain('enhancedHardFailRate: 1');
+    expect(review).toContain('baselineHardFailRateAmongSchemaValidSamples: 1');
+    expect(review).toContain('enhancedHardFailRateAmongSchemaValidSamples: 1');
     expect(review).toContain('true_positive_draft_issue_confirmed');
 
     const audit = await auditProject({ projectId, projectsRoot: tempRoot, strict: true, fixIndex: true }, store);
     expect(audit.ok).toBe(true);
+
+    const benchmarkPath = paths.chapterArtifact(1, 'codex_diagnostics_benchmark_v2.json');
+    const tampered = JSON.parse(await store.readText(benchmarkPath)) as Record<string, unknown>;
+    tampered.schemaValidSampleCount = 0;
+    tampered.schemaInvalidSampleCount = 2;
+    tampered.hardFailCountAmongSchemaValidSamples = 2;
+    tampered.hardFailRateAmongSchemaValidSamples = 1;
+    await store.writeText(benchmarkPath, `${JSON.stringify(tampered, null, 2)}\n`);
+    const invalidAudit = await auditProject({ projectId, projectsRoot: tempRoot, strict: true, fixIndex: true }, store);
+    expect(invalidAudit.ok).toBe(false);
+    expect(invalidAudit.report.issues.some((issue) => issue.issueId.includes('invalid_denominator'))).toBe(true);
   });
 });
 

@@ -16,9 +16,12 @@ import {
   CodexContextManifestSchema,
   CodexDiagnosticsBenchmarkReportSchema,
   CodexDiagnosticsContextFixReportSchema,
+  CodexDiagnosticsSchemaBenchmarkReportSchema,
   CodexDiagnosticsContextAuditSchema,
   CodexDiagnosticsHardFailAnalysisSchema,
   DiagnosticsContextManifestSchema,
+  DiagnosticsNormalizationReportSchema,
+  DiagnosticsSchemaComplianceReportSchema,
   CodexCrossChapterContinuityReportSchema,
   CodexCrossChapterDriftReportSchema,
   CodexMultiChapterPilotReportSchema,
@@ -580,6 +583,18 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, absolutePath, 'codex_diagnostics_context_fix', relativePath, CodexDiagnosticsContextFixReportSchema);
         await checkCodexDiagnosticsContextFixReport(issues, paths, fileStore, absolutePath, relativePath);
       }
+      if (/^diagnostics_schema_compliance_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'diagnostics_schema_compliance', relativePath, DiagnosticsSchemaComplianceReportSchema);
+        await checkDiagnosticsSchemaComplianceReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^diagnostics_normalization_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'diagnostics_normalization', relativePath, DiagnosticsNormalizationReportSchema);
+        await checkDiagnosticsNormalizationReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^codex_diagnostics_schema_benchmark_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'codex_diagnostics_schema_benchmark', relativePath, CodexDiagnosticsSchemaBenchmarkReportSchema);
+        await checkCodexDiagnosticsSchemaBenchmark(issues, paths, fileStore, absolutePath, relativePath);
+      }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
         await checkRevisionOpportunityReport(issues, absolutePath, relativePath, fileStore);
@@ -912,6 +927,51 @@ async function checkCodexDiagnosticsBenchmark(
         true
       ));
     }
+    const rawReport = JSON.parse(await fileStore.readText(absolutePath)) as unknown;
+    const hasM2712Statistics = isUnknownRecord(rawReport) && 'hardFailRateAmongSchemaValidSamples' in rawReport;
+    if (!hasM2712Statistics) {
+      issues.push(issue(
+        `codex_diagnostics_benchmark_legacy_statistics_${sanitizeIssueId(relativePath)}`,
+        'warning',
+        'codex_diagnostics_benchmark',
+        relativePath,
+        'Legacy diagnostics benchmark has no schema-valid-only hard-fail statistics.',
+        'Rerun diagnostics-benchmark after M27.12A before interpreting its hard-fail rate.',
+        false
+      ));
+    } else {
+      const validSamples = report.samples.filter((sample) => sample.schemaValid);
+      const invalidSamples = report.samples.filter((sample) => !sample.schemaValid);
+      const validHardFailCount = validSamples.filter((sample) => !sample.passed).length;
+      const expectedHardFailRate = validSamples.length === 0 ? null : roundedRate(validHardFailCount, validSamples.length);
+      if (
+        report.schemaValidSampleCount !== validSamples.length ||
+        report.schemaInvalidSampleCount !== invalidSamples.length ||
+        report.hardFailCountAmongSchemaValidSamples !== validHardFailCount ||
+        report.hardFailRateAmongSchemaValidSamples !== expectedHardFailRate
+      ) {
+        issues.push(issue(
+          `codex_diagnostics_benchmark_invalid_denominator_${sanitizeIssueId(relativePath)}`,
+          'error',
+          'codex_diagnostics_benchmark',
+          relativePath,
+          'Diagnostics benchmark statistics include schema-invalid samples or do not match the schema-valid denominator.',
+          'Regenerate diagnostics-benchmark with M27.12A statistics semantics.',
+          true
+        ));
+      }
+      if (validSamples.length === 0 && (report.hardFailRateAmongSchemaValidSamples !== null || report.experimentValid)) {
+        issues.push(issue(
+          `codex_diagnostics_benchmark_zero_valid_interpreted_${sanitizeIssueId(relativePath)}`,
+          'error',
+          'codex_diagnostics_benchmark',
+          relativePath,
+          'A zero-schema-valid diagnostics benchmark must have null hard-fail rate and experimentValid=false.',
+          'Regenerate the benchmark after fixing diagnostics structured-output compliance.',
+          true
+        ));
+      }
+    }
   } catch {
     // checkJson already recorded schema errors.
   }
@@ -950,7 +1010,20 @@ async function checkCodexDiagnosticsContextFixReport(
         ));
       }
     }
-    if (report.enhancedHardFailRate > 0) {
+    const rawReport = JSON.parse(await fileStore.readText(absolutePath)) as unknown;
+    const hasM2712Statistics = isUnknownRecord(rawReport) && 'schemaValidSampleCount' in rawReport;
+    if (hasM2712Statistics && report.schemaValidSampleCount === 0 && report.conclusion === 'requires_human_review') {
+      issues.push(issue(
+        `codex_diagnostics_context_fix_invalid_conclusion_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'codex_diagnostics_context_fix',
+        relativePath,
+        'Context-fix report has no schema-valid sample but concludes requires_human_review.',
+        'Use conclusion=diagnostics_schema_noncompliance until structured-output compliance is restored.',
+        true
+      ));
+    }
+    if ((report.enhancedHardFailRateAmongSchemaValidSamples ?? 0) > 0) {
       issues.push(issue(
         `codex_diagnostics_context_fix_hard_fail_persists_${sanitizeIssueId(relativePath)}`,
         'warning',
@@ -960,6 +1033,135 @@ async function checkCodexDiagnosticsContextFixReport(
         'Do not commit automatically; revise draft or use human review.',
         false
       ));
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkDiagnosticsSchemaComplianceReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, DiagnosticsSchemaComplianceReportSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `diagnostics_schema_compliance_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'diagnostics_schema_compliance',
+        relativePath,
+        'Diagnostics schema compliance report indicates Story State mutation.',
+        'Restore Story State and discard the mutating benchmark artifacts.',
+        true
+      ));
+    }
+    for (const sample of report.violationsBySample) {
+      for (const artifactPath of [sample.rawOutputPath, sample.finalOutputPath, sample.parsedOutputPath].filter((candidate) => candidate.length > 0)) {
+        if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) {
+          issues.push(issue(
+            `diagnostics_schema_compliance_missing_artifact_${sanitizeIssueId(relativePath)}_${sanitizeIssueId(artifactPath)}`,
+            'error',
+            'diagnostics_schema_compliance',
+            relativePath,
+            `Diagnostics schema compliance report references missing artifact ${artifactPath}.`,
+            'Restore the redacted Codex artifact or rerun diagnostics-schema-benchmark.',
+            true
+          ));
+        }
+      }
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkDiagnosticsNormalizationReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, DiagnosticsNormalizationReportSchema);
+    if (report.storyStateMutated) {
+      issues.push(issue(
+        `diagnostics_normalization_state_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'diagnostics_normalization',
+        relativePath,
+        'Diagnostics normalization report indicates Story State mutation.',
+        'Restore Story State and rerun the read-only schema benchmark.',
+        true
+      ));
+    }
+    if (report.parsedOutputPath.length > 0 && !(await fileStore.exists(paths.projectArtifact(report.parsedOutputPath)))) {
+      issues.push(issue(
+        `diagnostics_normalization_missing_parsed_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'diagnostics_normalization',
+        relativePath,
+        `Diagnostics normalization report references missing parsed output ${report.parsedOutputPath}.`,
+        'Restore parsed output or rerun diagnostics-schema-benchmark.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema errors.
+  }
+}
+
+async function checkCodexDiagnosticsSchemaBenchmark(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexDiagnosticsSchemaBenchmarkReportSchema);
+    if (report.storyStateMutated || report.canonicalDiagnosticsMutated || report.samples.some((sample) => sample.storyStateMutated)) {
+      issues.push(issue(
+        `codex_diagnostics_schema_benchmark_mutated_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'codex_diagnostics_schema_benchmark',
+        relativePath,
+        'Diagnostics schema benchmark indicates canonical diagnostics or Story State mutation.',
+        'Restore canonical artifacts and discard the mutating benchmark run.',
+        true
+      ));
+    }
+    for (const sourcePath of [report.diagnosticsContextManifestPath, report.complianceReportPath]) {
+      if (!(await fileStore.exists(paths.projectArtifact(sourcePath)))) {
+        issues.push(issue(
+          `codex_diagnostics_schema_benchmark_missing_source_${sanitizeIssueId(relativePath)}_${sanitizeIssueId(sourcePath)}`,
+          'error',
+          'codex_diagnostics_schema_benchmark',
+          relativePath,
+          `Diagnostics schema benchmark references missing source ${sourcePath}.`,
+          'Restore the source report or rerun diagnostics-schema-benchmark.',
+          true
+        ));
+      }
+    }
+    for (const sample of report.samples) {
+      for (const artifactPath of [sample.rawOutputPath, sample.finalOutputPath, sample.parsedOutputPath, sample.normalizationReportPath].filter((candidate) => candidate.length > 0)) {
+        if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) {
+          issues.push(issue(
+            `codex_diagnostics_schema_benchmark_missing_artifact_${sanitizeIssueId(relativePath)}_${sanitizeIssueId(artifactPath)}`,
+            'error',
+            'codex_diagnostics_schema_benchmark',
+            relativePath,
+            `Diagnostics schema benchmark references missing artifact ${artifactPath}.`,
+            'Restore the artifact or rerun diagnostics-schema-benchmark.',
+            true
+          ));
+        }
+      }
     }
   } catch {
     // checkJson already recorded schema errors.
@@ -1625,6 +1827,10 @@ function issue(issueId: string, severity: AuditIssue['severity'], category: stri
 
 function sumRecord(record: Record<string, number>): number {
   return Object.values(record).reduce((sum, value) => sum + value, 0);
+}
+
+function roundedRate(count: number, total: number): number {
+  return total === 0 ? 0 : Number((count / total).toFixed(4));
 }
 
 function isDiagnosticProfileCall(call: CodexStageRuntimeProfileReport['unclassifiedCalls'][number]): boolean {

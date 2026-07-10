@@ -96,9 +96,34 @@ describe('M21 Codex execution boundary', () => {
     expect(audit.exitCode).toBe(0);
     expect(audit.ok).toBe(true);
   });
+
+  test('exec-json rejects a non-zero Codex exit even when an output file exists', async () => {
+    const fake = await writeFakeCodex(tempRoot, 1);
+    const promptPath = path.join(tempRoot, 'failed-prompt.md');
+    const schemaPath = path.join(tempRoot, 'failed-schema.json');
+    await writeFile(promptPath, 'Return JSON for the schema only.\n', 'utf8');
+    await writeFile(schemaPath, JSON.stringify({
+      type: 'object',
+      required: ['title', 'ok', 'items'],
+      properties: {
+        title: { type: 'string' },
+        ok: { type: 'boolean' },
+        items: { type: 'array', items: { type: 'string' } }
+      },
+      additionalProperties: false
+    }), 'utf8');
+
+    await expect(execCodexJson({
+      codexBin: fake.codexBin,
+      projectsRoot: tempRoot,
+      projectId,
+      promptPath,
+      schemaPath
+    })).rejects.toMatchObject({ code: 'CODEX_EXEC_FAILED' });
+  });
 });
 
-async function writeFakeCodex(root: string): Promise<{ codexBin: string; argsLogPath: string }> {
+async function writeFakeCodex(root: string, execExitCode = 0): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, 'fake-codex.cjs');
   const argsLogPath = path.join(root, 'codex-args.log');
   await writeFile(
@@ -128,7 +153,7 @@ if (args.includes('exec')) {
   process.stdout.write(JSON.stringify({ type: 'session.started', token: 'sk-SECRET' }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'message', text: finalText }) + '\\n');
   process.stdout.write(JSON.stringify({ type: 'session.completed' }) + '\\n');
-  process.exit(0);
+  process.exit(${JSON.stringify(execExitCode)});
 }
 process.stderr.write('unknown fake codex command: ' + args.join(' ') + '\\n');
 process.exit(2);

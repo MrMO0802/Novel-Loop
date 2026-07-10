@@ -45,7 +45,8 @@ describe('M26 codex diagnostics normalization warnings', () => {
 
     const paths = new ProjectPaths(tempRoot, 'codex-normalization');
     const diagnostics = await store.readJson(paths.chapterArtifact(1, 'diagnostics_v1.json'), DiagnosticsReportSchema);
-    expect(diagnostics.normalizationWarnings).toEqual([
+    expect(diagnostics.normalizationWarnings).toHaveLength(9);
+    expect(diagnostics.normalizationWarnings).toEqual(expect.arrayContaining([
       expect.objectContaining({
         field: 'averageScore',
         originalValue: 4.2,
@@ -53,7 +54,10 @@ describe('M26 codex diagnostics normalization warnings', () => {
         promptId: 'diagnostics.diagnose_chapter_slim',
         artifactPath: 'chapters/chapter_001/diagnostics_v1.json'
       })
-    ]);
+    ]));
+    expect(diagnostics.normalizationWarnings.every(
+      (warning) => warning.artifactPath === 'chapters/chapter_001/diagnostics_v1.json'
+    )).toBe(true);
 
     const quality = await store.readJson(paths.chapterArtifact(1, 'codex_chapter_quality_report_v1.json'), CodexChapterQualityReportSchema);
     expect(quality.normalizationWarnings).toEqual(diagnostics.normalizationWarnings);

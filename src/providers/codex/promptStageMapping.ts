@@ -43,7 +43,7 @@ const PROMPT_STAGE_RULES: Array<{
   { match: (promptId) => promptId.includes('scene_cards'), stage: 'scene_cards', likelyCategory: 'chapter_planning_subtask' },
   { match: (promptId) => promptId.includes('write_scene'), stage: 'write_scene', likelyCategory: 'drafting_subtask' },
   { match: (promptId) => promptId.includes('diagnostics') || promptId.includes('diagnose'), stage: 'diagnostics', likelyCategory: 'diagnostics_subtask' },
-  { match: (promptId) => promptId.includes('revision_plan') || promptId.includes('create_revision'), stage: 'revision_plan', likelyCategory: 'diagnostics_subtask' },
+  { match: (promptId) => promptId.includes('revision_plan') || promptId.includes('create_revision') || promptId.includes('targeted_revision'), stage: 'revision_plan', likelyCategory: 'diagnostics_subtask' },
   { match: (promptId) => promptId.includes('final_chapter') || promptId.includes('rewrite_chapter'), stage: 'final_chapter', likelyCategory: 'drafting_subtask' },
   { match: (promptId) => promptId.includes('canon_patch'), stage: 'canon_patch_proposal', likelyCategory: 'canon_patch_subtask' },
   { match: (promptId) => promptId.includes('state_diff'), stage: 'state_diff', likelyCategory: 'canon_patch_subtask' }

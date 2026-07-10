@@ -16,6 +16,7 @@ import {
   CodexContextManifestSchema,
   CodexDiagnosticsBenchmarkReportSchema,
   CodexDiagnosticsContextFixReportSchema,
+  CodexDiagnosticsEvidenceAdjudicationSchema,
   CodexDiagnosticsSchemaBenchmarkReportSchema,
   CodexDiagnosticsContextAuditSchema,
   CodexDiagnosticsHardFailAnalysisSchema,
@@ -46,8 +47,14 @@ import {
   ProjectAuditReportSchema,
   RunEventSchema,
   RunManifestSchema,
+  RunManifestV2Schema,
   RevisionOpportunityReportSchema,
-  StoryStateSchema
+  StoryStateSchema,
+  TargetedRevisionDiffSchema,
+  TargetedRevisionExperimentReportSchema,
+  TargetedRevisionPlanSchema,
+  TargetedRevisionScopeValidationSchema,
+  TimelineContradictionMapSchema
 } from '../schemas/index.js';
 import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexRuntimeSamplingReport, CodexStageRuntimeProfileReport, RunEvent, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
@@ -58,6 +65,7 @@ import { isCompletedCommitJournal } from './commitJournal.js';
 import { readFileMetadata } from './fileHash.js';
 import { validateChapterQueueConsistency } from './chapterQueue.js';
 import { verifySnapshots } from './snapshotBrowser.js';
+import { parseMarkdownEvidenceParagraphs, sha256 } from './codexDiagnosticsEvidenceRules.js';
 
 export interface ProjectAuditInput {
   projectId: string;
@@ -356,6 +364,7 @@ function checkCodexEventTiming(issues: AuditIssue[], relativeEventPath: string, 
 }
 
 function isCodexManifest(manifest: Extract<RunManifest, { schemaVersion: '2' }>): boolean {
+  if (manifest.args.codexInvoked === false) return false;
   if ((manifest.provider ?? '').includes('codex')) return true;
   if (manifest.command.toLowerCase().includes('codex')) return true;
   return manifest.promptCalls.some((call) => call.provider.includes('codex') || call.promptId.toLowerCase().includes('codex'));
@@ -594,6 +603,27 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^codex_diagnostics_schema_benchmark_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_diagnostics_schema_benchmark', relativePath, CodexDiagnosticsSchemaBenchmarkReportSchema);
         await checkCodexDiagnosticsSchemaBenchmark(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^codex_diagnostics_evidence_adjudication_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'diagnostics_evidence_adjudication', relativePath, CodexDiagnosticsEvidenceAdjudicationSchema);
+        await checkDiagnosticsEvidenceAdjudication(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^timeline_contradiction_map_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'timeline_contradiction_map', relativePath, TimelineContradictionMapSchema);
+        await checkTimelineContradictionMap(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^targeted_revision_plan_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionPlanSchema);
+      }
+      if (/^targeted_revision_scope_validation_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionScopeValidationSchema);
+      }
+      if (/^targeted_revision_diff_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionDiffSchema);
+      }
+      if (/^targeted_revision_experiment_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionExperimentReportSchema);
+        await checkTargetedRevisionExperiment(issues, paths, fileStore, absolutePath, relativePath);
       }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
@@ -1165,6 +1195,407 @@ async function checkCodexDiagnosticsSchemaBenchmark(
     }
   } catch {
     // checkJson already recorded schema errors.
+  }
+}
+
+async function checkDiagnosticsEvidenceAdjudication(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexDiagnosticsEvidenceAdjudicationSchema);
+    const requiredSources = [
+      report.sourceDraftPath,
+      report.sourceMissionPath,
+      report.sourceSelectedPlanPath,
+      report.sourceStoryStatePath,
+      report.sourceDiagnosticsBenchmarkPath,
+      report.sourceSchemaBenchmarkPath,
+      report.timelineContradictionMapPath
+    ];
+    for (const sourcePath of requiredSources) {
+      if (sourcePath.length > 0 && await fileStore.exists(paths.projectArtifact(sourcePath))) continue;
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_missing_source_${sanitizeIssueId(relativePath)}_${sanitizeIssueId(sourcePath || 'empty')}`,
+        'error',
+        'diagnostics_evidence_adjudication',
+        relativePath,
+        `Evidence adjudication references missing source ${sourcePath || '(empty path)'}.`,
+        'Restore the cited artifact or regenerate diagnostics-adjudicate.',
+        true
+      ));
+    }
+
+    for (const evidence of report.draftEvidence) {
+      const evidencePath = paths.projectArtifact(evidence.path);
+      if (!(await fileStore.exists(evidencePath))) {
+        issues.push(issue(
+          `diagnostics_evidence_adjudication_missing_draft_${sanitizeIssueId(evidence.evidenceId)}`,
+          'error',
+          'diagnostics_evidence_adjudication',
+          evidence.path,
+          `Draft evidence ${evidence.evidenceId} references a missing path.`,
+          'Restore the draft or regenerate the adjudication report.',
+          true
+        ));
+        continue;
+      }
+      const paragraph = parseMarkdownEvidenceParagraphs(await fileStore.readText(evidencePath))[evidence.paragraphIndex - 1];
+      if (paragraph === undefined || !paragraph.text.includes(evidence.snippet) || sha256(evidence.snippet) !== evidence.normalizedSnippetHash) {
+        issues.push(issue(
+          `diagnostics_evidence_adjudication_invalid_draft_citation_${sanitizeIssueId(evidence.evidenceId)}`,
+          'error',
+          'diagnostics_evidence_adjudication',
+          evidence.path,
+          `Draft evidence ${evidence.evidenceId} does not match its cited paragraph or snippet hash.`,
+          'Regenerate evidence citations from the current draft without editing canonical artifacts.',
+          true
+        ));
+      }
+    }
+
+    for (const evidence of report.planningEvidence) {
+      const evidencePath = paths.projectArtifact(evidence.path);
+      if (!(await fileStore.exists(evidencePath)) || !(await fileStore.readText(evidencePath)).includes(evidence.snippet) || sha256(evidence.snippet) !== evidence.normalizedSnippetHash) {
+        issues.push(issue(
+          `diagnostics_evidence_adjudication_invalid_planning_citation_${sanitizeIssueId(evidence.evidenceId)}`,
+          'error',
+          'diagnostics_evidence_adjudication',
+          evidence.path,
+          `Planning evidence ${evidence.evidenceId} does not match its source artifact.`,
+          'Restore mission/selected plan or regenerate diagnostics-adjudicate.',
+          true
+        ));
+      }
+    }
+
+    const storyState = await fileStore.readJson(paths.projectArtifact(report.sourceStoryStatePath), StoryStateSchema);
+    const timelineIds = new Set(storyState.timeline.map((event) => event.id));
+    const canonFactIds = new Set(storyState.canonFacts.map((fact) => fact.id));
+    const characterIds = new Set(storyState.characters.map((character) => character.id));
+    const expectedCanonConflict = report.temporalRulesTriggered.some((ruleItem) =>
+      ruleItem.ruleId === 'canon_timeline_time_mismatch' && ruleItem.outcome === 'confirmed_contradiction'
+    );
+    const canonicalReview = report.canonicalContextReview;
+    if (canonicalReview === undefined) {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_legacy_canonical_review_${sanitizeIssueId(relativePath)}`,
+        'warning',
+        'diagnostics_evidence_adjudication',
+        report.sourceStoryStatePath,
+        'Legacy adjudication report does not contain the canonical timeline and character-state review summary.',
+        'Generate a new diagnostics-adjudicate report when an explicit canonical context review is required.',
+        false
+      ));
+    } else if (
+      canonicalReview.latestCommittedChapter !== storyState.latestCommittedChapter ||
+      canonicalReview.timelineEventsReviewed !== storyState.timeline.length ||
+      canonicalReview.characterStatesReviewed !== storyState.characters.length ||
+      canonicalReview.relevantCharacterStateIds.some((characterId) => !characterIds.has(characterId)) ||
+      canonicalReview.canonicalTimelineConflictFound !== expectedCanonConflict
+    ) {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_invalid_canonical_review_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'diagnostics_evidence_adjudication',
+        report.sourceStoryStatePath,
+        'Canonical timeline or character-state review does not match the cited Story State.',
+        'Regenerate diagnostics-adjudicate from the current Story State.',
+        true
+      ));
+    }
+    for (const evidence of report.canonEvidence) {
+      const missingTimeline = !timelineIds.has(evidence.timelineEventId);
+      const missingFacts = evidence.relatedCanonFactIds.filter((factId) => !canonFactIds.has(factId));
+      if (!missingTimeline && missingFacts.length === 0) continue;
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_invalid_canon_citation_${sanitizeIssueId(evidence.evidenceId)}`,
+        'error',
+        'diagnostics_evidence_adjudication',
+        evidence.statePath,
+        `Canon evidence ${evidence.evidenceId} references missing timeline/fact ids: ${[...(missingTimeline ? [evidence.timelineEventId] : []), ...missingFacts].join(', ')}.`,
+        'Regenerate adjudication from the current Story State.',
+        true
+      ));
+    }
+
+    const expectedRepeatability = report.sampleConsensus.validSampleCount === 0
+      ? 0
+      : roundedRate(report.repeatedFailureCount, report.sampleConsensus.validSampleCount);
+    if (
+      report.repeatedFailureCount > report.sampleConsensus.validSampleCount ||
+      report.repeatabilityRate !== expectedRepeatability ||
+      report.sampleConsensus.repeatabilityRate !== expectedRepeatability
+    ) {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_invalid_repeatability_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'diagnostics_evidence_adjudication',
+        relativePath,
+        'Repeated-failure counts or repeatabilityRate do not match the valid-sample denominator.',
+        'Regenerate adjudication from the schema-valid sample set.',
+        true
+      ));
+    }
+
+    if (report.adjudication === 'confirmed_true_positive' && (
+      report.evidenceClaims.length === 0 ||
+      report.draftEvidence.length === 0 ||
+      !report.temporalRulesTriggered.some((rule) => rule.outcome === 'confirmed_contradiction')
+    )) {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_unsubstantiated_confirmation_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'diagnostics_evidence_adjudication',
+        relativePath,
+        'confirmed_true_positive has no complete draft evidence and deterministic temporal rule.',
+        'Downgrade the adjudication or regenerate it with concrete citations.',
+        true
+      ));
+    }
+    if (report.adjudication === 'false_positive' && report.falsePositiveFactors.length === 0) {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_unsubstantiated_false_positive_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'diagnostics_evidence_adjudication',
+        relativePath,
+        'false_positive has no falsePositiveFactors.',
+        'Record the concrete event-identity or citation reason before classifying a false positive.',
+        true
+      ));
+    }
+    if (report.adjudication === 'ambiguous' || report.adjudication === 'insufficient_evidence') {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_needs_review_${sanitizeIssueId(relativePath)}`,
+        'warning',
+        'diagnostics_evidence_adjudication',
+        relativePath,
+        `Diagnostics evidence adjudication is ${report.adjudication}.`,
+        'Resolve the listed questions through human review before revising the chapter.',
+        false
+      ));
+    }
+    if (report.evidenceClaims.some((claim) => claim.normalizedClaim.startsWith('unclassified_'))) {
+      issues.push(issue(
+        `diagnostics_evidence_adjudication_legacy_evidence_${sanitizeIssueId(relativePath)}`,
+        'warning',
+        'diagnostics_evidence_adjudication',
+        relativePath,
+        'One or more diagnostics samples lack detailed evidence that can be deterministically classified.',
+        'Regenerate structured diagnostics with explicit event A, event B, and contradiction evidence.',
+        false
+      ));
+    }
+
+    for (const protectedArtifact of report.protectedArtifacts) {
+      const protectedPath = paths.projectArtifact(protectedArtifact.path);
+      const currentHash = await fileStore.exists(protectedPath) ? sha256(await fileStore.readText(protectedPath)) : '';
+      if (
+        !protectedArtifact.unchanged ||
+        protectedArtifact.beforeSha256 !== protectedArtifact.afterSha256 ||
+        currentHash !== protectedArtifact.afterSha256
+      ) {
+        issues.push(issue(
+          `diagnostics_evidence_adjudication_protected_artifact_changed_${sanitizeIssueId(protectedArtifact.path)}`,
+          'critical',
+          'diagnostics_evidence_adjudication',
+          protectedArtifact.path,
+          'A canonical artifact covered by diagnostics-adjudicate immutability checks has changed.',
+          'Restore the protected artifact and rerun adjudication from a clean baseline.',
+          true
+        ));
+      }
+    }
+  } catch {
+    // checkJson already recorded schema or source errors.
+  }
+}
+
+async function checkTimelineContradictionMap(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const map = await fileStore.readJson(absolutePath, TimelineContradictionMapSchema);
+    if (!(await fileStore.exists(paths.projectArtifact(map.sourceAdjudicationReportPath)))) {
+      issues.push(issue(
+        `timeline_contradiction_map_missing_report_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'timeline_contradiction_map',
+        relativePath,
+        `Timeline map references missing adjudication report ${map.sourceAdjudicationReportPath}.`,
+        'Restore or regenerate diagnostics-adjudicate artifacts.',
+        true
+      ));
+    }
+    const eventIds = new Set(map.eventNodes.map((node) => node.eventId));
+    for (const edge of map.temporalEdges) {
+      if (eventIds.has(edge.fromEventId) && eventIds.has(edge.toEventId)) continue;
+      issues.push(issue(
+        `timeline_contradiction_map_missing_edge_node_${sanitizeIssueId(edge.edgeId)}`,
+        'error',
+        'timeline_contradiction_map',
+        relativePath,
+        `Temporal edge ${edge.edgeId} references a missing event node.`,
+        'Regenerate the timeline contradiction map from adjudicated events.',
+        true
+      ));
+    }
+    for (const contradiction of map.contradictions) {
+      if (contradiction.eventIds.every((eventId) => eventIds.has(eventId))) continue;
+      issues.push(issue(
+        `timeline_contradiction_map_missing_contradiction_node_${sanitizeIssueId(contradiction.contradictionId)}`,
+        'error',
+        'timeline_contradiction_map',
+        relativePath,
+        `Contradiction ${contradiction.contradictionId} references a missing event node.`,
+        'Regenerate the map from valid event comparisons.',
+        true
+      ));
+    }
+    for (const reference of map.canonicalTimelineReferences) {
+      const state = await fileStore.readJson(paths.projectArtifact(reference.statePath), StoryStateSchema);
+      if (state.timeline.some((event) => event.id === reference.timelineEventId) && eventIds.has(reference.eventNodeId)) continue;
+      issues.push(issue(
+        `timeline_contradiction_map_invalid_canon_reference_${sanitizeIssueId(reference.timelineEventId)}`,
+        'error',
+        'timeline_contradiction_map',
+        reference.statePath,
+        `Canonical timeline reference ${reference.timelineEventId} or its event node does not exist.`,
+        'Regenerate the map from the current Story State.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already recorded schema or source errors.
+  }
+}
+
+async function checkTargetedRevisionExperiment(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, TargetedRevisionExperimentReportSchema);
+    const requiredPaths = [
+      report.sourceAdjudicationPath,
+      report.targetedRevisionPlanPath,
+      report.candidateDraftPath,
+      report.scopeValidationPath,
+      report.revisionDiffPath,
+      report.sourceDraftPath
+    ];
+    const missing = [];
+    for (const artifactPath of requiredPaths) {
+      if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) missing.push(artifactPath);
+    }
+    if (missing.length > 0) {
+      issues.push(issue(
+        `targeted_revision_missing_artifacts_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'targeted_revision',
+        relativePath,
+        `Targeted revision experiment references missing artifacts: ${missing.join(', ')}.`,
+        'Restore the isolated experiment artifacts or rerun targeted-revision-experiment from a fresh adjudication.',
+        true
+      ));
+      return;
+    }
+
+    const [plan, scope, diff, candidateText, sourceDraftText] = await Promise.all([
+      fileStore.readJson(paths.projectArtifact(report.targetedRevisionPlanPath), TargetedRevisionPlanSchema),
+      fileStore.readJson(paths.projectArtifact(report.scopeValidationPath), TargetedRevisionScopeValidationSchema),
+      fileStore.readJson(paths.projectArtifact(report.revisionDiffPath), TargetedRevisionDiffSchema),
+      fileStore.readText(paths.projectArtifact(report.candidateDraftPath)),
+      fileStore.readText(paths.projectArtifact(report.sourceDraftPath))
+    ]);
+    const candidateHash = sha256(candidateText);
+    const sourceHash = sha256(sourceDraftText);
+    const allowedTargets = new Set(plan.allowedTargets.map((target) => target.targetId));
+    const diffTargets = new Set(diff.changes.map((change) => change.targetId));
+    const scopeTargets = new Set(scope.changedParagraphs.map((change) => change.targetId));
+    const expectedOrder = Array.from({ length: report.sampleCountPerArm }, (_, index) => [`A${index + 1}`, `B${index + 1}`]).flat();
+    const sampleOrderValid = report.samples.every((sample, index) => {
+      const expectedArm = index % 2 === 0 ? 'baseline' : 'candidate';
+      const expectedPair = Math.floor(index / 2) + 1;
+      return sample.sequenceIndex === index + 1 && sample.arm === expectedArm && sample.pairIndex === expectedPair;
+    });
+    const resultConsistent = report.result !== 'candidate_clears_timeline_failure' || (
+      report.baselineSummary.timelineFailCount > 0 &&
+      report.candidateSummary.timelineFailCount === 0 &&
+      report.candidateSummary.schemaValidCount > 0
+    );
+    const crossArtifactValid =
+      scope.scopeValid &&
+      scope.candidateDraftHash === candidateHash &&
+      scope.sourceDraftHash === sourceHash &&
+      plan.sourceDraftHash === sourceHash &&
+      report.samples.filter((sample) => sample.arm === 'baseline').every((sample) => sample.draftHash === sourceHash) &&
+      report.samples.filter((sample) => sample.arm === 'candidate').every((sample) => sample.draftHash === candidateHash) &&
+      diff.changes.every((change) => allowedTargets.has(change.targetId)) &&
+      [...diffTargets].every((targetId) => scopeTargets.has(targetId)) &&
+      report.executionOrder.join('|') === expectedOrder.join('|') &&
+      sampleOrderValid &&
+      report.environmentConsistent &&
+      resultConsistent;
+    if (!crossArtifactValid) {
+      issues.push(issue(
+        `targeted_revision_cross_artifact_mismatch_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'targeted_revision',
+        relativePath,
+        'Targeted candidate, source hashes, scope report, diff, environment, or paired sample order do not agree.',
+        'Discard the altered experiment artifacts and rerun from the unchanged adjudicated source draft.',
+        true
+      ));
+    }
+
+    const manifest = await fileStore.readJson(paths.runManifest(report.runId), RunManifestV2Schema);
+    const safetyValid =
+      manifest.args.storyStateCommitAllowed === false &&
+      manifest.args.normalPreviewAllowed === false &&
+      manifest.args.candidateAdoptionAllowed === false &&
+      manifest.args.queueMutationAllowed === false &&
+      manifest.stateMutations.length === 0 &&
+      manifest.queueTransitions.length === 0 &&
+      manifest.promptCalls.length === 1 + report.sampleCountPerArm * 2;
+    if (!safetyValid) {
+      issues.push(issue(
+        `targeted_revision_run_safety_${sanitizeIssueId(report.runId)}`,
+        'critical',
+        'targeted_revision',
+        path.join('runs', report.runId, 'run_manifest.json'),
+        'Targeted revision run provenance violates preview-only safety or call-count expectations.',
+        'Restore canonical artifacts and investigate the run before using its candidate.',
+        true
+      ));
+    }
+
+    for (const protectedArtifact of report.protectedArtifacts) {
+      const protectedPath = paths.projectArtifact(protectedArtifact.path);
+      const currentHash = await fileStore.exists(protectedPath) ? sha256(await fileStore.readText(protectedPath)) : '';
+      if (protectedArtifact.beforeSha256 === protectedArtifact.afterSha256 && currentHash === protectedArtifact.afterSha256) continue;
+      issues.push(issue(
+        `targeted_revision_protected_artifact_changed_${sanitizeIssueId(protectedArtifact.path)}`,
+        'critical',
+        'targeted_revision',
+        protectedArtifact.path,
+        'A canonical artifact protected by the targeted revision experiment has changed.',
+        'Restore the protected artifact before interpreting the experiment.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson or source checks already record schema and reference failures.
   }
 }
 

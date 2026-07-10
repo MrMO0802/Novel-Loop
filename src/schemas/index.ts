@@ -364,3 +364,70 @@ export {
   RankedPlanCandidateSchema
 } from './chapterPlanning.js';
 export type { ChapterPlanRanking, ChapterPlanRankingScores, PlanCandidate, PlanCandidates, RankedPlanCandidate } from './chapterPlanning.js';
+
+export {
+  CodexDiagnosticsAdjudicationConfidenceSchema,
+  CodexDiagnosticsAdjudicationEventSchema,
+  CodexDiagnosticsAdjudicationSchema,
+  CodexDiagnosticsCanonicalContextReviewSchema,
+  CodexDiagnosticsCanonEvidenceSchema,
+  CodexDiagnosticsDraftEvidenceSchema,
+  CodexDiagnosticsEventComparisonSchema,
+  CodexDiagnosticsEvidenceAdjudicationSchema,
+  CodexDiagnosticsEvidenceClaimSchema,
+  CodexDiagnosticsPlanningEvidenceSchema,
+  CodexDiagnosticsProtectedArtifactSchema,
+  CodexDiagnosticsRevisionScopeRecommendationSchema,
+  CodexDiagnosticsSampleConsensusSchema,
+  CodexDiagnosticsTemporalRuleSchema,
+  TimelineAmbiguousRelationSchema,
+  TimelineCanonicalReferenceSchema,
+  TimelineContradictionEdgeSchema,
+  TimelineContradictionEventNodeSchema,
+  TimelineContradictionMapSchema,
+  TimelineContradictionSchema
+} from './codexDiagnosticsAdjudication.js';
+export type {
+  CodexDiagnosticsAdjudication,
+  CodexDiagnosticsAdjudicationEvent,
+  CodexDiagnosticsCanonicalContextReview,
+  CodexDiagnosticsCanonEvidence,
+  CodexDiagnosticsDraftEvidence,
+  CodexDiagnosticsEventComparison,
+  CodexDiagnosticsEvidenceAdjudication,
+  CodexDiagnosticsEvidenceClaim,
+  CodexDiagnosticsPlanningEvidence,
+  CodexDiagnosticsRevisionScopeRecommendation,
+  CodexDiagnosticsSampleConsensus,
+  CodexDiagnosticsTemporalRule,
+  TimelineContradictionMap
+} from './codexDiagnosticsAdjudication.js';
+
+export {
+  TargetedRevisionAllowedTargetSchema,
+  TargetedRevisionChangedParagraphSchema,
+  TargetedRevisionDiagnosticsSampleSchema,
+  TargetedRevisionDiagnosticsSummarySchema,
+  TargetedRevisionDiffChangeSchema,
+  TargetedRevisionDiffSchema,
+  TargetedRevisionExperimentReportSchema,
+  TargetedRevisionExperimentResultSchema,
+  TargetedRevisionOperationSchema,
+  TargetedRevisionOperationTypeSchema,
+  TargetedRevisionPairComparisonSchema,
+  TargetedRevisionPlanSchema,
+  TargetedRevisionProtectedArtifactSchema,
+  TargetedRevisionProviderOutputSchema,
+  TargetedRevisionScopeValidationSchema
+} from './codexTargetedRevision.js';
+export type {
+  TargetedRevisionAllowedTarget,
+  TargetedRevisionDiagnosticsSample,
+  TargetedRevisionDiagnosticsSummary,
+  TargetedRevisionDiff,
+  TargetedRevisionExperimentReport,
+  TargetedRevisionOperation,
+  TargetedRevisionPlan,
+  TargetedRevisionProviderOutput,
+  TargetedRevisionScopeValidation
+} from './codexTargetedRevision.js';

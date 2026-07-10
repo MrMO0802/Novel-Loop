@@ -17,6 +17,7 @@ const promptFiles = [
   'prompts/codex-text/production/write_scene.md',
   'prompts/codex-text/diagnostics/diagnose_chapter_slim.md',
   'prompts/codex-text/revision/create_revision_plan_slim.md',
+  'prompts/codex-text/revision/targeted_revision_operations_slim.md',
   'prompts/codex-text/revision/rewrite_chapter.md',
   'prompts/codex-text/revision/final_chapter.md',
   'prompts/codex-text/memory/extract_canon_patch_proposal_slim.md',
@@ -33,6 +34,7 @@ const slimSchemas = [
   'schemas/codex-output/slim/drafting.scene_cards.slim.schema.json',
   'schemas/codex-output/slim/diagnostics.report.slim.schema.json',
   'schemas/codex-output/slim/revision.plan.slim.schema.json',
+  'schemas/codex-output/slim/revision.targeted_operations.slim.schema.json',
   'schemas/codex-output/slim/memory.canon_patch_proposal.slim.schema.json'
 ];
 

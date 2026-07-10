@@ -29,6 +29,11 @@ describe('M21 Codex CLI', () => {
     const sampleStage = codexCommand?.commands.find((command) => command.name() === 'sample-stage');
     expect(sampleStage?.helpInformation()).toContain('--timeout-ms <ms>');
     expect(sampleStage?.helpInformation()).toContain('--stage <stage>');
+    const targetedRevision = codexCommand?.commands.find((command) => command.name() === 'targeted-revision-experiment');
+    expect(targetedRevision?.helpInformation()).toContain('--adjudication <path|latest>');
+    expect(targetedRevision?.helpInformation()).toContain('--samples <count>');
+    expect(targetedRevision?.helpInformation()).toContain('--context-mode <mode>');
+    expect(targetedRevision?.helpInformation()).toContain('--timeout-ms <ms>');
   });
 
   test('exec-json command prints parsed JSON artifact path and uses fake codex binary', async () => {

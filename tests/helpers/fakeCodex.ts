@@ -17,7 +17,9 @@ export type FakeCodexMode =
   | 'codex-controlled-invalid-patch'
   | 'codex-controlled-conflict'
   | 'codex-controlled-diagnostics-fail'
-  | 'codex-controlled-normalization-warning';
+  | 'codex-controlled-normalization-warning'
+  | 'codex-targeted-revision'
+  | 'codex-targeted-revision-scope-violation';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
@@ -140,6 +142,57 @@ function jsonFor(promptId, mode, repairMode, stdin) {
   }
   if (mode === 'repair-schema-invalid' && !repairMode) {
     return { unexpected: true };
+  }
+  if (promptId === 'revision.targeted_revision_operations_slim' && mode === 'codex-targeted-revision-scope-violation') {
+    return {
+      operations: [
+        {
+          operationId: 'operation_outside_scope',
+          operationType: 'replace_paragraph',
+          targetIds: ['target_p999'],
+          replacementText: 'Unauthorized paragraph replacement.',
+          reason: 'Exercise the local scope gate.',
+          expectedEffect: 'This operation must be rejected.',
+          rulesAddressed: ['duplicate_event_repetition', 'same_event_same_day_explicit_time_conflict', 'mission_plan_time_mismatch'],
+          factsPreserved: [],
+          newFactsIntroduced: []
+        }
+      ]
+    };
+  }
+  if (promptId === 'revision.targeted_revision_operations_slim' && mode === 'codex-targeted-revision') {
+    const targetIds = [...stdin.matchAll(/"targetId"\\s*:\\s*"([^"]+)"/g)].map((match) => match[1]);
+    const first = targetIds[0] || 'target_p002';
+    const duplicate = targetIds[Math.min(2, Math.max(0, targetIds.length - 1))] || first;
+    return {
+      operations: [
+        {
+          operationId: 'operation_align_daytime',
+          operationType: 'replace_paragraph',
+          targetIds: [first],
+          replacementText: '午高峰的新单挤进手机，林澈确认这是同一趟白天配送。',
+          reason: 'Keep the delivery in the mission-required daytime window.',
+          expectedEffect: 'Remove the incompatible late-night framing.',
+          rulesAddressed: ['same_event_same_day_explicit_time_conflict', 'mission_plan_time_mismatch'],
+          factsPreserved: ['The same order and recipient remain unchanged.'],
+          newFactsIntroduced: []
+        },
+        {
+          operationId: 'operation_remove_duplicate_handoff',
+          operationType: 'replace_paragraph',
+          targetIds: [duplicate],
+          replacementText: '林澈没有再次递餐，只把视线越过已经合上的门，投向楼梯间上方。',
+          reason: 'Remove the second delivery action while preserving the floor clue.',
+          expectedEffect: 'Leave one delivery handoff in the chapter.',
+          rulesAddressed: ['duplicate_event_repetition'],
+          factsPreserved: ['The seventeenth-floor clue remains unchanged.'],
+          newFactsIntroduced: []
+        }
+      ]
+    };
+  }
+  if (promptId === 'diagnostics.diagnose_chapter_slim' && mode === 'codex-targeted-revision') {
+    return targetedDiagnostics(chapterNumber, /EXPERIMENT_ARM:\\s*A\\d+/.test(stdin));
   }
   const json = {
     'planning.generate_arc_map_minimal_json': {
@@ -380,6 +433,36 @@ function jsonFor(promptId, mode, repairMode, stdin) {
     'provider.health': { ok: true }
   };
   return json[promptId] || { title: 'Codex Boundary Smoke', ok: true, summary: 'Fake Codex returned schema-constrained JSON.' };
+}
+
+function targetedDiagnostics(chapterNumber, baseline) {
+  const timelinePassed = !baseline;
+  const hardChecks = ['timeline_consistency', 'character_knowledge_consistency', 'world_rule_consistency', 'no_unplanned_reveal'].map((checkName) => ({
+    checkName,
+    result: checkName === 'timeline_consistency' && !timelinePassed ? 'fail' : 'pass',
+    blocking: checkName === 'timeline_consistency' && !timelinePassed,
+    evidence: checkName === 'timeline_consistency' && !timelinePassed ? 'same delivery has incompatible time and duplicate handoff' : '',
+    explanation: checkName === 'timeline_consistency' && !timelinePassed ? 'confirmed contradiction in baseline draft' : 'No contradiction found.'
+  }));
+  return {
+    chapterNumber,
+    draftVersion: 1,
+    passed: timelinePassed,
+    averageScore: timelinePassed ? 8.4 : 6.2,
+    hardChecks,
+    softScores: {
+      plot_progression: timelinePassed ? 8.4 : 6.2,
+      character_consistency: timelinePassed ? 8.4 : 6.2,
+      tension_curve: timelinePassed ? 8.4 : 6.2,
+      emotional_impact: timelinePassed ? 8.4 : 6.2,
+      chapter_hook: timelinePassed ? 8.4 : 6.2,
+      style_match: timelinePassed ? 8.4 : 6.2,
+      genre_satisfaction: timelinePassed ? 8.4 : 6.2,
+      reader_curiosity: timelinePassed ? 8.4 : 6.2
+    },
+    diagnostics: timelinePassed ? [] : [{ type: 'timeline', severity: 'high', message: 'baseline timeline conflict', evidence: 'same order repeated at incompatible times', recommendation: 'Apply only the adjudicated revision.' }],
+    revisionRequired: !timelinePassed
+  };
 }
 
 function chapterFromPrompt(stdin) {

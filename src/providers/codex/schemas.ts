@@ -22,6 +22,7 @@ const CODEX_OUTPUT_SCHEMAS: Record<string, CodexOutputSchemaDescriptor> = {
   'planning.generate_scene_cards_slim': slimDescriptor('CodexSlimSceneCardsOutputSchema', 'drafting.scene_cards.slim.schema.json'),
   'diagnostics.diagnose_chapter_slim': slimDescriptor('CodexSlimDiagnosticsOutputSchema', 'diagnostics.report.slim.schema.json'),
   'revision.create_revision_plan_slim': slimDescriptor('CodexSlimRevisionPlanOutputSchema', 'revision.plan.slim.schema.json'),
+  'revision.targeted_revision_operations_slim': slimDescriptor('TargetedRevisionProviderOutputSchema', 'revision.targeted_operations.slim.schema.json'),
   'memory.extract_canon_patch_proposal_slim': slimDescriptor('CodexSlimCanonPatchProposalOutputSchema', 'memory.canon_patch_proposal.slim.schema.json'),
   'planning.plan_chapter_mission': descriptor('CodexChapterMissionOutputSchema', 'planning.chapter_mission.schema.json'),
   'planning.generate_plan_candidates': descriptor('CodexPlanCandidatesOutputSchema', 'planning.plan_candidates.schema.json'),

@@ -6,6 +6,7 @@ import {
   CommitReportSchema,
   CodexDiagnosticsBenchmarkReportSchema,
   CodexDiagnosticsContextFixReportSchema,
+  CodexDiagnosticsEvidenceAdjudicationSchema,
   DiagnosticsContextManifestSchema,
   CodexDiagnosticsContextAuditSchema,
   CodexDiagnosticsHardFailAnalysisSchema,
@@ -16,9 +17,14 @@ import {
   DiagnosticsReportSchema,
   FailureReportSchema,
   RevisionOpportunityReportSchema,
-  StoryStateSchema
+  StoryStateSchema,
+  TargetedRevisionDiffSchema,
+  TargetedRevisionExperimentReportSchema,
+  TargetedRevisionPlanSchema,
+  TargetedRevisionScopeValidationSchema,
+  TimelineContradictionMapSchema
 } from '../schemas/index.js';
-import type { ConflictSeverity } from '../schemas/index.js';
+import type { CodexDiagnosticsEvidenceAdjudication, ConflictSeverity, TargetedRevisionExperimentReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 
@@ -42,6 +48,20 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     fileStore.readJson(paths.storyState(), StoryStateSchema)
   ]);
   const queueItem = queue.chapters.find((chapter) => chapter.chapterNumber === input.chapterNumber);
+  const latestAdjudication = (await readReports(
+    paths,
+    fileStore,
+    input.chapterNumber,
+    'codex_diagnostics_evidence_adjudication',
+    CodexDiagnosticsEvidenceAdjudicationSchema
+  )).at(-1);
+  const latestTargetedExperiment = (await readReports(
+    paths,
+    fileStore,
+    input.chapterNumber,
+    'targeted_revision_experiment',
+    TargetedRevisionExperimentReportSchema
+  )).at(-1);
   const finalPath = relativeChapterArtifact(input.chapterNumber, 'final.md');
   const lines = [
     `Project: ${paths.projectId}`,
@@ -64,6 +84,8 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
       lines.push(`- hard failures: ${diagnostics.hardFailures}`);
       lines.push(`- soft average: ${diagnostics.softAverage.toFixed(2)}`);
     }
+    appendDiagnosticsEvidenceAdjudication(lines, latestAdjudication);
+    appendTargetedRevisionExperiment(lines, latestTargetedExperiment);
   }
 
   if (input.conflicts === true) {
@@ -92,6 +114,13 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_benchmark', CodexDiagnosticsBenchmarkReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_context_fix_report', CodexDiagnosticsContextFixReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'revision_opportunity_report', RevisionOpportunityReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_evidence_adjudication', CodexDiagnosticsEvidenceAdjudicationSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'timeline_contradiction_map', TimelineContradictionMapSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_plan', TargetedRevisionPlanSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_scope_validation', TargetedRevisionScopeValidationSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_diff', TargetedRevisionDiffSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'targeted_revision_experiment', TargetedRevisionExperimentReportSchema);
+    await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^draft_targeted_revision_candidate_v\d+\.md$/);
     await appendPreviewCompleteness(lines, paths, fileStore, input.chapterNumber);
     await appendDiagnosticsHardFailAnalysis(lines, paths, fileStore, input.chapterNumber);
     await appendDiagnosticsContextFix(lines, paths, fileStore, input.chapterNumber);
@@ -113,7 +142,7 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
 
   if (input.suggestNext === true) {
     lines.push('', 'Suggested command:');
-    lines.push(suggestNextCommand(paths.projectId, input.chapterNumber, queueItem?.status));
+    lines.push(suggestNextCommand(paths.projectId, input.chapterNumber, queueItem?.status, latestAdjudication?.value, latestTargetedExperiment?.value));
   }
 
   return `${lines.join('\n')}\n`;
@@ -153,6 +182,20 @@ async function appendArtifactList<T>(
   }
 }
 
+async function appendMatchingFiles(
+  lines: string[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterNumber: number,
+  pattern: RegExp
+): Promise<void> {
+  const chapterDir = paths.chapterDir(chapterNumber);
+  if (!(await fileStore.exists(chapterDir))) return;
+  for (const fileName of (await fileStore.list(chapterDir)).filter((entry) => pattern.test(entry)).sort()) {
+    lines.push(`- ${relativeChapterArtifact(chapterNumber, fileName)}`);
+  }
+}
+
 async function readReports<T>(
   paths: ProjectPaths,
   fileStore: FileStore,
@@ -176,11 +219,69 @@ async function readReports<T>(
   return reports.sort((left, right) => left.path.localeCompare(right.path));
 }
 
-function suggestNextCommand(projectId: string, chapterNumber: number, status: string | undefined): string {
+function suggestNextCommand(
+  projectId: string,
+  chapterNumber: number,
+  status: string | undefined,
+  adjudication: CodexDiagnosticsEvidenceAdjudication | undefined,
+  experiment: TargetedRevisionExperimentReport | undefined
+): string {
+  if (experiment?.result === 'candidate_clears_timeline_failure') {
+    return `human review the isolated candidate ${experiment.candidateDraftPath} and ${experiment.revisionDiffPath}; candidate adoption, preview, and commit remain disabled`;
+  }
+  if (experiment !== undefined) {
+    return `${experiment.recommendation} No candidate was adopted.`;
+  }
+  if (adjudication?.adjudication === 'confirmed_true_positive' || adjudication?.adjudication === 'likely_true_positive') {
+    return `corepack pnpm novel-loop codex targeted-revision-experiment ${projectId} ${chapterNumber} --adjudication latest --samples 3 --context-mode enhanced --codex-profile clean --codex-json-retries 2 --codex-json-repair`;
+  }
+  if (adjudication?.adjudication === 'false_positive') {
+    return 'diagnostics prompt calibration is recommended; do not modify the chapter draft';
+  }
+  if (adjudication?.adjudication === 'ambiguous' || adjudication?.adjudication === 'insufficient_evidence') {
+    return `corepack pnpm novel-loop review ${projectId} ${chapterNumber} --diagnostics --artifacts --state`;
+  }
   if (status === 'blocked' || status === 'needs_human_review') {
     return `corepack pnpm novel-loop recommit ${projectId} ${chapterNumber} --from-final --confirm`;
   }
   return `corepack pnpm novel-loop review ${projectId} ${chapterNumber} --diagnostics --state --artifacts`;
+}
+
+function appendTargetedRevisionExperiment(
+  lines: string[],
+  latest: { path: string; value: TargetedRevisionExperimentReport } | undefined
+): void {
+  if (latest === undefined) return;
+  lines.push('', 'Targeted revision experiment');
+  lines.push(`- path: ${latest.path}`);
+  lines.push(`- candidateDraftPath: ${latest.value.candidateDraftPath}`);
+  lines.push(`- scopeValidationPath: ${latest.value.scopeValidationPath}`);
+  lines.push(`- revisionDiffPath: ${latest.value.revisionDiffPath}`);
+  lines.push(`- executionOrder: ${latest.value.executionOrder.join(' -> ')}`);
+  lines.push(`- baselineTimelineFailCount: ${latest.value.baselineSummary.timelineFailCount}`);
+  lines.push(`- candidateTimelineFailCount: ${latest.value.candidateSummary.timelineFailCount}`);
+  lines.push(`- result: ${latest.value.result}`);
+  lines.push(`- candidateAdopted: ${String(latest.value.candidateAdopted)}`);
+  lines.push(`- normalPreviewStarted: ${String(latest.value.normalPreviewStarted)}`);
+  lines.push(`- commitStarted: ${String(latest.value.commitStarted)}`);
+  lines.push(`- recommendation: ${latest.value.recommendation}`);
+}
+
+function appendDiagnosticsEvidenceAdjudication(
+  lines: string[],
+  latest: { path: string; value: CodexDiagnosticsEvidenceAdjudication } | undefined
+): void {
+  if (latest === undefined) return;
+  const confirmedRules = latest.value.temporalRulesTriggered.filter((rule) => rule.outcome === 'confirmed_contradiction');
+  lines.push('', 'Diagnostics evidence adjudication');
+  lines.push(`- path: ${latest.path}`);
+  lines.push(`- adjudication: ${latest.value.adjudication}`);
+  lines.push(`- confidence: ${latest.value.confidence}`);
+  lines.push(`- repeatabilityRate: ${latest.value.repeatabilityRate}`);
+  lines.push(`- uniqueClaimCount: ${latest.value.sampleConsensus.uniqueClaimCount}`);
+  lines.push(`- confirmedContradictions: ${confirmedRules.map((rule) => rule.ruleId).join(', ') || 'none'}`);
+  lines.push(`- timelineMapPath: ${latest.value.timelineContradictionMapPath}`);
+  lines.push(`- recommendedNextStep: ${latest.value.recommendedNextStep}`);
 }
 
 async function appendPreviewCompleteness(lines: string[], paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<void> {

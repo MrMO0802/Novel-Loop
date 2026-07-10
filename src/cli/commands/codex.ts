@@ -6,6 +6,8 @@ import { generateCodexCallReductionReport } from '../../app/codexCallReduction.j
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
 import { generateCodexDiagnosticsHardFailAnalysis, runCodexDiagnosticsBenchmark } from '../../app/codexDiagnosticsHardFailAnalysis.js';
 import { runCodexDiagnosticsSchemaBenchmark } from '../../app/codexDiagnosticsSchemaCompliance.js';
+import { runCodexDiagnosticsEvidenceAdjudication } from '../../app/codexDiagnosticsEvidenceAdjudication.js';
+import { runCodexTargetedRevisionExperiment } from '../../app/codexTargetedRevisionExperiment.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
 import { evaluateCodexCrossChapterDrift, runCodexMultiChapterPilot } from '../../app/codexMultiChapterPilot.js';
@@ -63,6 +65,7 @@ interface CodexCommandOptions {
   chapter?: string;
   stage?: string;
   samples?: string;
+  adjudication?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -685,6 +688,87 @@ export function registerCodexCommand(program: Command): void {
       if (!result.report.releaseGatePassed) process.exitCode = 1;
     });
 
+  addBoundaryOptions(codex.command('diagnostics-adjudicate').description('[local/read-only] Adjudicate repeated diagnostics evidence against chapter and canonical artifacts'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexDiagnosticsEvidenceAdjudication({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber')
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      const confirmedRules = result.report.temporalRulesTriggered.filter((rule) => rule.outcome === 'confirmed_contradiction');
+      process.stdout.write([
+        'codexDiagnosticsAdjudication: success',
+        `reportPath: ${result.reportPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `timelineMapPath: ${result.timelineMapPath}`,
+        `adjudication: ${result.report.adjudication}`,
+        `confidence: ${result.report.confidence}`,
+        `repeatabilityRate: ${result.report.repeatabilityRate}`,
+        `uniqueClaimCount: ${result.report.sampleConsensus.uniqueClaimCount}`,
+        `confirmedContradictions: ${confirmedRules.map((rule) => rule.ruleId).join(', ') || 'none'}`,
+        `recommendedNextStep: ${result.report.recommendedNextStep}`,
+        `storyStateMutated: ${String(result.report.storyStateMutated)}`,
+        'codexInvoked: false'
+      ].join('\n') + '\n');
+    });
+
+  addCodexPilotOptions(addBoundaryOptions(codex.command('targeted-revision-experiment').description('[pilot/read-only] Generate an isolated targeted candidate and run paired diagnostics A/B')))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--adjudication <path|latest>', 'source evidence adjudication report path or latest', 'latest')
+    .option('--samples <count>', 'paired diagnostics sample count per arm', '3')
+    .option('--context-mode <mode>', 'diagnostics context mode: enhanced', 'enhanced')
+    .option('--timeout-ms <ms>', 'alias for codex timeout', '180000')
+    .option('--prompt-root <path>', 'prompt root directory', './prompts')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexTargetedRevisionExperiment({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        promptRoot: options.promptRoot ?? './prompts',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        adjudication: options.adjudication ?? 'latest',
+        samples: parsePositiveInteger(options.samples ?? '3', 'samples'),
+        contextMode: parseTargetedRevisionContextMode(options.contextMode ?? 'enhanced'),
+        ...resolveCodexCliOptions({
+          ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+          codexProfile: options.codexProfile ?? 'clean',
+          codexJsonRetries: options.codexJsonRetries ?? '2',
+          ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+          codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+          codexTimeoutMs: options.codexTimeoutMs ?? options.timeoutMs ?? '180000'
+        })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'codexTargetedRevisionExperiment: success',
+        `planPath: ${result.planPath}`,
+        `candidateDraftPath: ${result.candidateDraftPath}`,
+        `scopeValidationPath: ${result.scopeValidationPath}`,
+        `diffPath: ${result.diffPath}`,
+        `reportPath: ${result.reportPath}`,
+        `executionOrder: ${result.report.executionOrder.join(' -> ')}`,
+        `baselineTimelineFailCount: ${result.report.baselineSummary.timelineFailCount}`,
+        `candidateTimelineFailCount: ${result.report.candidateSummary.timelineFailCount}`,
+        `result: ${result.report.result}`,
+        `candidateAdopted: ${String(result.report.candidateAdopted)}`,
+        `normalPreviewStarted: ${String(result.report.normalPreviewStarted)}`,
+        `commitStarted: ${String(result.report.commitStarted)}`,
+        `storyStateMutated: ${String(result.report.storyStateMutated)}`,
+        `recommendation: ${result.report.recommendation}`
+      ].join('\n') + '\n');
+    });
+
   program
     .command('evaluate-continuity')
     .description('[experimental/internal] Run local deterministic Codex cross-chapter drift checks')
@@ -831,6 +915,13 @@ function parseDiagnosticsContextMode(value: string): 'baseline' | 'enhanced' {
     throw new AppError('INVALID_DIAGNOSTICS_CONTEXT_MODE', `Invalid diagnostics context mode: ${value}`, 2);
   }
   return value as (typeof allowed)[number];
+}
+
+function parseTargetedRevisionContextMode(value: string): 'enhanced' {
+  if (value !== 'enhanced') {
+    throw new AppError('INVALID_DIAGNOSTICS_CONTEXT_MODE', 'targeted-revision-experiment requires context-mode enhanced', 2);
+  }
+  return value;
 }
 
 function parseCodexFinalMode(value: string): 'codex' | 'local-assemble' | 'light-polish' {

@@ -5,6 +5,8 @@ import {
   ChapterQueueSchema,
   CommitReportSchema,
   CodexDiagnosticsBenchmarkReportSchema,
+  CodexDiagnosticsContextFixReportSchema,
+  DiagnosticsContextManifestSchema,
   CodexDiagnosticsContextAuditSchema,
   CodexDiagnosticsHardFailAnalysisSchema,
   CodexPreviewCompletenessReportSchema,
@@ -86,10 +88,13 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_preview_failure_report', CodexPreviewFailureReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_hard_fail_analysis', CodexDiagnosticsHardFailAnalysisSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'diagnostics_context_audit', CodexDiagnosticsContextAuditSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'diagnostics_context_manifest', DiagnosticsContextManifestSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_benchmark', CodexDiagnosticsBenchmarkReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_diagnostics_context_fix_report', CodexDiagnosticsContextFixReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'revision_opportunity_report', RevisionOpportunityReportSchema);
     await appendPreviewCompleteness(lines, paths, fileStore, input.chapterNumber);
     await appendDiagnosticsHardFailAnalysis(lines, paths, fileStore, input.chapterNumber);
+    await appendDiagnosticsContextFix(lines, paths, fileStore, input.chapterNumber);
   }
 
   if (input.state === true) {
@@ -202,6 +207,20 @@ async function appendDiagnosticsHardFailAnalysis(lines: string[], paths: Project
   lines.push(`- contextAuditPath: ${contextAudit?.path ?? 'none'}`);
   lines.push(`- revisionOpportunityPath: ${opportunity?.path ?? 'none'}`);
   lines.push(`- suggestedRetryCommand: ${latest.value.suggestedRetryCommand}`);
+}
+
+async function appendDiagnosticsContextFix(lines: string[], paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<void> {
+  const reports = await readReports(paths, fileStore, chapterNumber, 'codex_diagnostics_context_fix_report', CodexDiagnosticsContextFixReportSchema);
+  const latest = reports.at(-1);
+  if (latest === undefined) return;
+  lines.push('', 'Diagnostics context fix');
+  lines.push(`- path: ${latest.path}`);
+  lines.push(`- baselineHardFailRate: ${latest.value.baselineHardFailRate}`);
+  lines.push(`- enhancedHardFailRate: ${latest.value.enhancedHardFailRate}`);
+  lines.push(`- baselineFalsePositiveRisk: ${latest.value.baselineFalsePositiveRisk}`);
+  lines.push(`- enhancedFalsePositiveRisk: ${latest.value.enhancedFalsePositiveRisk}`);
+  lines.push(`- conclusion: ${latest.value.conclusion}`);
+  lines.push(`- recommendedNextStep: ${latest.value.recommendedNextStep}`);
 }
 
 function highestSeverity(severities: ConflictSeverity[]): ConflictSeverity {

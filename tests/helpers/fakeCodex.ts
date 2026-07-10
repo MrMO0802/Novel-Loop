@@ -131,6 +131,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       : chapterNumber === 2
         ? 'Lin Cheng follows the elevator log after the powerless radio names the old building.'
         : 'Lin Cheng reaches the missing floor after the elevator log exposes the impossible stop.';
+  const enhancedDiagnosticsContext = stdin.includes('DIAGNOSTICS_CONTEXT_MODE: enhanced');
   if (mode === 'schema-invalid') {
     return { unexpected: true };
   }
@@ -185,7 +186,27 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       draftVersion: 1,
       passed: mode !== 'codex-controlled-diagnostics-fail',
       averageScore: mode === 'codex-controlled-diagnostics-fail' ? 5 : mode === 'codex-controlled-normalization-warning' ? 4.2 : 8.6,
-      issues: mode === 'codex-controlled-diagnostics-fail' ? ['timeline hard check failed'] : []
+      issues:
+        mode === 'codex-controlled-diagnostics-fail'
+          ? enhancedDiagnosticsContext
+            ? ['timeline inconsistency confirmed by draft timestamps and mission context']
+            : ['timeline hard check failed']
+          : [],
+      ...(mode === 'codex-controlled-diagnostics-fail' && enhancedDiagnosticsContext
+        ? {
+            hardChecks: {
+              timeline_consistency: {
+                passed: false,
+                severity: 'high',
+                message: 'confirmed contradiction: timeline conflict remains after enhanced context',
+                evidence: 'draft timestamps conflict with chapter mission sequence'
+              },
+              character_knowledge_consistency: { passed: true, message: 'ok: enhanced context supplies character knowledge' },
+              world_rule_consistency: { passed: true, message: 'ok: enhanced context supplies world rules' },
+              no_unplanned_reveal: { passed: true, message: 'ok: enhanced context supplies reveal constraints' }
+            }
+          }
+        : {})
     },
     'revision.create_revision_plan_slim': {
       chapterNumber,

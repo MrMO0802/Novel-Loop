@@ -333,6 +333,7 @@ async function renderStagePrompt(input: RunCodexRuntimeStageSamplingInput, paths
     FINAL_MARKDOWN: await readOptionalProjectText(paths, path.posix.join('chapters', `chapter_${String(input.chapterNumber).padStart(3, '0')}`, 'final.md'), sampleFinal(input.chapterNumber), fileStore),
     DRAFT_VERSION: 1,
     DRAFT_SUMMARY: `Chapter ${input.chapterNumber} draft advances the queued mystery without resolving final answers.`,
+    DIAGNOSTICS_CONTEXT: 'DIAGNOSTICS_CONTEXT_MODE: baseline\n\nBaseline diagnostics uses sampling draft context only.',
     DRAFT_MARKDOWN: await readOptionalProjectText(paths, path.posix.join('chapters', `chapter_${String(input.chapterNumber).padStart(3, '0')}`, 'draft_v1.md'), sampleDraft(input.chapterNumber), fileStore),
     DIAGNOSTICS_SUMMARY: 'No hard continuity issue in sample context.',
     REVISION_PLAN_SUMMARY: 'Preserve continuity and tighten the chapter hook.'

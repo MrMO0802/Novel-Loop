@@ -6,7 +6,30 @@
     "draftVersion": { "type": "integer" },
     "passed": { "type": "boolean" },
     "averageScore": { "type": "number" },
-    "issues": { "type": "array", "items": { "type": "string" } }
+    "issues": { "type": "array", "items": { "type": "string" } },
+    "hardChecks": {
+      "type": "object",
+      "properties": {
+        "timeline_consistency": { "$ref": "#/$defs/hardCheck" },
+        "character_knowledge_consistency": { "$ref": "#/$defs/hardCheck" },
+        "world_rule_consistency": { "$ref": "#/$defs/hardCheck" },
+        "no_unplanned_reveal": { "$ref": "#/$defs/hardCheck" }
+      },
+      "additionalProperties": false
+    }
+  },
+  "$defs": {
+    "hardCheck": {
+      "type": "object",
+      "required": ["passed", "message"],
+      "properties": {
+        "passed": { "type": "boolean" },
+        "message": { "type": "string" },
+        "evidence": { "type": "string" },
+        "severity": { "type": "string", "enum": ["critical", "high", "medium", "low"] }
+      },
+      "additionalProperties": false
+    }
   },
   "additionalProperties": false
 }

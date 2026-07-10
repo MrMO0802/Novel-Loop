@@ -1002,7 +1002,8 @@ async function generateCodexDiagnostics(
   const renderedPrompt = await promptService.renderPrompt('diagnostics.diagnose_chapter_slim', {
     CHAPTER_NUMBER: input.chapterNumber,
     DRAFT_VERSION: 1,
-    DRAFT_SUMMARY: summarizeText(draftText)
+    DRAFT_SUMMARY: summarizeText(draftText),
+    DIAGNOSTICS_CONTEXT: 'DIAGNOSTICS_CONTEXT_MODE: baseline\n\nBaseline diagnostics uses the draft summary only.'
   });
   const response = await createCodexLlmClient(input, paths, fileStore, runId).complete({
     promptId: 'diagnostics.diagnose_chapter_slim',

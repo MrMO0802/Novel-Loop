@@ -56,6 +56,7 @@ interface CodexCommandOptions {
   sourceProfile?: string;
   optimizationMode?: string;
   codexFinalMode?: string;
+  contextMode?: string;
   useCache?: boolean;
   warmCache?: boolean;
   chapter?: string;
@@ -557,12 +558,14 @@ export function registerCodexCommand(program: Command): void {
   addBoundaryOptions(codex.command('diagnostics-analysis').description('[experimental/internal] Analyze an existing Codex diagnostics hard fail without executing Codex'))
     .argument('<projectId>', 'project id')
     .argument('<chapterNumber>', 'chapter number')
+    .option('--context-mode <mode>', 'diagnostics context mode: baseline|enhanced', 'baseline')
     .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
       options = mergedOptions(options, command);
       const result = await generateCodexDiagnosticsHardFailAnalysis({
         projectId,
         projectsRoot: options.root ?? './projects',
-        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber')
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        contextMode: parseDiagnosticsContextMode(options.contextMode ?? 'baseline')
       });
       if (options.json === true) {
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
@@ -574,6 +577,8 @@ export function registerCodexCommand(program: Command): void {
           `analysisPath: ${result.analysisPath}`,
           `contextAuditPath: ${result.contextAuditPath}`,
           `revisionOpportunityPath: ${result.revisionOpportunityPath}`,
+          `contextMode: ${result.analysis.contextMode}`,
+          `contextFixReportPath: ${result.analysis.contextFixReportPath ?? 'none'}`,
           `hardFailures: ${result.analysis.hardFailures.length}`,
           `falsePositiveRisk: ${result.analysis.falsePositiveRisk.level}`,
           `suggestedRetryCommand: ${result.analysis.suggestedRetryCommand}`
@@ -585,6 +590,7 @@ export function registerCodexCommand(program: Command): void {
     .argument('<projectId>', 'project id')
     .argument('<chapterNumber>', 'chapter number')
     .option('--samples <count>', 'sample count', '1')
+    .option('--context-mode <mode>', 'diagnostics context mode: baseline|enhanced', 'baseline')
     .option('--timeout-ms <ms>', 'alias for codex timeout', '180000')
     .option('--prompt-root <path>', 'prompt root directory', './prompts')
     .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
@@ -595,6 +601,7 @@ export function registerCodexCommand(program: Command): void {
         promptRoot: options.promptRoot ?? './prompts',
         chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
         samples: parsePositiveInteger(options.samples ?? '1', 'samples'),
+        contextMode: parseDiagnosticsContextMode(options.contextMode ?? 'baseline'),
         ...resolveCodexCliOptions({
           ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
           codexProfile: options.codexProfile ?? 'clean',
@@ -614,6 +621,9 @@ export function registerCodexCommand(program: Command): void {
           `reportPath: ${result.reportPath}`,
           `markdownPath: ${result.markdownPath}`,
           `sampleCount: ${result.report.sampleCount}`,
+          `contextMode: ${result.report.contextMode}`,
+          `diagnosticsContextManifestPath: ${result.report.diagnosticsContextManifestPath ?? 'none'}`,
+          `contextFixReportPath: ${result.report.contextFixReportPath ?? 'none'}`,
           `hardFailRate: ${result.report.hardFailRate}`,
           `schemaValidRate: ${result.report.schemaValidRate}`,
           `stableFailure: ${String(result.report.stableFailure)}`,
@@ -758,6 +768,14 @@ function parseCodexContextMode(value: string): 'compact' | 'balanced' | 'rich' {
   const allowed = ['compact', 'balanced', 'rich'] as const;
   if (!allowed.includes(value as (typeof allowed)[number])) {
     throw new AppError('INVALID_CODEX_CONTEXT_MODE', `Invalid codex context mode: ${value}`, 2);
+  }
+  return value as (typeof allowed)[number];
+}
+
+function parseDiagnosticsContextMode(value: string): 'baseline' | 'enhanced' {
+  const allowed = ['baseline', 'enhanced'] as const;
+  if (!allowed.includes(value as (typeof allowed)[number])) {
+    throw new AppError('INVALID_DIAGNOSTICS_CONTEXT_MODE', `Invalid diagnostics context mode: ${value}`, 2);
   }
   return value as (typeof allowed)[number];
 }

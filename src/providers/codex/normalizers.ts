@@ -88,7 +88,15 @@ const SlimDiagnosticsSchema = z.object({
   draftVersion: z.number().int().positive(),
   passed: z.boolean(),
   averageScore: z.number().min(0).max(10),
-  issues: z.array(z.string()).default([])
+  issues: z.array(z.string()).default([]),
+  hardChecks: z
+    .object({
+      timeline_consistency: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional(),
+      character_knowledge_consistency: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional(),
+      world_rule_consistency: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional(),
+      no_unplanned_reveal: z.object({ passed: z.boolean(), message: z.string(), evidence: z.string().optional(), severity: z.enum(['critical', 'high', 'medium', 'low']).optional() }).optional()
+    })
+    .optional()
 });
 
 const SlimRevisionPlanSchema = z.object({
@@ -368,10 +376,10 @@ export function normalizeDiagnostics(value: unknown, context: CodexNormalization
     chapterNumber: context.chapterNumber ?? slim.chapterNumber,
     draftVersion: slim.draftVersion,
     hard_checks: {
-      timeline_consistency: { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
-      character_knowledge_consistency: { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
-      world_rule_consistency: { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
-      no_unplanned_reveal: { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' }
+      timeline_consistency: slim.hardChecks?.timeline_consistency ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
+      character_knowledge_consistency: slim.hardChecks?.character_knowledge_consistency ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
+      world_rule_consistency: slim.hardChecks?.world_rule_consistency ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' },
+      no_unplanned_reveal: slim.hardChecks?.no_unplanned_reveal ?? { passed: slim.passed, message: slim.passed ? 'ok' : 'review required' }
     },
     soft_scores: {
       plot_progression: score,

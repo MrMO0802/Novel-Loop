@@ -10,6 +10,7 @@ import { PromptService } from '../prompts/PromptService.js';
 import {
   ChapterMissionSchema,
   CodexDiagnosticsBenchmarkReportSchema,
+  CodexDiagnosticsContextFixReportSchema,
   CodexDiagnosticsContextAuditSchema,
   CodexDiagnosticsHardFailAnalysisSchema,
   CodexDiagnosticsHardFailureAnalysisSchema,
@@ -22,12 +23,14 @@ import type {
   ChapterMission,
   CodexDiagnosticsBenchmarkReport,
   CodexDiagnosticsBenchmarkSample,
+  CodexDiagnosticsContextFixReport,
   CodexDiagnosticsContextAudit,
   CodexDiagnosticsEvidence,
   CodexDiagnosticsHardCheckName,
   CodexDiagnosticsHardFailAnalysis,
   CodexDiagnosticsHardFailureAnalysis,
   CodexDiagnosticsLikelyCause,
+  DiagnosticsContextMode,
   DiagnosticsReport,
   RevisionOpportunityReport,
   RunManifest,
@@ -38,11 +41,15 @@ import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
+import { buildDiagnosticsContextManifest } from './codexDiagnosticsContextBuilder.js';
+
+export { buildDiagnosticsContextManifest } from './codexDiagnosticsContextBuilder.js';
 
 export interface GenerateCodexDiagnosticsHardFailAnalysisInput {
   projectId: string;
   projectsRoot?: string;
   chapterNumber: number;
+  contextMode?: DiagnosticsContextMode;
 }
 
 export interface GenerateCodexDiagnosticsHardFailAnalysisResult {
@@ -63,6 +70,7 @@ export interface RunCodexDiagnosticsBenchmarkInput {
   promptRoot?: string;
   chapterNumber: number;
   samples?: number;
+  contextMode?: DiagnosticsContextMode;
   codexBin?: string;
   codexProfile?: CodexProfile;
   codexJsonRetries?: number;
@@ -75,6 +83,9 @@ export interface RunCodexDiagnosticsBenchmarkResult {
   report: CodexDiagnosticsBenchmarkReport;
   reportPath: string;
   markdownPath: string;
+  contextFixReport?: CodexDiagnosticsContextFixReport;
+  contextFixReportPath?: string;
+  contextFixReportMarkdownPath?: string;
 }
 
 interface SourceContext {
@@ -147,6 +158,18 @@ export async function generateCodexDiagnosticsHardFailAnalysis(
   const hardFailures = HARD_CHECKS
     .filter((checkName) => !context.diagnostics.hard_checks[checkName].passed)
     .map((checkName) => analyzeHardFailure(context, checkName, availability));
+  const contextMode = input.contextMode ?? 'baseline';
+  const latestContextFix =
+    contextMode === 'enhanced'
+      ? await readLatestVersionedJson(paths, fileStore, input.chapterNumber, 'codex_diagnostics_context_fix_report', CodexDiagnosticsContextFixReportSchema)
+      : undefined;
+  const contextFixReport = latestContextFix?.value;
+  const hardFailuresAfter = applyContextFixClassifications(hardFailures, contextFixReport);
+  const classificationChanged =
+    contextFixReport?.hardCheckComparison.some((comparison) => comparison.changed || comparison.classificationBefore !== comparison.classificationAfter) ?? false;
+  const remainingInsufficientEvidence =
+    contextFixReport?.hardCheckComparison.filter((comparison) => comparison.classificationAfter === 'insufficient_evidence').map((comparison) => comparison.checkName) ??
+    hardFailures.filter((failure) => failure.classification === 'insufficient_evidence').map((failure) => failure.checkName);
   const evidenceMap = uniqueEvidence(hardFailures.flatMap((failure) => [...failure.evidenceFromDraft, ...failure.evidenceFromPlan, ...failure.evidenceFromStoryState]));
   const suspectedRootCauses = suspectedRootCausesFor(hardFailures, contextAudit);
   const analysisArtifact = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_diagnostics_hard_fail_analysis');
@@ -157,6 +180,16 @@ export async function generateCodexDiagnosticsHardFailAnalysis(
       projectId: paths.projectId,
       chapterNumber: input.chapterNumber,
       generatedAt,
+      contextMode,
+      ...(latestContextFix === undefined ? {} : { contextFixReportPath: latestContextFix.relativePath }),
+      classificationChanged,
+      hardFailuresBefore: hardFailures,
+      hardFailuresAfter,
+      evidenceImprovementSummary:
+        contextFixReport === undefined
+          ? 'No enhanced diagnostics context comparison was available.'
+          : `Enhanced context changed ${contextFixReport.hardCheckComparison.filter((comparison) => comparison.evidenceImproved).length} hard-check evidence classification(s).`,
+      remainingInsufficientEvidence,
       sourceDiagnosticsPath: context.diagnosticsPath,
       sourceDraftPath: context.draftPath,
       sourceFinalPath: context.finalExists ? context.finalPath : '',
@@ -216,23 +249,50 @@ export async function runCodexDiagnosticsBenchmark(
 ): Promise<RunCodexDiagnosticsBenchmarkResult> {
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
   const beforeState = await readOptionalText(paths.storyState(), fileStore);
+  const contextMode = input.contextMode ?? 'baseline';
+  const contextManifest = await buildDiagnosticsContextManifest(
+    { projectId: paths.projectId, projectsRoot: paths.projectsRoot, chapterNumber: input.chapterNumber, mode: contextMode },
+    fileStore
+  );
   const samples: CodexDiagnosticsBenchmarkSample[] = [];
   const sampleCount = Math.max(1, input.samples ?? 1);
   for (let index = 0; index < sampleCount; index += 1) {
-    samples.push(await runDiagnosticsSample({ ...input, projectsRoot: paths.projectsRoot, projectId: paths.projectId, sampleIndex: index + 1 }, fileStore));
+    samples.push(
+      await runDiagnosticsSample(
+        { ...input, projectsRoot: paths.projectsRoot, projectId: paths.projectId, contextMode, diagnosticsPromptContext: contextManifest.promptContext, sampleIndex: index + 1 },
+        fileStore
+      )
+    );
   }
   const artifact = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_diagnostics_benchmark');
-  const report = await fileStore.writeJson(
+  let report = await fileStore.writeJson(
     artifact.jsonPath,
-    buildBenchmarkReport(paths.projectId, input.chapterNumber, samples, artifact.version),
+    buildBenchmarkReport(paths.projectId, input.chapterNumber, samples, artifact.version, contextMode, contextManifest.manifestPath),
     CodexDiagnosticsBenchmarkReportSchema
   );
   await fileStore.writeText(artifact.mdPath, renderBenchmarkMarkdown(report));
+  const contextFix =
+    contextMode === 'enhanced'
+      ? await maybeWriteContextFixReport(paths, fileStore, input.chapterNumber, report, artifact.relativeJsonPath, contextManifest.manifestPath)
+      : undefined;
+  if (contextFix !== undefined) {
+    report = await fileStore.writeJson(
+      artifact.jsonPath,
+      { ...report, contextFixReportPath: contextFix.reportPath },
+      CodexDiagnosticsBenchmarkReportSchema
+    );
+    await fileStore.writeText(artifact.mdPath, renderBenchmarkMarkdown(report));
+  }
   const afterState = await readOptionalText(paths.storyState(), fileStore);
   if (afterState !== beforeState) {
     throw new Error('diagnostics-benchmark mutated Story State');
   }
-  return { report, reportPath: artifact.relativeJsonPath, markdownPath: artifact.relativeMdPath };
+  return {
+    report,
+    reportPath: artifact.relativeJsonPath,
+    markdownPath: artifact.relativeMdPath,
+    ...(contextFix === undefined ? {} : { contextFixReport: contextFix.report, contextFixReportPath: contextFix.reportPath, contextFixReportMarkdownPath: contextFix.markdownPath })
+  };
 }
 
 async function loadSourceContext(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<SourceContext> {
@@ -474,6 +534,20 @@ function classificationFor(input: {
   return 'unknown';
 }
 
+function applyContextFixClassifications(
+  hardFailures: CodexDiagnosticsHardFailureAnalysis[],
+  contextFixReport: CodexDiagnosticsContextFixReport | undefined
+): CodexDiagnosticsHardFailureAnalysis[] {
+  if (contextFixReport === undefined) return hardFailures;
+  const afterByCheck = new Map(contextFixReport.hardCheckComparison.map((comparison) => [comparison.checkName, comparison.classificationAfter]));
+  return hardFailures
+    .map((failure) => {
+      const classification = afterByCheck.get(failure.checkName) ?? failure.classification;
+      return { ...failure, classification };
+    })
+    .filter((failure) => failure.classification !== 'diagnostics_false_positive');
+}
+
 function missingEvidenceFor(
   availability: ContextArtifactAvailability[],
   draftEvidence: CodexDiagnosticsEvidence[],
@@ -523,7 +597,7 @@ function buildRevisionOpportunity(
 }
 
 async function runDiagnosticsSample(
-  input: RunCodexDiagnosticsBenchmarkInput & { sampleIndex: number },
+  input: RunCodexDiagnosticsBenchmarkInput & { sampleIndex: number; contextMode: DiagnosticsContextMode; diagnosticsPromptContext: string },
   fileStore: FileStore
 ): Promise<CodexDiagnosticsBenchmarkSample> {
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
@@ -538,6 +612,7 @@ async function runDiagnosticsSample(
       provider: 'codex-text',
       chapterNumber: input.chapterNumber,
       sampleId,
+      contextMode: input.contextMode,
       storyStateCommitAllowed: false,
       codexProfile: input.codexProfile ?? 'clean'
     }
@@ -548,7 +623,7 @@ async function runDiagnosticsSample(
   let retryCount = 0;
   let repairCount = 0;
   try {
-    const renderedPrompt = await renderDiagnosticsPrompt(input, paths, fileStore);
+    const renderedPrompt = await renderDiagnosticsPrompt(input, paths, fileStore, input.diagnosticsPromptContext);
     const outputSchema = resolveCodexOutputSchema('diagnostics.diagnose_chapter_slim');
     if (outputSchema === undefined) {
       throw new AppError('OUTPUT_SCHEMA_NOT_FOUND', 'No output schema registered for diagnostics.diagnose_chapter_slim', 1);
@@ -609,18 +684,26 @@ async function runDiagnosticsSample(
   });
 }
 
-async function renderDiagnosticsPrompt(input: RunCodexDiagnosticsBenchmarkInput, paths: ProjectPaths, fileStore: FileStore): Promise<string> {
+async function renderDiagnosticsPrompt(input: RunCodexDiagnosticsBenchmarkInput, paths: ProjectPaths, fileStore: FileStore, diagnosticsPromptContext: string): Promise<string> {
   const promptService = new PromptService(path.join(input.promptRoot ?? DEFAULT_PROMPT_ROOT, 'codex-text'), fileStore);
   const draftPath = paths.chapterArtifact(input.chapterNumber, 'draft_v1.md');
   const draftText = await fileStore.readText(draftPath);
   return promptService.renderPrompt('diagnostics.diagnose_chapter_slim', {
     CHAPTER_NUMBER: input.chapterNumber,
     DRAFT_VERSION: 1,
-    DRAFT_SUMMARY: summarizeText(draftText)
+    DRAFT_SUMMARY: summarizeText(draftText),
+    DIAGNOSTICS_CONTEXT: diagnosticsPromptContext
   });
 }
 
-function buildBenchmarkReport(projectIdValue: string, chapterNumber: number, samples: CodexDiagnosticsBenchmarkSample[], version: number): CodexDiagnosticsBenchmarkReport {
+function buildBenchmarkReport(
+  projectIdValue: string,
+  chapterNumber: number,
+  samples: CodexDiagnosticsBenchmarkSample[],
+  version: number,
+  contextMode: DiagnosticsContextMode,
+  diagnosticsContextManifestPath: string
+): CodexDiagnosticsBenchmarkReport {
   const sampleCount = samples.length;
   const successCount = samples.filter((sample) => sample.schemaValid).length;
   const failureCount = sampleCount - successCount;
@@ -656,9 +739,173 @@ function buildBenchmarkReport(projectIdValue: string, chapterNumber: number, sam
     stableFailure: sampleCount > 0 && hardFailRate === 1 && schemaValidRate === 1,
     likelyFalsePositive: sampleCount > 0 && hardFailRate > 0 && schemaValidRate === 1 && samples.every((sample) => sample.retryCount === 0),
     recommendation: hardFailRate === 1 ? 'Run diagnostics-analysis and review evidence before retrying revision.' : 'Diagnostics result varies; collect more samples before changing prompts.',
+    contextMode,
+    diagnosticsContextManifestPath,
     generatedAt: new Date().toISOString(),
     storyStateMutated: false
   });
+}
+
+async function maybeWriteContextFixReport(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterNumber: number,
+  enhancedReport: CodexDiagnosticsBenchmarkReport,
+  enhancedReportPath: string,
+  contextManifestPath: string
+): Promise<{ report: CodexDiagnosticsContextFixReport; reportPath: string; markdownPath: string } | undefined> {
+  const baseline = await latestBenchmarkByMode(paths, fileStore, chapterNumber, 'baseline');
+  if (baseline === undefined) return undefined;
+  const artifact = await nextVersionedChapterArtifact(paths, fileStore, chapterNumber, 'codex_diagnostics_context_fix_report');
+  const report = await fileStore.writeJson(
+    artifact.jsonPath,
+    buildContextFixReport(paths.projectId, chapterNumber, baseline.value, baseline.relativePath, enhancedReport, enhancedReportPath, contextManifestPath, artifact.version),
+    CodexDiagnosticsContextFixReportSchema
+  );
+  await fileStore.writeText(artifact.mdPath, renderContextFixMarkdown(report));
+  return { report, reportPath: artifact.relativeJsonPath, markdownPath: artifact.relativeMdPath };
+}
+
+function buildContextFixReport(
+  projectIdValue: string,
+  chapterNumber: number,
+  baseline: CodexDiagnosticsBenchmarkReport,
+  baselinePath: string,
+  enhanced: CodexDiagnosticsBenchmarkReport,
+  enhancedPath: string,
+  contextManifestPath: string,
+  version: number
+): CodexDiagnosticsContextFixReport {
+  const hardCheckComparison = HARD_CHECKS.map((checkName) => {
+    const before = classifyBenchmarkCheck(baseline, checkName);
+    const after = classifyBenchmarkCheck(enhanced, checkName);
+    return {
+      checkName,
+      baselineResult: before.result,
+      enhancedResult: after.result,
+      changed: before.result !== after.result || before.classification !== after.classification,
+      evidenceImproved: before.classification === 'insufficient_evidence' && after.classification !== 'insufficient_evidence',
+      classificationBefore: before.classification,
+      classificationAfter: after.classification,
+      notes: after.note
+    };
+  });
+  const baselineInsufficientEvidenceCount = hardCheckComparison.filter((item) => item.classificationBefore === 'insufficient_evidence').length;
+  const enhancedInsufficientEvidenceCount = hardCheckComparison.filter((item) => item.classificationAfter === 'insufficient_evidence').length;
+  return CodexDiagnosticsContextFixReportSchema.parse({
+    reportId: `codex_diagnostics_context_fix_report_ch${formatChapterNumber(chapterNumber)}_v${version}`,
+    projectId: projectIdValue,
+    chapterNumber,
+    generatedAt: new Date().toISOString(),
+    baselineBenchmarkPath: baselinePath,
+    enhancedBenchmarkPath: enhancedPath,
+    baselineHardFailRate: baseline.hardFailRate,
+    enhancedHardFailRate: enhanced.hardFailRate,
+    baselineFalsePositiveRisk: falsePositiveRiskLevel(baselineInsufficientEvidenceCount, baseline.hardFailRate),
+    enhancedFalsePositiveRisk: falsePositiveRiskLevel(enhancedInsufficientEvidenceCount, enhanced.hardFailRate),
+    baselineInsufficientEvidenceCount,
+    enhancedInsufficientEvidenceCount,
+    hardCheckComparison,
+    contextManifestPath,
+    conclusion: contextFixConclusion(baseline, enhanced, baselineInsufficientEvidenceCount, enhancedInsufficientEvidenceCount, hardCheckComparison),
+    recommendedNextStep: recommendedNextStepForContextFix(enhanced, hardCheckComparison),
+    storyStateMutated: false
+  });
+}
+
+function classifyBenchmarkCheck(report: CodexDiagnosticsBenchmarkReport, checkName: CodexDiagnosticsHardCheckName): {
+  result: string;
+  classification: CodexDiagnosticsHardFailureAnalysis['classification'];
+  note: string;
+} {
+  const checkResults = report.samples.map((sample) => sample.hardChecks[checkName]).filter((check): check is { passed: boolean; message: string; evidence?: string } => check !== undefined);
+  const failed = checkResults.filter((check) => !check.passed);
+  if (failed.length === 0) {
+    return { result: 'passed', classification: 'diagnostics_false_positive', note: 'Enhanced diagnostics passed this hard check or no failure remained.' };
+  }
+  const combined = failed.map((check) => `${check.message} ${check.evidence ?? ''}`).join(' | ').trim();
+  const lower = combined.toLowerCase();
+  if (lower.includes('sample failed before diagnostics schema validation')) {
+    return { result: `failed: ${combined}`, classification: 'schema_or_normalizer_issue', note: 'Sample did not produce schema-valid diagnostics, so context impact cannot be interpreted as a draft issue.' };
+  }
+  if (lower.includes('confirmed contradiction') || lower.includes('confirmed by') || lower.includes('draft timestamps') || lower.includes('evidence:')) {
+    return { result: `failed: ${combined}`, classification: 'true_positive_draft_issue', note: 'Failure includes specific evidence rather than only a generic hard-check failure.' };
+  }
+  if (combined.length === 0 || lower.includes('review required') || lower.includes('without detailed evidence') || lower.includes('hard check failed')) {
+    return { result: `failed: ${combined || 'review required'}`, classification: 'insufficient_evidence', note: 'Failure is generic and does not cite enough evidence.' };
+  }
+  return { result: `failed: ${combined}`, classification: 'unknown', note: 'Failure is specific but could not be confidently classified.' };
+}
+
+function falsePositiveRiskLevel(insufficientEvidenceCount: number, hardFailRate: number): 'low' | 'medium' | 'high' {
+  if (insufficientEvidenceCount >= 3 && hardFailRate > 0) return 'high';
+  if (insufficientEvidenceCount > 0 && hardFailRate > 0) return 'medium';
+  return 'low';
+}
+
+function contextFixConclusion(
+  baseline: CodexDiagnosticsBenchmarkReport,
+  enhanced: CodexDiagnosticsBenchmarkReport,
+  baselineInsufficientEvidenceCount: number,
+  enhancedInsufficientEvidenceCount: number,
+  comparisons: Array<{ classificationAfter: CodexDiagnosticsHardFailureAnalysis['classification']; evidenceImproved: boolean }>
+): CodexDiagnosticsContextFixReport['conclusion'] {
+  if (baseline.schemaValidRate < 1 || enhanced.schemaValidRate < 1) return 'requires_human_review';
+  if (comparisons.some((comparison) => comparison.classificationAfter === 'true_positive_draft_issue')) return 'true_positive_draft_issue_confirmed';
+  if (enhanced.hardFailRate === 0 && enhancedInsufficientEvidenceCount < baselineInsufficientEvidenceCount) return 'diagnostics_context_fix_helped';
+  if (enhancedInsufficientEvidenceCount < baselineInsufficientEvidenceCount) return 'diagnostics_context_fix_helped';
+  if (enhanced.hardFailRate > 0 && enhancedInsufficientEvidenceCount > 0) return 'diagnostics_prompt_still_overstrict';
+  if (enhanced.hardFailRate > 0) return 'requires_revision';
+  if (baseline.hardFailRate === enhanced.hardFailRate) return 'diagnostics_context_fix_no_change';
+  return 'requires_human_review';
+}
+
+function recommendedNextStepForContextFix(enhanced: CodexDiagnosticsBenchmarkReport, comparisons: Array<{ classificationAfter: CodexDiagnosticsHardFailureAnalysis['classification'] }>): string {
+  if (enhanced.schemaValidRate < 1) {
+    return 'Fix diagnostics JSON schema compliance before interpreting enhanced context impact.';
+  }
+  if (comparisons.some((comparison) => comparison.classificationAfter === 'true_positive_draft_issue')) {
+    return 'Treat the remaining hard failure as a draft issue; do not commit until a revision clears diagnostics.';
+  }
+  if (enhanced.hardFailRate === 0) {
+    return 'Rerun chapter diagnostics with enhanced context before continuing the controlled commit.';
+  }
+  return 'Send the chapter to human review or refine diagnostics prompt evidence requirements.';
+}
+
+function renderContextFixMarkdown(report: CodexDiagnosticsContextFixReport): string {
+  return [
+    '# Codex Diagnostics Context Fix Report',
+    '',
+    `projectId: ${report.projectId}`,
+    `chapterNumber: ${report.chapterNumber}`,
+    `baselineHardFailRate: ${report.baselineHardFailRate}`,
+    `enhancedHardFailRate: ${report.enhancedHardFailRate}`,
+    `baselineFalsePositiveRisk: ${report.baselineFalsePositiveRisk}`,
+    `enhancedFalsePositiveRisk: ${report.enhancedFalsePositiveRisk}`,
+    `conclusion: ${report.conclusion}`,
+    `recommendedNextStep: ${report.recommendedNextStep}`,
+    '',
+    ...report.hardCheckComparison.map((item) => `- ${item.checkName}: ${item.classificationBefore} -> ${item.classificationAfter}`)
+  ].join('\n') + '\n';
+}
+
+async function latestBenchmarkByMode(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterNumber: number,
+  contextMode: DiagnosticsContextMode
+): Promise<{ relativePath: string; value: CodexDiagnosticsBenchmarkReport } | undefined> {
+  const chapterDir = paths.chapterDir(chapterNumber);
+  if (!(await fileStore.exists(chapterDir))) return undefined;
+  const entries = (await fileStore.list(chapterDir)).filter((entry) => /^codex_diagnostics_benchmark_v\d+\.json$/.test(entry));
+  const candidates: Array<{ relativePath: string; value: CodexDiagnosticsBenchmarkReport }> = [];
+  for (const entry of entries) {
+    const relativePath = relativeChapterArtifact(chapterNumber, entry);
+    const value = await fileStore.readJson(paths.projectArtifact(relativePath), CodexDiagnosticsBenchmarkReportSchema);
+    if (value.contextMode === contextMode) candidates.push({ relativePath, value });
+  }
+  return candidates.at(-1);
 }
 
 async function readPromptMetrics(paths: ProjectPaths, fileStore: FileStore, runId: string): Promise<{ retryCount: number; repairCount: number }> {
@@ -847,6 +1094,8 @@ function renderAnalysisMarkdown(report: CodexDiagnosticsHardFailAnalysis): strin
     '',
     `projectId: ${report.projectId}`,
     `chapterNumber: ${report.chapterNumber}`,
+    `contextMode: ${report.contextMode}`,
+    `contextFixReportPath: ${report.contextFixReportPath ?? 'none'}`,
     `hardFailures: ${report.hardFailures.length}`,
     `falsePositiveRisk: ${report.falsePositiveRisk.level}`,
     '',
@@ -872,6 +1121,9 @@ function renderBenchmarkMarkdown(report: CodexDiagnosticsBenchmarkReport): strin
     '',
     `projectId: ${report.projectId}`,
     `chapterNumber: ${report.chapterNumber}`,
+    `contextMode: ${report.contextMode}`,
+    `diagnosticsContextManifestPath: ${report.diagnosticsContextManifestPath ?? 'none'}`,
+    `contextFixReportPath: ${report.contextFixReportPath ?? 'none'}`,
     `sampleCount: ${report.sampleCount}`,
     `hardFailRate: ${report.hardFailRate}`,
     `schemaValidRate: ${report.schemaValidRate}`,

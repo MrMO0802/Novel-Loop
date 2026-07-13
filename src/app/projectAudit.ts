@@ -51,17 +51,29 @@ import {
   RevisionOpportunityReportSchema,
   StoryStateSchema,
   CandidateDispositionSchema,
+  CandidateRevisionEvidenceAdjudicationSchema,
+  CandidateTimelineContradictionMapSchema,
+  ExpandedTargetRevisionCandidateDispositionSchema,
+  ExpandedTargetRevisionDiagnosticsABSchema,
+  ExpandedTargetRevisionExperimentReportSchema,
+  ExpandedTargetRevisionPlanSchema,
+  ExpandedTargetRevisionQualityReportSchema,
+  ExpandedTargetRevisionScopeValidationSchema,
   TargetCoverageClosureReportSchema,
   TargetCoverageGraphSchema,
   TargetExpansionApprovalPreviewSchema,
   TargetExpansionApprovalRecordSchema,
+  TargetedRevisionCandidateDispositionArtifactSchema,
   TargetedRevisionDiffSchema,
+  TargetedRevisionExperimentArtifactSchema,
   TargetedRevisionExperimentReportSchema,
+  TargetedRevisionPlanArtifactSchema,
   TargetedRevisionPlanSchema,
+  TargetedRevisionScopeValidationArtifactSchema,
   TargetedRevisionScopeValidationSchema,
   TimelineContradictionMapSchema
 } from '../schemas/index.js';
-import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexRuntimeSamplingReport, CodexStageRuntimeProfileReport, RunEvent, RunManifest } from '../schemas/index.js';
+import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, CodexRuntimeGapReport, CodexRuntimeSamplingReport, CodexStageRuntimeProfileReport, ExpandedTargetRevisionExperimentReport, RunEvent, RunManifest } from '../schemas/index.js';
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
@@ -618,21 +630,33 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkTimelineContradictionMap(issues, paths, fileStore, absolutePath, relativePath);
       }
       if (/^targeted_revision_plan_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionPlanSchema);
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionPlanArtifactSchema);
       }
       if (/^targeted_revision_scope_validation_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionScopeValidationSchema);
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionScopeValidationArtifactSchema);
       }
       if (/^targeted_revision_diff_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionDiffSchema);
       }
       if (/^targeted_revision_experiment_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionExperimentReportSchema);
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionExperimentArtifactSchema);
         await checkTargetedRevisionExperiment(issues, paths, fileStore, absolutePath, relativePath);
       }
       if (/^targeted_revision_candidate_disposition_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, CandidateDispositionSchema);
+        await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetedRevisionCandidateDispositionArtifactSchema);
         await checkCandidateDisposition(issues, absolutePath, relativePath, fileStore);
+      }
+      if (/^targeted_revision_diagnostics_ab_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, ExpandedTargetRevisionDiagnosticsABSchema);
+      }
+      if (/^candidate_diagnostics_evidence_adjudication_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, CandidateRevisionEvidenceAdjudicationSchema);
+      }
+      if (/^candidate_timeline_contradiction_map_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, CandidateTimelineContradictionMapSchema);
+      }
+      if (/^targeted_revision_quality_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, ExpandedTargetRevisionQualityReportSchema);
       }
       if (/^target_coverage_graph_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetCoverageGraphSchema);
@@ -1510,7 +1534,12 @@ async function checkTargetedRevisionExperiment(
   relativePath: string
 ): Promise<void> {
   try {
-    const report = await fileStore.readJson(absolutePath, TargetedRevisionExperimentReportSchema);
+    const artifact = await fileStore.readJson(absolutePath, TargetedRevisionExperimentArtifactSchema);
+    if ('revisionRound' in artifact) {
+      await checkExpandedTargetRevisionExperiment(issues, paths, fileStore, artifact, relativePath);
+      return;
+    }
+    const report = TargetedRevisionExperimentReportSchema.parse(artifact);
     const requiredPaths = [
       report.sourceAdjudicationPath,
       report.targetedRevisionPlanPath,
@@ -1624,6 +1653,152 @@ async function checkTargetedRevisionExperiment(
   }
 }
 
+async function checkExpandedTargetRevisionExperiment(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  report: ExpandedTargetRevisionExperimentReport,
+  relativePath: string
+): Promise<void> {
+  const requiredPaths = [
+    report.approvalRecordPath,
+    report.coverageReportPath,
+    report.candidateV1DispositionPath,
+    report.sourceAdjudicationPath,
+    report.sourceDraftPath,
+    report.targetedRevisionPlanPath,
+    report.candidateDraftPath,
+    report.scopeValidationPath,
+    report.revisionDiffPath,
+    report.diagnosticsABPath,
+    report.candidateAdjudicationPath,
+    report.candidateTimelineMapPath,
+    report.qualityReportPath
+  ];
+  const missing: string[] = [];
+  for (const artifactPath of requiredPaths) {
+    if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) missing.push(artifactPath);
+  }
+  if (missing.length > 0) {
+    issues.push(issue(
+      `expanded_target_revision_missing_artifacts_${sanitizeIssueId(relativePath)}`,
+      'error',
+      'targeted_revision',
+      relativePath,
+      `Expanded-target revision references missing artifacts: ${missing.join(', ')}.`,
+      'Restore the complete isolated round-2 artifact set or rerun from unchanged approved sources.',
+      true
+    ));
+    return;
+  }
+
+  try {
+    const [plan, scope, diff, diagnostics, adjudication, timelineMap, quality, approval, coverage, candidateV1Disposition, candidateText, sourceText, manifest] = await Promise.all([
+      fileStore.readJson(paths.projectArtifact(report.targetedRevisionPlanPath), ExpandedTargetRevisionPlanSchema),
+      fileStore.readJson(paths.projectArtifact(report.scopeValidationPath), ExpandedTargetRevisionScopeValidationSchema),
+      fileStore.readJson(paths.projectArtifact(report.revisionDiffPath), TargetedRevisionDiffSchema),
+      fileStore.readJson(paths.projectArtifact(report.diagnosticsABPath), ExpandedTargetRevisionDiagnosticsABSchema),
+      fileStore.readJson(paths.projectArtifact(report.candidateAdjudicationPath), CandidateRevisionEvidenceAdjudicationSchema),
+      fileStore.readJson(paths.projectArtifact(report.candidateTimelineMapPath), CandidateTimelineContradictionMapSchema),
+      fileStore.readJson(paths.projectArtifact(report.qualityReportPath), ExpandedTargetRevisionQualityReportSchema),
+      fileStore.readJson(paths.projectArtifact(report.approvalRecordPath), TargetExpansionApprovalRecordSchema),
+      fileStore.readJson(paths.projectArtifact(report.coverageReportPath), TargetCoverageClosureReportSchema),
+      fileStore.readJson(paths.projectArtifact(report.candidateV1DispositionPath), CandidateDispositionSchema),
+      fileStore.readText(paths.projectArtifact(report.candidateDraftPath)),
+      fileStore.readText(paths.projectArtifact(report.sourceDraftPath)),
+      fileStore.readJson(paths.runManifest(report.runId), RunManifestV2Schema)
+    ]);
+    const candidateHash = sha256(candidateText);
+    const sourceHash = sha256(sourceText);
+    const approvedFullSet = [...coverage.initialTargets.map((target) => target.targetId), ...coverage.proposedAdditionalTargets.map((target) => target.targetId)].sort();
+    const planSet = [...plan.fullApprovedTargetIds].sort();
+    const operationCoverageSet = plan.targetOperationCoverage.map((target) => target.targetId).sort();
+    const requiredTargetsHandled = plan.targetOperationCoverage
+      .filter((target) => target.requiredForClosure)
+      .every((target) => target.disposition !== 'preserved_with_justification' && target.operationIds.length > 0);
+    const baselineValid = diagnostics.samples.filter((sample) => sample.arm === 'baseline' && sample.schemaValid);
+    const candidateValid = diagnostics.samples.filter((sample) => sample.arm === 'candidate' && sample.schemaValid);
+    const expectedOrder = Array.from({ length: report.sampleCountPerArm }, (_, index) => [`A${index + 1}`, `B${index + 1}`]).flat();
+    const sampleOrderValid = diagnostics.samples.every((sample, index) =>
+      sample.sequenceIndex === index + 1 &&
+      sample.pairIndex === Math.floor(index / 2) + 1 &&
+      sample.arm === (index % 2 === 0 ? 'baseline' : 'candidate')
+    );
+    const denominatorValid =
+      auditRate(baselineValid.length, report.sampleCountPerArm) === diagnostics.baselineSchemaValidRate &&
+      auditRate(candidateValid.length, report.sampleCountPerArm) === diagnostics.candidateSchemaValidRate &&
+      auditRate(baselineValid.filter((sample) => sample.timelineConsistencyPassed === false).length, baselineValid.length) === diagnostics.baselineTimelineFailureRate &&
+      auditRate(candidateValid.filter((sample) => sample.timelineConsistencyPassed === false).length, candidateValid.length) === diagnostics.candidateTimelineFailureRate &&
+      auditRate(baselineValid.filter((sample) => sample.allHardChecksPassed === false).length, baselineValid.length) === diagnostics.baselineAnyBlockingFailureRate &&
+      auditRate(candidateValid.filter((sample) => sample.allHardChecksPassed === false).length, candidateValid.length) === diagnostics.candidateAnyBlockingFailureRate;
+    const generatedPaths = manifest.artifacts.filter((artifact) => artifact.action === 'generated').map((artifact) => artifact.path);
+    const diagnosticsPromptCalls = manifest.promptCalls.filter((call) => call.promptId === diagnostics.diagnosticsPromptId);
+    const forbiddenGenerated = generatedPaths.filter((artifactPath) =>
+      /(?:^|\/)(?:final\.md|canon_patch(?:_.*)?\.json|commit_report(?:_.*)?\.json|approval_record(?:_.*)?\.json)$/.test(artifactPath) ||
+      /(?:preview|snapshot)/i.test(artifactPath)
+    );
+    const safetyValid =
+      manifest.args.revisionRound === 2 &&
+      manifest.args.sourceCandidatePath === null &&
+      manifest.args.storyStateCommitAllowed === false &&
+      manifest.args.normalPreviewAllowed === false &&
+      manifest.args.candidateAdoptionAllowed === false &&
+      manifest.args.queueMutationAllowed === false &&
+      manifest.args.canonicalPatchAllowed === false &&
+      manifest.args.snapshotAllowed === false &&
+      manifest.args.automaticFurtherRevisionAllowed === false &&
+      manifest.stateMutations.length === 0 && manifest.queueTransitions.length === 0 && manifest.snapshots.length === 0 &&
+      manifest.promptCalls.length === 1 + report.sampleCountPerArm * 2 && forbiddenGenerated.length === 0;
+    const protectedValid = await allProtectedArtifactsCurrent(paths, fileStore, report.protectedArtifacts);
+    const sourceLinksValid =
+      report.revisionRound === 2 && plan.revisionRound === 2 && scope.revisionRound === 2 && diagnostics.revisionRound === 2 &&
+      report.sourceCandidatePath === null && plan.sourceCandidatePath === null && /draft_v1\.md$/.test(report.sourceDraftPath) &&
+      report.approvalRecordPath === plan.approvalRecordPath && report.coverageReportPath === plan.coverageReportPath &&
+      approval.coverageReportPath === report.coverageReportPath && approval.coverageReportHash === sha256(await fileStore.readText(paths.projectArtifact(report.coverageReportPath))) &&
+      approval.approved && approval.riskAcknowledged && coverage.coverageClosed &&
+      candidateV1Disposition.result === 'rejected_no_improvement' && !candidateV1Disposition.eligibleAsNextRevisionBase && !candidateV1Disposition.adopted;
+    const artifactLinksValid =
+      plan.sourceDraftHash === sourceHash && scope.sourceDraftHash === sourceHash && diagnostics.sourceDraftHash === sourceHash &&
+      scope.candidateDraftHash === candidateHash && diagnostics.candidateDraftHash === candidateHash && timelineMap.sourceCandidateHash === candidateHash &&
+      adjudication.sourceCandidateHash === candidateHash && adjudication.sourceDiagnosticsABPath === report.diagnosticsABPath &&
+      adjudication.candidateTimelineContradictionMapPath === report.candidateTimelineMapPath &&
+      approvedFullSet.join('|') === planSet.join('|') && planSet.join('|') === operationCoverageSet.join('|') &&
+      requiredTargetsHandled && scope.requiredTargetsHandled && scope.fullApprovedTargetSetMatched && scope.nonTargetParagraphsUnchanged &&
+      diff.changes.every((change) => planSet.includes(change.targetId)) &&
+      diagnostics.executionOrder.join('|') === expectedOrder.join('|') && report.executionOrder.join('|') === expectedOrder.join('|') &&
+      sampleOrderValid && denominatorValid &&
+      diagnostics.provider === 'codex-text' && diagnosticsPromptCalls.length === report.sampleCountPerArm * 2 &&
+      diagnosticsPromptCalls.every((call) => call.provider === diagnostics.provider && call.codexProfile === diagnostics.codexProfile &&
+        call.outputSchemaPath === diagnostics.diagnosticsOutputSchemaPath && diagnostics.codexVersions.includes(call.codexVersion ?? '')) &&
+      diagnostics.storyStateHash === sha256(await fileStore.readText(paths.storyState())) &&
+      diagnostics.missionHash === sha256(await fileStore.readText(paths.chapterArtifact(report.chapterNumber, 'mission.json'))) &&
+      diagnostics.selectedPlanHash === sha256(await fileStore.readText(paths.chapterArtifact(report.chapterNumber, 'selected_plan.md'))) &&
+      diagnostics.samples.filter((sample) => sample.arm === 'baseline').every((sample) => sample.draftHash === sourceHash) &&
+      diagnostics.samples.filter((sample) => sample.arm === 'candidate').every((sample) => sample.draftHash === candidateHash) &&
+      quality.sourceDraftPath === report.sourceDraftPath && quality.candidateDraftPath === report.candidateDraftPath;
+    const resultValid = report.result !== 'revision_effective' || (
+      scope.scopeValid && report.fullApprovedTargetSetMatched && diagnostics.experimentValid &&
+      diagnostics.baselineSchemaValidRate >= 0.8 && diagnostics.candidateSchemaValidRate >= 0.8 &&
+      diagnostics.baselineTimelineFailureRate >= 0.8 && diagnostics.candidateTimelineFailureRate <= 0.2 &&
+      diagnostics.newlyIntroducedHardChecks.length === 0 && adjudication.adjudication === 'no_remaining_contradiction' &&
+      quality.criticalIssueCount === 0 && quality.scoreRegressionWithinLimit
+    );
+    if (!sourceLinksValid || !artifactLinksValid || !resultValid || !safetyValid || !protectedValid) {
+      issues.push(issue(
+        `expanded_target_revision_cross_artifact_invalid_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'targeted_revision',
+        relativePath,
+        `Round-2 approval, source, target coverage, A/B denominator, result, run safety, or protected hashes are inconsistent. forbiddenGenerated=${forbiddenGenerated.join(', ') || 'none'}.`,
+        'Keep candidate v2 isolated, restore canonical files, and regenerate only from the latest unchanged approval.',
+        true
+      ));
+    }
+  } catch {
+    // Individual schema and missing-source checks report malformed artifacts.
+  }
+}
+
 async function checkCandidateDisposition(
   issues: AuditIssue[],
   absolutePath: string,
@@ -1631,7 +1806,24 @@ async function checkCandidateDisposition(
   fileStore: FileStore
 ): Promise<void> {
   try {
-    const disposition = await fileStore.readJson(absolutePath, CandidateDispositionSchema);
+    const artifact = await fileStore.readJson(absolutePath, TargetedRevisionCandidateDispositionArtifactSchema);
+    if ('revisionRound' in artifact) {
+      const disposition = ExpandedTargetRevisionCandidateDispositionSchema.parse(artifact);
+      if (disposition.adopted || disposition.committed || disposition.automaticFurtherRevisionAllowed ||
+        (disposition.result === 'accepted_for_preview_review') !== disposition.eligibleForPreviewReview) {
+        issues.push(issue(
+          `expanded_target_revision_invalid_disposition_${sanitizeIssueId(relativePath)}`,
+          'critical',
+          'targeted_revision',
+          relativePath,
+          'Candidate v2 disposition permits automatic adoption, commit, further revision, or inconsistent preview eligibility.',
+          'Restore the isolated candidate disposition and require explicit human review.',
+          true
+        ));
+      }
+      return;
+    }
+    const disposition = CandidateDispositionSchema.parse(artifact);
     if (!disposition.result.startsWith('rejected_') || disposition.adopted || disposition.eligibleAsNextRevisionBase || !disposition.retainForProvenance) {
       issues.push(issue(
         `target_coverage_invalid_disposition_${sanitizeIssueId(relativePath)}`,
@@ -2547,6 +2739,23 @@ function uniqueProfileCalls(report: CodexStageRuntimeProfileReport): Array<Codex
     }
   }
   return [...calls.values()];
+}
+
+async function allProtectedArtifactsCurrent(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  artifacts: Array<{ path: string; beforeSha256: string; afterSha256: string; unchanged: true }>
+): Promise<boolean> {
+  for (const artifact of artifacts) {
+    const artifactPath = paths.projectArtifact(artifact.path);
+    if (!(await fileStore.exists(artifactPath)) || artifact.beforeSha256 !== artifact.afterSha256 ||
+      sha256(await fileStore.readText(artifactPath)) !== artifact.afterSha256) return false;
+  }
+  return true;
+}
+
+function auditRate(numerator: number, denominator: number): number {
+  return denominator === 0 ? 0 : Number((numerator / denominator).toFixed(4));
 }
 
 function sanitizeIssueId(value: string): string {

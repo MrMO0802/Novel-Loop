@@ -8,6 +8,7 @@ import { generateCodexDiagnosticsHardFailAnalysis, runCodexDiagnosticsBenchmark 
 import { runCodexDiagnosticsSchemaBenchmark } from '../../app/codexDiagnosticsSchemaCompliance.js';
 import { runCodexDiagnosticsEvidenceAdjudication } from '../../app/codexDiagnosticsEvidenceAdjudication.js';
 import { approveCodexTargetExpansion, runCodexDiagnosticsTargetCoverage } from '../../app/codexTargetCoverage.js';
+import { runCodexExpandedTargetRevisionExperiment } from '../../app/codexExpandedTargetRevisionExperiment.js';
 import { runCodexTargetedRevisionExperiment } from '../../app/codexTargetedRevisionExperiment.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
@@ -69,6 +70,8 @@ interface CodexCommandOptions {
   adjudication?: string;
   report?: string;
   operator?: string;
+  approval?: string;
+  revisionRound?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -726,12 +729,63 @@ export function registerCodexCommand(program: Command): void {
     .argument('<projectId>', 'project id')
     .argument('<chapterNumber>', 'chapter number')
     .option('--adjudication <path|latest>', 'source evidence adjudication report path or latest', 'latest')
+    .option('--approval <path|latest>', 'required approved target expansion record for revision round 2')
+    .option('--revision-round <round>', 'isolated targeted revision round: 1 or 2', '1')
     .option('--samples <count>', 'paired diagnostics sample count per arm', '3')
     .option('--context-mode <mode>', 'diagnostics context mode: enhanced', 'enhanced')
     .option('--timeout-ms <ms>', 'alias for codex timeout', '180000')
     .option('--prompt-root <path>', 'prompt root directory', './prompts')
     .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
       options = mergedOptions(options, command);
+      const revisionRound = parsePositiveInteger(options.revisionRound ?? '1', 'revisionRound');
+      if (revisionRound > 2) {
+        throw new AppError('CODEX_TARGETED_REVISION_MAX_ROUNDS_REACHED', 'Automatic isolated targeted revision is limited to revision round 2.', 2);
+      }
+      if (revisionRound === 2) {
+        const result = await runCodexExpandedTargetRevisionExperiment({
+          projectId,
+          projectsRoot: options.root ?? './projects',
+          promptRoot: options.promptRoot ?? './prompts',
+          chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+          ...(options.approval === undefined ? {} : { approval: options.approval }),
+          revisionRound,
+          samples: parsePositiveInteger(options.samples ?? '3', 'samples'),
+          contextMode: parseTargetedRevisionContextMode(options.contextMode ?? 'enhanced'),
+          ...resolveCodexCliOptions({
+            ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+            codexProfile: options.codexProfile ?? 'clean',
+            codexJsonRetries: options.codexJsonRetries ?? '2',
+            ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+            codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+            codexTimeoutMs: options.codexTimeoutMs ?? options.timeoutMs ?? '180000'
+          })
+        });
+        if (options.json === true) {
+          process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+          return;
+        }
+        process.stdout.write([
+          'codexExpandedTargetRevisionExperiment: success',
+          `revisionRound: ${result.report.revisionRound}`,
+          `approvalRecordPath: ${result.report.approvalRecordPath}`,
+          `planPath: ${result.planPath}`,
+          `candidateDraftPath: ${result.candidateDraftPath}`,
+          `scopeValidationPath: ${result.scopeValidationPath}`,
+          `diagnosticsABPath: ${result.diagnosticsABPath}`,
+          `candidateAdjudicationPath: ${result.candidateAdjudicationPath}`,
+          `qualityReportPath: ${result.qualityReportPath}`,
+          `reportPath: ${result.reportPath}`,
+          `dispositionPath: ${result.dispositionPath}`,
+          `result: ${result.report.result}`,
+          `disposition: ${result.disposition.result}`,
+          `candidateAdopted: ${String(result.disposition.adopted)}`,
+          `eligibleForPreviewReview: ${String(result.disposition.eligibleForPreviewReview)}`,
+          `storyStateMutated: ${String(result.report.storyStateMutated)}`,
+          `queueMutated: ${String(result.report.queueMutated)}`,
+          `recommendedNextStep: ${result.disposition.recommendedNextStep}`
+        ].join('\n') + '\n');
+        return;
+      }
       const result = await runCodexTargetedRevisionExperiment({
         projectId,
         projectsRoot: options.root ?? './projects',

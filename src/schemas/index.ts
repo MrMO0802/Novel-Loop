@@ -460,3 +460,39 @@ export type {
   TargetExpansionApprovalPreview,
   TargetExpansionApprovalRecord
 } from './codexTargetCoverage.js';
+
+export {
+  CandidateRevisionAdjudicationResultSchema,
+  CandidateRevisionEvidenceAdjudicationSchema,
+  CandidateTimelineContradictionMapSchema,
+  CandidateTimelineContradictionSchema,
+  ExpandedTargetRevisionAllowedTargetSchema,
+  ExpandedTargetRevisionCandidateDispositionResultSchema,
+  ExpandedTargetRevisionCandidateDispositionSchema,
+  ExpandedTargetRevisionDiagnosticsABSchema,
+  ExpandedTargetRevisionExperimentReportSchema,
+  ExpandedTargetRevisionExperimentResultSchema,
+  ExpandedTargetRevisionPlanSchema,
+  ExpandedTargetRevisionQualityCheckSchema,
+  ExpandedTargetRevisionQualityReportSchema,
+  ExpandedTargetRevisionScopeValidationSchema,
+  TargetedRevisionCandidateDispositionArtifactSchema,
+  TargetedRevisionDiffArtifactSchema,
+  TargetedRevisionExperimentArtifactSchema,
+  TargetedRevisionPlanArtifactSchema,
+  TargetedRevisionScopeValidationArtifactSchema,
+  TargetOperationCoverageDispositionSchema,
+  TargetOperationCoverageSchema
+} from './codexExpandedTargetRevision.js';
+export type {
+  CandidateRevisionEvidenceAdjudication,
+  CandidateTimelineContradictionMap,
+  ExpandedTargetRevisionAllowedTarget,
+  ExpandedTargetRevisionCandidateDisposition,
+  ExpandedTargetRevisionDiagnosticsAB,
+  ExpandedTargetRevisionExperimentReport,
+  ExpandedTargetRevisionPlan,
+  ExpandedTargetRevisionQualityReport,
+  ExpandedTargetRevisionScopeValidation,
+  TargetOperationCoverage
+} from './codexExpandedTargetRevision.js';

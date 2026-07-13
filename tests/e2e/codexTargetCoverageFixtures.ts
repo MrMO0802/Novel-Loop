@@ -1,5 +1,6 @@
 import { runCodexDiagnosticsEvidenceAdjudication } from '../../src/app/codexDiagnosticsEvidenceAdjudication.js';
 import { runCodexTargetedRevisionExperiment } from '../../src/app/codexTargetedRevisionExperiment.js';
+import { ChapterQueueSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { writeFakeCodex } from '../helpers/fakeCodex.js';
 import { adjudicationProjectId, prepareDiagnosticsAdjudicationProject } from './codexDiagnosticsAdjudicationFixtures.js';
@@ -7,6 +8,18 @@ import { adjudicationProjectId, prepareDiagnosticsAdjudicationProject } from './
 export async function prepareTargetCoverageProject(tempRoot: string, fileStore = new FileStore()) {
   const prepared = await prepareDiagnosticsAdjudicationProject(tempRoot, fileStore);
   await fileStore.writeText(prepared.paths.chapterArtifact(1, 'draft_v1.md'), expandedConflictDraft());
+  const queue = await fileStore.readJson(prepared.paths.chapterQueue(), ChapterQueueSchema);
+  await fileStore.writeJson(prepared.paths.chapterQueue(), {
+    ...queue,
+    chapters: queue.chapters.map((chapter) => chapter.chapterNumber === 1
+      ? {
+          ...chapter,
+          status: 'needs_human_review' as const,
+          currentStage: 'diagnostics' as const,
+          failureReason: 'Diagnostics hard failure requires controlled targeted revision review.'
+        }
+      : chapter)
+  }, ChapterQueueSchema);
   const adjudication = await runCodexDiagnosticsEvidenceAdjudication({
     projectId: adjudicationProjectId,
     projectsRoot: tempRoot,

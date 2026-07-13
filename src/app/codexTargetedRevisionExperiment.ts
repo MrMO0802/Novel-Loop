@@ -492,7 +492,7 @@ function buildPlan(
   };
 }
 
-async function runDiagnosticsArm(input: {
+export async function runDiagnosticsArm(input: {
   paths: ProjectPaths;
   fileStore: FileStore;
   provider: CodexTextProvider;
@@ -563,7 +563,7 @@ async function runDiagnosticsArm(input: {
   });
 }
 
-function summarizeDiagnostics(samples: TargetedRevisionDiagnosticsSample[]): TargetedRevisionDiagnosticsSummary {
+export function summarizeDiagnostics(samples: TargetedRevisionDiagnosticsSample[]): TargetedRevisionDiagnosticsSummary {
   const valid = samples.filter((sample) => sample.schemaValid);
   const scores = valid.map((sample) => sample.averageScore).filter((score): score is number => score !== null);
   const timelinePassCount = valid.filter((sample) => sample.timelineConsistencyPassed === true).length;
@@ -705,7 +705,7 @@ function resolveSafeProjectPath(paths: ProjectPaths, requestedPath: string, chap
   return path.relative(paths.projectRoot, absolute).split(path.sep).join(path.posix.sep);
 }
 
-function replaceDraftContext(baseContext: string, draftPath: string, draftText: string): string {
+export function replaceDraftContext(baseContext: string, draftPath: string, draftText: string): string {
   const marker = '## chapter draft\n';
   const start = baseContext.indexOf(marker);
   if (start < 0) return `${baseContext}\n${marker}path: ${draftPath}\n${draftText.trim()}\n`;

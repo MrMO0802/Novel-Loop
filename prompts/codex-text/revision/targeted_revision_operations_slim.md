@@ -26,6 +26,7 @@ Rules that the operations should address:
 
 Constraints:
 - Every targetIds entry must exactly match an allowed targetId.
+- Every allowed target marked requiredForClosure=true must appear in exactly one operation.
 - Do not modify or quote non-target paragraphs.
 - newFactsIntroduced must always be an empty array.
 - Keep replacementText limited to the target paragraph or merged targets.

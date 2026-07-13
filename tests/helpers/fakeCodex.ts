@@ -20,7 +20,12 @@ export type FakeCodexMode =
   | 'codex-controlled-normalization-warning'
   | 'codex-targeted-revision'
   | 'codex-targeted-revision-no-improvement'
-  | 'codex-targeted-revision-scope-violation';
+  | 'codex-targeted-revision-scope-violation'
+  | 'codex-expanded-target-revision'
+  | 'codex-expanded-target-incomplete'
+  | 'codex-expanded-target-residual-time'
+  | 'codex-expanded-target-residual-duplicate'
+  | 'codex-expanded-target-quality-regression';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
@@ -192,11 +197,18 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       ]
     };
   }
+  if (promptId === 'revision.targeted_revision_operations_slim' && mode.startsWith('codex-expanded-target-')) {
+    return expandedTargetOperations(stdin, mode);
+  }
   if (promptId === 'diagnostics.diagnose_chapter_slim' && mode === 'codex-targeted-revision') {
     return targetedDiagnostics(chapterNumber, /EXPERIMENT_ARM:\\s*A\\d+/.test(stdin));
   }
   if (promptId === 'diagnostics.diagnose_chapter_slim' && mode === 'codex-targeted-revision-no-improvement') {
     return targetedDiagnostics(chapterNumber, true, /EXPERIMENT_ARM:\\s*B\\d+/.test(stdin));
+  }
+  if (promptId === 'diagnostics.diagnose_chapter_slim' && mode.startsWith('codex-expanded-target-')) {
+    const candidate = /EXPERIMENT_ARM:\\s*B\\d+/.test(stdin) || /draft_targeted_revision_candidate_v2\\.md/.test(stdin);
+    return targetedDiagnostics(chapterNumber, !candidate, false, candidate && stdin.includes('文气突然断裂') ? 4.8 : undefined);
   }
   const json = {
     'planning.generate_arc_map_minimal_json': {
@@ -439,7 +451,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
   return json[promptId] || { title: 'Codex Boundary Smoke', ok: true, summary: 'Fake Codex returned schema-constrained JSON.' };
 }
 
-function targetedDiagnostics(chapterNumber, timelineFailed, residualCandidate = false) {
+function targetedDiagnostics(chapterNumber, timelineFailed, residualCandidate = false, forcedScore) {
   const timelinePassed = !timelineFailed;
   const timelineEvidence = residualCandidate
     ? '任务要求白天送餐，但出门时间仍为二十三点二十九分；十六楼的门又开了，住户再次接过同一个餐袋并再次关门。'
@@ -454,22 +466,83 @@ function targetedDiagnostics(chapterNumber, timelineFailed, residualCandidate = 
   return {
     chapterNumber,
     draftVersion: 1,
-    passed: timelinePassed,
-    averageScore: timelinePassed ? 8.4 : 6.2,
+    passed: forcedScore === undefined ? timelinePassed : false,
+    averageScore: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
     hardChecks,
     softScores: {
-      plot_progression: timelinePassed ? 8.4 : 6.2,
-      character_consistency: timelinePassed ? 8.4 : 6.2,
-      tension_curve: timelinePassed ? 8.4 : 6.2,
-      emotional_impact: timelinePassed ? 8.4 : 6.2,
-      chapter_hook: timelinePassed ? 8.4 : 6.2,
-      style_match: timelinePassed ? 8.4 : 6.2,
-      genre_satisfaction: timelinePassed ? 8.4 : 6.2,
-      reader_curiosity: timelinePassed ? 8.4 : 6.2
+      plot_progression: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      character_consistency: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      tension_curve: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      emotional_impact: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      chapter_hook: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      style_match: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      genre_satisfaction: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore,
+      reader_curiosity: forcedScore === undefined ? (timelinePassed ? 8.4 : 6.2) : forcedScore
     },
     diagnostics: timelinePassed ? [] : [{ type: 'timeline', severity: 'high', message: 'baseline timeline conflict', evidence: 'same order repeated at incompatible times', recommendation: 'Apply only the adjudicated revision.' }],
     revisionRequired: !timelinePassed
   };
+}
+
+function expandedTargetOperations(stdin, mode) {
+  let allowedTargets = [];
+  const allowedMatch = /Allowed targets:\\s*([\\s\\S]*?)\\n\\nFacts to preserve:/.exec(stdin);
+  try {
+    allowedTargets = allowedMatch ? JSON.parse(allowedMatch[1]) : [];
+  } catch {
+    allowedTargets = [];
+  }
+  const allTargetIds = [...new Set(allowedTargets.map((target) => target.targetId))]
+    .sort((left, right) => targetNumber(left) - targetNumber(right));
+  const requiredTargetIds = allowedTargets
+    .filter((target) => target.requiredForClosure === true)
+    .map((target) => target.targetId)
+    .sort((left, right) => targetNumber(left) - targetNumber(right));
+  const lateExit = requiredTargetIds[requiredTargetIds.length - 1] || allTargetIds[allTargetIds.length - 1] || 'target_p014';
+  const duplicateRequired = requiredTargetIds.filter((targetId) => targetId !== lateExit);
+  const duplicateMin = Math.min(...duplicateRequired.map(targetNumber));
+  const duplicateMax = Math.max(...duplicateRequired.map(targetNumber));
+  const duplicateTargets = allTargetIds.filter((targetId) => targetNumber(targetId) >= duplicateMin && targetNumber(targetId) <= duplicateMax);
+  const earlierTargets = allTargetIds.filter((targetId) => targetNumber(targetId) < targetNumber(lateExit));
+  const lateEntry = earlierTargets[earlierTargets.length - 1] || lateExit;
+  const duplicateReplacement = mode === 'codex-expanded-target-residual-duplicate'
+    ? '十六楼的门又开了，住户再次接过同一个餐袋，随后门再次合上。'
+    : mode === 'codex-expanded-target-quality-regression'
+      ? '住户已经收好餐袋，提到十七楼曾有人失踪，又立刻否认；文气突然断裂，林澈追问后，门在他面前合上。'
+      : '住户已经收好餐袋，提到十七楼曾有人失踪，又立刻否认；林澈追问后，门在他面前合上。';
+  const timeReplacement = mode === 'codex-expanded-target-residual-time'
+    ? '出门时间，二十三点二十九分。'
+    : '进出记录：这次白天送餐在午间完成。';
+  const operations = [
+    {
+      operationId: 'operation_merge_duplicate_sequence',
+      operationType: 'merge_target_paragraphs',
+      targetIds: duplicateTargets,
+      replacementText: duplicateReplacement,
+      reason: 'Collapse the approved duplicate opening, handoff, dialogue, and closing sequence while preserving the disappearance clue.',
+      expectedEffect: 'Leave one delivery handoff and one continuous resident exchange.',
+      rulesAddressed: ['duplicate_event_repetition'],
+      factsPreserved: ['The resident mentions the seventeenth-floor disappearance and withdraws the statement.'],
+      newFactsIntroduced: []
+    },
+    {
+      operationId: 'operation_merge_daytime_record',
+      operationType: 'merge_target_paragraphs',
+      targetIds: [...new Set([lateEntry, lateExit])],
+      replacementText: timeReplacement,
+      reason: 'Align both approved time-record endpoints with the mission-required daytime delivery.',
+      expectedEffect: 'Remove the late-night entry and exit references for the same delivery.',
+      rulesAddressed: ['same_event_same_day_explicit_time_conflict', 'mission_plan_time_mismatch'],
+      factsPreserved: ['Lin Che records the route after leaving the building.'],
+      newFactsIntroduced: []
+    }
+  ];
+  if (mode === 'codex-expanded-target-incomplete') return { operations: operations.slice(1) };
+  return { operations };
+}
+
+function targetNumber(targetId) {
+  return Number.parseInt((/p(\\d+)$/.exec(targetId) || [])[1] || '0', 10);
 }
 
 function chapterFromPrompt(stdin) {

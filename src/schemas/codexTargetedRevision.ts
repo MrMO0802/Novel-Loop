@@ -40,7 +40,7 @@ export const TargetedRevisionOperationSchema = z.object({
 });
 
 export const TargetedRevisionProviderOutputSchema = z.object({
-  operations: z.array(TargetedRevisionOperationSchema).min(1).max(4)
+  operations: z.array(TargetedRevisionOperationSchema).min(1).max(16)
 }).strict();
 
 export const TargetedRevisionPlanSchema = z.object({

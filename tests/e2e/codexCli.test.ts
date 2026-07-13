@@ -31,6 +31,8 @@ describe('M21 Codex CLI', () => {
     expect(sampleStage?.helpInformation()).toContain('--stage <stage>');
     const targetedRevision = codexCommand?.commands.find((command) => command.name() === 'targeted-revision-experiment');
     expect(targetedRevision?.helpInformation()).toContain('--adjudication <path|latest>');
+    expect(targetedRevision?.helpInformation()).toContain('--approval <path|latest>');
+    expect(targetedRevision?.helpInformation()).toContain('--revision-round <round>');
     expect(targetedRevision?.helpInformation()).toContain('--samples <count>');
     expect(targetedRevision?.helpInformation()).toContain('--context-mode <mode>');
     expect(targetedRevision?.helpInformation()).toContain('--timeout-ms <ms>');

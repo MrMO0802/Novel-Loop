@@ -26,6 +26,10 @@ import {
   CandidateRevisionEvidenceAdjudicationSchema,
   CandidateCommitReviewSchema,
   CandidatePatchEvidenceMapSchema,
+  CandidatePatchNoopAnalysisSchema,
+  CandidateCommitMutationDecisionSchema,
+  CandidateCommitReviewFinalizedSchema,
+  CandidateCommitApprovalSchema,
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionQualityReportSchema,
@@ -45,6 +49,10 @@ import type {
   CandidateRevisionEvidenceAdjudication,
   CandidateCommitReview,
   CandidatePatchEvidenceMap,
+  CandidatePatchNoopAnalysis,
+  CandidateCommitMutationDecision,
+  CandidateCommitReviewFinalized,
+  CandidateCommitApproval,
   CandidateDisposition,
   CodexDiagnosticsEvidenceAdjudication,
   ConflictSeverity,
@@ -143,6 +151,10 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
   const latestCandidatePreview = (await readReports(paths, fileStore, input.chapterNumber, 'codex_candidate_preview_report', CodexCandidatePreviewReportSchema)).at(-1);
   const latestCommitReview = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_review', CandidateCommitReviewSchema)).at(-1);
   const latestEvidenceMap = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_patch_evidence_map', CandidatePatchEvidenceMapSchema)).at(-1);
+  const mutationDecisions = await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_mutation_decision', CandidateCommitMutationDecisionSchema);
+  const latestNoopAnalysis = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_patch_noop_analysis', CandidatePatchNoopAnalysisSchema)).at(-1);
+  const latestFinalizedCommitReview = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_review_finalized', CandidateCommitReviewFinalizedSchema)).at(-1);
+  const latestCommitApproval = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_approval', CandidateCommitApprovalSchema)).at(-1);
   const finalPath = relativeChapterArtifact(input.chapterNumber, 'final.md');
   const lines = [
     `Project: ${paths.projectId}`,
@@ -171,6 +183,7 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     appendExpandedTargetRevision(lines, latestV2Plan, latestV2Disposition, latestV2Diagnostics, latestV2Adjudication, latestV2Quality);
     appendCandidateAdoptionAndPreview(lines, latestCandidateReview, latestCandidateApproval, latestDraftAdoption, latestDraftSelection, latestCandidatePreview);
     appendCandidateCommitReview(lines, latestCommitReview, latestEvidenceMap);
+    appendCandidateCommitDecisionFinalization(lines, mutationDecisions, latestNoopAnalysis, latestFinalizedCommitReview, latestCommitApproval);
   }
 
   if (input.conflicts === true) {
@@ -221,6 +234,10 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_candidate_preview_report', CodexCandidatePreviewReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_patch_evidence_map', CandidatePatchEvidenceMapSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_review', CandidateCommitReviewSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_patch_noop_analysis', CandidatePatchNoopAnalysisSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_mutation_decision', CandidateCommitMutationDecisionSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_review_finalized', CandidateCommitReviewFinalizedSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_approval', CandidateCommitApprovalSchema);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:draft_v2|final_candidate_preview_v2)\.md$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:diagnostics_v2|codex_chapter_quality_report_v2|canon_patch_codex_(?:proposal|normalized)_v2|state_diff_codex_preview_v2)\.(?:json|md)$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^draft_targeted_revision_candidate_v\d+\.md$/);
@@ -259,7 +276,9 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
       latestCandidateApproval?.value,
       latestDraftAdoption?.value,
       latestCandidatePreview?.value,
-      latestCommitReview?.value
+      latestCommitReview?.value,
+      latestFinalizedCommitReview?.value,
+      latestCommitApproval?.value
     ));
   }
 
@@ -334,7 +353,13 @@ async function readReports<T>(
       value: await fileStore.readJson(paths.chapterArtifact(chapterNumber, entry), schema)
     });
   }
-  return reports.sort((left, right) => left.path.localeCompare(right.path));
+  return reports.sort((left, right) => versionedArtifactPathCompare(left.path, right.path));
+}
+
+function versionedArtifactPathCompare(left: string, right: string): number {
+  const leftVersion = Number.parseInt(/_v(\d+)\.json$/.exec(left)?.[1] ?? '0', 10);
+  const rightVersion = Number.parseInt(/_v(\d+)\.json$/.exec(right)?.[1] ?? '0', 10);
+  return leftVersion - rightVersion || left.localeCompare(right);
 }
 
 function suggestNextCommand(
@@ -351,8 +376,22 @@ function suggestNextCommand(
   candidateApproval: RevisionCandidateAdoptionApproval | undefined,
   draftAdoption: DraftAdoptionManifest | undefined,
   candidatePreview: CodexCandidatePreviewReport | undefined,
-  candidateCommitReview: CandidateCommitReview | undefined
+  candidateCommitReview: CandidateCommitReview | undefined,
+  finalizedCommitReview: CandidateCommitReviewFinalized | undefined,
+  commitApproval: CandidateCommitApproval | undefined
 ): string {
+  if (commitApproval !== undefined) {
+    return `candidate commit approval ${commitApproval.approvalId} is ready for one controlled local commit; approval remains unconsumed`;
+  }
+  if (finalizedCommitReview !== undefined) {
+    if (finalizedCommitReview.overallDecision === 'approved_for_commit') {
+      return `corepack pnpm novel-loop codex approve-candidate-commit ${projectId} ${chapterNumber} --review latest --confirm`;
+    }
+    if (finalizedCommitReview.overallDecision === 'human_review_incomplete') {
+      return `record active decisions for mutations ${finalizedCommitReview.unresolvedMutationIds.join(', ')} and rerun finalize-candidate-commit-review`;
+    }
+    return `finalized commit review is ${finalizedCommitReview.overallDecision}; modify or reject the candidate patch before any approval`;
+  }
   if (candidateCommitReview !== undefined) {
     return candidateCommitReview.overallDecision === 'human_review_incomplete'
       ? `record human commit decisions for ${candidateCommitReview.requiredHumanDecisions.map((decision) => decision.statePath).join(', ')}; no commit approval exists`
@@ -489,6 +528,47 @@ function appendCandidateCommitReview(
     lines.push(`- commitApprovalGenerated: ${String(review.value.commitApprovalGenerated)}`);
     lines.push(`- storyStateMutated: ${String(review.value.storyStateMutated)}`);
     lines.push(`- queueMutated: ${String(review.value.queueMutated)}`);
+  }
+}
+
+function appendCandidateCommitDecisionFinalization(
+  lines: string[],
+  decisions: Array<{ path: string; value: CandidateCommitMutationDecision }>,
+  noop: { path: string; value: CandidatePatchNoopAnalysis } | undefined,
+  finalized: { path: string; value: CandidateCommitReviewFinalized } | undefined,
+  approval: { path: string; value: CandidateCommitApproval } | undefined
+): void {
+  const effective = new Map<string, { path: string; value: CandidateCommitMutationDecision }>();
+  for (const decision of decisions) effective.set(decision.value.mutationId, decision);
+  if (decisions.length > 0 || noop !== undefined || finalized !== undefined || approval !== undefined) {
+    lines.push('', 'Candidate commit mutation decisions');
+    const mutationCount = finalized?.value.mutationCount ?? noop?.value.mutationCount ?? 0;
+    lines.push(`- decision progress: ${effective.size}/${mutationCount}`);
+    lines.push(`- active decisions: ${effective.size}`);
+    lines.push(`- superseded decisions: ${decisions.length - effective.size}`);
+    for (const decision of effective.values()) {
+      lines.push(`  - ${decision.value.mutationId}: ${decision.value.decision} (${decision.value.mutationOrigin})`);
+    }
+  }
+  if (noop !== undefined) {
+    lines.push(`- no-op analysis: ${noop.path}`);
+    lines.push(`- semantic no-ops: ${noop.value.mutations.filter((mutation) => mutation.semanticNoop).map((mutation) => mutation.mutationId).join(', ') || 'none'}`);
+  }
+  if (finalized !== undefined) {
+    lines.push('', 'Finalized candidate commit review');
+    lines.push(`- path: ${finalized.path}`);
+    lines.push(`- finalized overallDecision: ${finalized.value.overallDecision}`);
+    lines.push(`- unresolved mutations: ${finalized.value.unresolvedMutationIds.join(', ') || 'none'}`);
+    lines.push(`- modify-required mutations: ${finalized.value.modifyRequiredMutationIds.join(', ') || 'none'}`);
+    lines.push(`- rejected mutations: ${finalized.value.rejectedMutationIds.join(', ') || 'none'}`);
+  }
+  if (approval !== undefined) {
+    lines.push('', 'Candidate commit approval');
+    lines.push(`- path: ${approval.path}`);
+    lines.push(`- commit approval status: approved, ${approval.value.consumed ? 'consumed' : 'unconsumed'}`);
+    lines.push(`- approvalScope: ${approval.value.approvalScope}`);
+  } else if (finalized !== undefined) {
+    lines.push('- commit approval status: not generated');
   }
 }
 

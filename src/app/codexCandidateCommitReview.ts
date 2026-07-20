@@ -14,7 +14,7 @@ import {
   StoryStateSchema
 } from '../schemas/index.js';
 import type {
-  CandidateCommitMutationDecision,
+  CandidateCommitEvidenceDecision,
   CandidateCommitMutationType,
   CandidateCommitReview,
   CandidateCommitReviewChange,
@@ -636,14 +636,14 @@ function decideMutation(input: {
   prematureResolutionRisk: boolean;
   readerLeakRisk: boolean;
   characterKnowledgeRisk: boolean;
-}): CandidateCommitMutationDecision {
+}): CandidateCommitEvidenceDecision {
   if (!input.legalStateTransition) return 'reject';
   if (input.duplicateRisk || input.prematureResolutionRisk || input.readerLeakRisk || input.characterKnowledgeRisk) return 'modify_required';
   if (input.change.riskLevel === 'high' || input.change.riskLevel === 'critical') return 'needs_human_review';
   return input.supportedByFinal ? 'approve' : 'needs_human_review';
 }
 
-function decisionReason(decision: CandidateCommitMutationDecision, change: StateDiffChange, supportedByFinal: boolean): string {
+function decisionReason(decision: CandidateCommitEvidenceDecision, change: StateDiffChange, supportedByFinal: boolean): string {
   if (decision === 'reject') return `State transition at ${change.path} is not legal.`;
   if (decision === 'modify_required') return `Mutation at ${change.path} lacks sufficient direct evidence or has a detected safety risk.`;
   if (decision === 'needs_human_review') return `High-risk mutation at ${change.path} requires an explicit one-time human decision.`;

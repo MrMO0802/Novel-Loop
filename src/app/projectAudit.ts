@@ -62,6 +62,10 @@ import {
   CandidateTimelineContradictionMapSchema,
   CandidateCommitReviewSchema,
   CandidatePatchEvidenceMapSchema,
+  CandidatePatchNoopAnalysisSchema,
+  CandidateCommitMutationDecisionSchema,
+  CandidateCommitReviewFinalizedSchema,
+  CandidateCommitApprovalSchema,
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionExperimentReportSchema,
@@ -778,6 +782,18 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, absolutePath, 'candidate_commit_review', relativePath, CandidateCommitReviewSchema);
         await checkCandidateCommitReview(issues, paths, fileStore, absolutePath, relativePath);
       }
+      if (/^candidate_patch_noop_analysis_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_commit_decision', relativePath, CandidatePatchNoopAnalysisSchema);
+      }
+      if (/^candidate_commit_mutation_decision_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_commit_decision', relativePath, CandidateCommitMutationDecisionSchema);
+      }
+      if (/^candidate_commit_review_finalized_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_commit_decision', relativePath, CandidateCommitReviewFinalizedSchema);
+      }
+      if (/^candidate_commit_approval_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_commit_decision', relativePath, CandidateCommitApprovalSchema);
+      }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
         await checkRevisionOpportunityReport(issues, absolutePath, relativePath, fileStore);
@@ -790,6 +806,7 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkFinalAssemblyReport(issues, paths, fileStore, absolutePath, relativePath);
       }
     }
+    await checkCandidateCommitDecisionChain(issues, paths, fileStore, chapterDirName, chapterDir);
   }
 }
 
@@ -1191,6 +1208,159 @@ async function checkCandidateCommitReview(
       true
     ));
   }
+}
+
+async function checkCandidateCommitDecisionChain(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterDirName: string,
+  chapterDir: string
+): Promise<void> {
+  const entries = await fileStore.list(chapterDir);
+  const decisionFiles = entries.filter((entry) => /^candidate_commit_mutation_decision_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare);
+  const noopFiles = entries.filter((entry) => /^candidate_patch_noop_analysis_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare);
+  const finalizedFiles = entries.filter((entry) => /^candidate_commit_review_finalized_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare);
+  const approvalFiles = entries.filter((entry) => /^candidate_commit_approval_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare);
+  if (decisionFiles.length === 0 && noopFiles.length === 0 && finalizedFiles.length === 0 && approvalFiles.length === 0) return;
+
+  const issuePath = path.join('chapters', chapterDirName);
+  try {
+    const stateText = await fileStore.readText(paths.storyState());
+    const queueText = await fileStore.readText(paths.chapterQueue());
+    const decisions = [];
+    for (const fileName of decisionFiles) {
+      decisions.push({
+        path: path.join(issuePath, fileName),
+        value: await fileStore.readJson(path.join(chapterDir, fileName), CandidateCommitMutationDecisionSchema)
+      });
+    }
+    const reviewCache = new Map<string, Awaited<ReturnType<typeof CandidateCommitReviewSchema.parse>>>();
+    const loadReview = async (reviewPath: string) => {
+      const cached = reviewCache.get(reviewPath);
+      if (cached !== undefined) return cached;
+      const review = await fileStore.readJson(paths.projectArtifact(reviewPath), CandidateCommitReviewSchema);
+      reviewCache.set(reviewPath, review);
+      return review;
+    };
+
+    const effective = new Map<string, (typeof decisions)[number]>();
+    const latestByMutation = new Map<string, (typeof decisions)[number]>();
+    const decisionIds = new Set<string>();
+    let chainValid = true;
+    for (const artifact of decisions) {
+      const decision = artifact.value;
+      const key = `${decision.commitReviewPath}\u0000${decision.mutationId}`;
+      const prior = latestByMutation.get(key);
+      if (decisionIds.has(decision.decisionId) || decision.supersedesDecisionId !== (prior?.value.decisionId ?? null)) chainValid = false;
+      decisionIds.add(decision.decisionId);
+      latestByMutation.set(key, artifact);
+      effective.set(key, artifact);
+      const review = await loadReview(decision.commitReviewPath);
+      const change = review.changes.find((candidate) => candidate.mutationId === decision.mutationId);
+      const sourceHashesValid = decision.sourceStateHash === sha256(stateText) && decision.sourceQueueHash === sha256(queueText) &&
+        decision.sourceFinalHash === sha256(await fileStore.readText(paths.projectArtifact(review.finalPreviewPath))) &&
+        decision.sourcePatchHash === sha256(await fileStore.readText(paths.projectArtifact(review.normalizedPatchPath))) &&
+        decision.sourceDiffHash === sha256(await fileStore.readText(paths.projectArtifact(review.stateDiffPath)));
+      if (change === undefined || change.statePath !== decision.statePath || change.mutationType !== decision.mutationType || !sourceHashesValid ||
+        (decision.semanticNoop && decision.decision === 'approve') ||
+        (decision.mutationOrigin === 'engine_metadata' && !['conditional-approve', 'reject'].includes(decision.decision)) ||
+        (decision.mutationOrigin !== 'engine_metadata' && decision.decision === 'conditional-approve')) {
+        chainValid = false;
+      }
+    }
+
+    const noopByPath = new Map<string, Awaited<ReturnType<typeof CandidatePatchNoopAnalysisSchema.parse>>>();
+    for (const fileName of noopFiles) {
+      const relativePath = path.join(issuePath, fileName);
+      const report = await fileStore.readJson(path.join(chapterDir, fileName), CandidatePatchNoopAnalysisSchema);
+      noopByPath.set(relativePath, report);
+      const review = await loadReview(report.commitReviewPath);
+      const sourceHashesValid = report.sourceStateHash === sha256(stateText) && report.sourceQueueHash === sha256(queueText) &&
+        report.sourceFinalHash === sha256(await fileStore.readText(paths.projectArtifact(review.finalPreviewPath))) &&
+        report.sourcePatchHash === sha256(await fileStore.readText(paths.projectArtifact(review.normalizedPatchPath))) &&
+        report.sourceDiffHash === sha256(await fileStore.readText(paths.projectArtifact(review.stateDiffPath)));
+      if (!sourceHashesValid || report.mutationCount !== review.changes.length ||
+        report.mutations.some((mutation) => !review.changes.some((change) => change.mutationId === mutation.mutationId && change.statePath === mutation.statePath))) {
+        chainValid = false;
+      }
+    }
+
+    const finalizedByPath = new Map<string, Awaited<ReturnType<typeof CandidateCommitReviewFinalizedSchema.parse>>>();
+    for (const fileName of finalizedFiles) {
+      const relativePath = path.join(issuePath, fileName);
+      const report = await fileStore.readJson(path.join(chapterDir, fileName), CandidateCommitReviewFinalizedSchema);
+      finalizedByPath.set(relativePath, report);
+      const review = await loadReview(report.sourceReviewPath);
+      const noop = noopByPath.get(report.noopAnalysisPath) ?? await fileStore.readJson(paths.projectArtifact(report.noopAnalysisPath), CandidatePatchNoopAnalysisSchema);
+      const activeForReview = [...effective.values()].filter((artifact) => artifact.value.commitReviewPath === report.sourceReviewPath);
+      const activeIds = new Set(activeForReview.map((artifact) => artifact.value.decisionId));
+      const highRiskIds = review.highRiskChanges.map((change) => change.mutationId).sort();
+      const reportHighRiskIds = [...report.highRiskMutationIds].sort();
+      const decisionCoverageValid = report.mutationCount === review.changes.length && report.activeDecisionCount === activeForReview.length &&
+        report.decisions.length === activeForReview.length && report.decisions.every((decision) => activeIds.has(decision.decisionId)) &&
+        JSON.stringify(highRiskIds) === JSON.stringify(reportHighRiskIds);
+      const noops = new Set(noop.mutations.filter((mutation) => mutation.semanticNoop).map((mutation) => mutation.mutationId));
+      const outcomeValid = report.overallDecision !== 'approved_for_commit' ||
+        (report.activeDecisionCount === report.mutationCount && report.unresolvedMutationIds.length === 0 && report.modifyRequiredMutationIds.length === 0 &&
+          report.rejectedMutationIds.length === 0 && report.noopMutationIds.length === 0 && report.patchStateMismatchMutationIds.length === 0 &&
+          report.decisions.every((decision) => decision.mutationOrigin === 'engine_metadata' ? decision.decision === 'conditional-approve' : decision.decision === 'approve'));
+      const noopValid = report.noopMutationIds.length === noops.size && report.noopMutationIds.every((mutationId) => noops.has(mutationId)) &&
+        report.decisions.every((decision) => !decision.semanticNoop || decision.decision !== 'approve');
+      const sourceHashesValid = report.sourceStateHash === sha256(stateText) && report.sourceQueueHash === sha256(queueText) &&
+        report.sourceFinalHash === sha256(await fileStore.readText(paths.projectArtifact(review.finalPreviewPath))) &&
+        report.sourcePatchHash === sha256(await fileStore.readText(paths.projectArtifact(review.normalizedPatchPath))) &&
+        report.sourceDiffHash === sha256(await fileStore.readText(paths.projectArtifact(review.stateDiffPath)));
+      if (!decisionCoverageValid || !outcomeValid || !noopValid || !sourceHashesValid || report.commitApprovalGenerated || report.storyStateMutated || report.queueMutated || report.snapshotCreated || report.canonicalArtifactsGenerated) {
+        chainValid = false;
+      }
+    }
+
+    for (const fileName of approvalFiles) {
+      const approval = await fileStore.readJson(path.join(chapterDir, fileName), CandidateCommitApprovalSchema);
+      const finalized = finalizedByPath.get(approval.finalizedReviewPath) ?? await fileStore.readJson(paths.projectArtifact(approval.finalizedReviewPath), CandidateCommitReviewFinalizedSchema);
+      const approvedIds = [...approval.approvedMutationIds].sort();
+      const finalizedApprovedIds = [...finalized.approvedMutationIds].sort();
+      const conditionalIds = [...approval.conditionalEngineMutationIds].sort();
+      const finalizedConditionalIds = [...finalized.conditionalEngineMutationIds].sort();
+      const sourceHashesValid = approval.sourceStateHash === sha256(stateText) && approval.sourceQueueHash === sha256(queueText) &&
+        approval.sourceStateHash === finalized.sourceStateHash && approval.sourceQueueHash === finalized.sourceQueueHash &&
+        approval.sourceFinalHash === finalized.sourceFinalHash && approval.sourcePatchHash === finalized.sourcePatchHash && approval.sourceDiffHash === finalized.sourceDiffHash;
+      if (finalized.overallDecision !== 'approved_for_commit' || JSON.stringify(approvedIds) !== JSON.stringify(finalizedApprovedIds) ||
+        JSON.stringify(conditionalIds) !== JSON.stringify(finalizedConditionalIds) || !sourceHashesValid || approval.consumed ||
+        approval.storyStateMutated || approval.queueMutated || approval.snapshotCreated || approval.canonicalArtifactsGenerated) {
+        chainValid = false;
+      }
+    }
+
+    if (!chainValid) {
+      issues.push(issue(
+        `candidate_commit_decision_chain_${sanitizeIssueId(chapterDirName)}`,
+        'critical',
+        'candidate_commit_decision',
+        issuePath,
+        'Candidate mutation decisions, supersession chain, finalized review, no-op analysis, approval, or source hashes are inconsistent.',
+        'Restore the append-only D4A.1 chain and rerun decisions/finalization from the unchanged D4A review.',
+        true
+      ));
+    }
+  } catch (error) {
+    issues.push(issue(
+      `candidate_commit_decision_chain_${sanitizeIssueId(chapterDirName)}`,
+      'critical',
+      'candidate_commit_decision',
+      issuePath,
+      `Candidate commit decision chain could not be verified: ${String(error)}`,
+      'Restore all D4A.1 artifacts and rerun strict audit.',
+      true
+    ));
+  }
+}
+
+function versionedArtifactCompare(left: string, right: string): number {
+  const leftVersion = Number.parseInt(/_v(\d+)\.json$/.exec(left)?.[1] ?? '0', 10);
+  const rightVersion = Number.parseInt(/_v(\d+)\.json$/.exec(right)?.[1] ?? '0', 10);
+  return leftVersion - rightVersion || left.localeCompare(right);
 }
 
 async function hasCandidatePreviewCommitArtifact(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<boolean> {

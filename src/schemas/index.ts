@@ -532,7 +532,10 @@ export type {
 } from './codexRevisionCandidateAdoption.js';
 
 export {
+  CandidateCommitEvidenceDecisionSchema,
   CandidateCommitMutationDecisionSchema,
+  CandidateCommitMutationDecisionValueSchema,
+  CandidateCommitMutationOriginSchema,
   CandidateCommitMutationTypeSchema,
   CandidatePatchEvidenceMutationSchema,
   CandidatePatchEvidenceMapSchema,
@@ -544,15 +547,30 @@ export {
   CandidateCommitOverallDecisionSchema,
   CandidatePatchReviewSchema,
   CandidateConflictReviewSchema,
-  CandidateCommitReviewSchema
+  CandidateCommitReviewSchema,
+  CandidateNarrativeDebtHumanAssessmentSchema,
+  CandidatePatchNoopMutationSchema,
+  CandidatePatchNoopAnalysisSchema,
+  CandidateCommitFinalizedDecisionSchema,
+  CandidateCommitReviewFinalizedSchema,
+  CandidateCommitApprovalSchema
 } from './codexCandidateCommitReview.js';
 export type {
+  CandidateCommitEvidenceDecision,
   CandidateCommitMutationDecision,
+  CandidateCommitMutationDecisionValue,
+  CandidateCommitMutationOrigin,
   CandidateCommitMutationType,
   CandidatePatchEvidenceMutation,
   CandidatePatchEvidenceMap,
   CandidateCommitReviewChange,
   CandidateCommitSectionReview,
   CandidateNarrativeDebtDetail,
-  CandidateCommitReview
+  CandidateCommitReview,
+  CandidateNarrativeDebtHumanAssessment,
+  CandidatePatchNoopMutation,
+  CandidatePatchNoopAnalysis,
+  CandidateCommitFinalizedDecision,
+  CandidateCommitReviewFinalized,
+  CandidateCommitApproval
 } from './codexCandidateCommitReview.js';

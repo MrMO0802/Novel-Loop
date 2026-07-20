@@ -324,6 +324,13 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^candidate_patch_evidence_map_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_patch_evidence_map', phase: 'human_commit_review' };
   if (/^candidate_commit_review_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_commit_review', phase: 'human_commit_review', schemaName: 'CandidateCommitReviewSchema' };
   if (/^candidate_commit_review_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_commit_review', phase: 'human_commit_review' };
+  if (/^candidate_patch_noop_analysis_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_patch_noop_analysis', phase: 'human_commit_review', schemaName: 'CandidatePatchNoopAnalysisSchema' };
+  if (/^candidate_patch_noop_analysis_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_patch_noop_analysis', phase: 'human_commit_review' };
+  if (/^candidate_commit_mutation_decision_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_commit_mutation_decision', phase: 'human_commit_review', schemaName: 'CandidateCommitMutationDecisionSchema' };
+  if (/^candidate_commit_review_finalized_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_commit_review_finalized', phase: 'human_commit_review', schemaName: 'CandidateCommitReviewFinalizedSchema' };
+  if (/^candidate_commit_review_finalized_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_commit_review_finalized', phase: 'human_commit_review' };
+  if (/^candidate_commit_approval_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_commit_approval', phase: 'human_commit_review', schemaName: 'CandidateCommitApprovalSchema' };
+  if (/^candidate_commit_approval_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_commit_approval', phase: 'human_commit_review' };
   if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision', schemaName: 'RevisionOpportunityReportSchema' };
   if (/^revision_opportunity_report_v\d+\.md$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };

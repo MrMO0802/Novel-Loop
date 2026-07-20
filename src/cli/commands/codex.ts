@@ -3,6 +3,12 @@ import type { Command } from 'commander';
 import { checkCodexStatus, execCodexJson, execCodexText, runCodexSmoke } from '../../app/codexBoundary.js';
 import { runCodexCandidatePreview } from '../../app/codexCandidatePreview.js';
 import { reviewCodexCandidateCommit } from '../../app/codexCandidateCommitReview.js';
+import {
+  analyzeCandidatePatchNoops,
+  approveCandidateCommit,
+  decideCandidateCommitChange,
+  finalizeCandidateCommitReview
+} from '../../app/codexCandidateCommitDecision.js';
 import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
@@ -84,6 +90,10 @@ interface CodexCommandOptions {
   candidate?: string;
   draft?: string;
   preview?: string;
+  review?: string;
+  mutation?: string;
+  decision?: string;
+  note?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -1025,6 +1035,135 @@ export function registerCodexCommand(program: Command): void {
       ].join('\n') + '\n');
     });
 
+  addBoundaryOptions(codex.command('analyze-candidate-patch-noops').description('[local/read-only] Detect semantic no-op mutations in a candidate patch'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--review <path|latest>', 'candidate commit review path or latest', 'latest')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await analyzeCandidatePatchNoops({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        review: options.review ?? 'latest'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidatePatchNoopAnalysis: success',
+        `reportPath: ${result.reportPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `mutationCount: ${result.report.mutationCount}`,
+        `semanticNoopCount: ${result.report.semanticNoopCount}`,
+        'storyStateMutated: false',
+        'queueMutated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('decide-candidate-commit-change').description('[local/read-only] Append one explicit human decision for a candidate commit mutation'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--review <path|latest>', 'candidate commit review path or latest', 'latest')
+    .requiredOption('--mutation <mutationId>', 'mutation id from the candidate commit review')
+    .requiredOption('--decision <decision>', 'approve, reject, modify-required, or conditional-approve')
+    .requiredOption('--note <text>', 'human decision rationale')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await decideCandidateCommitChange({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        review: options.review ?? 'latest',
+        mutationId: options.mutation!,
+        decision: parseCandidateCommitDecision(options.decision!),
+        note: options.note!
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidateCommitMutationDecision: recorded',
+        `decisionPath: ${result.decisionPath}`,
+        `mutationId: ${result.record.mutationId}`,
+        `mutationOrigin: ${result.record.mutationOrigin}`,
+        `decision: ${result.record.decision}`,
+        `supersedesDecisionId: ${result.record.supersedesDecisionId ?? 'none'}`,
+        `semanticNoop: ${String(result.record.semanticNoop)}`,
+        'storyStateMutated: false',
+        'queueMutated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('finalize-candidate-commit-review').description('[local/read-only] Finalize a candidate commit review from append-only active decisions'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--review <path|latest>', 'candidate commit review path or latest', 'latest')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await finalizeCandidateCommitReview({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        review: options.review ?? 'latest'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidateCommitReviewFinalized: success',
+        `reviewPath: ${result.reviewPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `decisionProgress: ${result.report.activeDecisionCount}/${result.report.mutationCount}`,
+        `overallDecision: ${result.report.overallDecision}`,
+        `unresolvedMutations: ${result.report.unresolvedMutationIds.join(',') || 'none'}`,
+        `modifyRequiredMutations: ${result.report.modifyRequiredMutationIds.join(',') || 'none'}`,
+        `rejectedMutations: ${result.report.rejectedMutationIds.join(',') || 'none'}`,
+        `noOpMutations: ${result.report.noopMutationIds.join(',') || 'none'}`,
+        `recommendedNextStep: ${result.report.recommendedNextStep}`,
+        'commitApprovalGenerated: false',
+        'storyStateMutated: false',
+        'queueMutated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('approve-candidate-commit').description('[local/read-only] Create a one-time approval for a fully approved finalized candidate review'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--review <path|latest>', 'finalized candidate commit review path or latest', 'latest')
+    .option('--confirm', 'confirm the single controlled commit approval', false)
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await approveCandidateCommit({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        review: options.review ?? 'latest',
+        confirm: options.confirm === true
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidateCommitApproval: recorded',
+        `approvalPath: ${result.approvalPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `approvalScope: ${result.record.approvalScope}`,
+        `approvedMutations: ${result.record.approvedMutationIds.length}`,
+        `conditionalEngineMutations: ${result.record.conditionalEngineMutationIds.length}`,
+        `highRiskMutations: ${result.record.highRiskMutationIds.length}`,
+        `consumed: ${String(result.record.consumed)}`,
+        'storyStateMutated: false',
+        'queueMutated: false',
+        'snapshotCreated: false',
+        'canonicalArtifactsGenerated: false'
+      ].join('\n') + '\n');
+    });
+
   addBoundaryOptions(codex.command('targeted-revision-contract-check').description('[local/read-only] Replay provider operations through normalization and canonical contract validation'))
     .argument('<projectId>', 'project id')
     .argument('<chapterNumber>', 'chapter number')
@@ -1239,6 +1378,14 @@ function parsePositiveInteger(value: string, label: string): number {
     throw new AppError('INVALID_NUMBER', `${label} must be a positive integer`, 2);
   }
   return parsed;
+}
+
+function parseCandidateCommitDecision(value: string): 'approve' | 'reject' | 'modify-required' | 'conditional-approve' {
+  const allowed = ['approve', 'reject', 'modify-required', 'conditional-approve'] as const;
+  if (!allowed.includes(value as (typeof allowed)[number])) {
+    throw new AppError('INVALID_CANDIDATE_COMMIT_DECISION', `Invalid candidate commit decision: ${value}`, 2);
+  }
+  return value as (typeof allowed)[number];
 }
 
 function parseNonNegativeInteger(value: string, label: string): number {

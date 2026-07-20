@@ -530,3 +530,29 @@ export type {
   RevisionCandidateAdoptionApproval,
   RevisionCandidateReview
 } from './codexRevisionCandidateAdoption.js';
+
+export {
+  CandidateCommitMutationDecisionSchema,
+  CandidateCommitMutationTypeSchema,
+  CandidatePatchEvidenceMutationSchema,
+  CandidatePatchEvidenceMapSchema,
+  CandidateCommitReviewChangeSchema,
+  CandidateCommitSectionReviewSchema,
+  CandidateNarrativeDebtDetailSchema,
+  CandidateNarrativeDebtReviewSchema,
+  CandidateRequiredHumanDecisionSchema,
+  CandidateCommitOverallDecisionSchema,
+  CandidatePatchReviewSchema,
+  CandidateConflictReviewSchema,
+  CandidateCommitReviewSchema
+} from './codexCandidateCommitReview.js';
+export type {
+  CandidateCommitMutationDecision,
+  CandidateCommitMutationType,
+  CandidatePatchEvidenceMutation,
+  CandidatePatchEvidenceMap,
+  CandidateCommitReviewChange,
+  CandidateCommitSectionReview,
+  CandidateNarrativeDebtDetail,
+  CandidateCommitReview
+} from './codexCandidateCommitReview.js';

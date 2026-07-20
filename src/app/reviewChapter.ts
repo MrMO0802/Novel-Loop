@@ -24,6 +24,8 @@ import {
   TargetExpansionApprovalPreviewSchema,
   TargetExpansionApprovalRecordSchema,
   CandidateRevisionEvidenceAdjudicationSchema,
+  CandidateCommitReviewSchema,
+  CandidatePatchEvidenceMapSchema,
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionQualityReportSchema,
@@ -41,6 +43,8 @@ import {
 } from '../schemas/index.js';
 import type {
   CandidateRevisionEvidenceAdjudication,
+  CandidateCommitReview,
+  CandidatePatchEvidenceMap,
   CandidateDisposition,
   CodexDiagnosticsEvidenceAdjudication,
   ConflictSeverity,
@@ -137,6 +141,8 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
   const latestDraftAdoption = (await readReports(paths, fileStore, input.chapterNumber, 'draft_adoption_manifest', DraftAdoptionManifestSchema)).at(-1);
   const latestDraftSelection = (await readReports(paths, fileStore, input.chapterNumber, 'draft_selection', DraftSelectionSchema)).at(-1);
   const latestCandidatePreview = (await readReports(paths, fileStore, input.chapterNumber, 'codex_candidate_preview_report', CodexCandidatePreviewReportSchema)).at(-1);
+  const latestCommitReview = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_review', CandidateCommitReviewSchema)).at(-1);
+  const latestEvidenceMap = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_patch_evidence_map', CandidatePatchEvidenceMapSchema)).at(-1);
   const finalPath = relativeChapterArtifact(input.chapterNumber, 'final.md');
   const lines = [
     `Project: ${paths.projectId}`,
@@ -164,6 +170,7 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     appendTargetCoverage(lines, latestDisposition, latestCoverage, latestApprovalPreview, latestApproval);
     appendExpandedTargetRevision(lines, latestV2Plan, latestV2Disposition, latestV2Diagnostics, latestV2Adjudication, latestV2Quality);
     appendCandidateAdoptionAndPreview(lines, latestCandidateReview, latestCandidateApproval, latestDraftAdoption, latestDraftSelection, latestCandidatePreview);
+    appendCandidateCommitReview(lines, latestCommitReview, latestEvidenceMap);
   }
 
   if (input.conflicts === true) {
@@ -212,6 +219,8 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'draft_adoption_manifest', DraftAdoptionManifestSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'draft_selection', DraftSelectionSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_candidate_preview_report', CodexCandidatePreviewReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_patch_evidence_map', CandidatePatchEvidenceMapSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_review', CandidateCommitReviewSchema);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:draft_v2|final_candidate_preview_v2)\.md$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:diagnostics_v2|codex_chapter_quality_report_v2|canon_patch_codex_(?:proposal|normalized)_v2|state_diff_codex_preview_v2)\.(?:json|md)$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^draft_targeted_revision_candidate_v\d+\.md$/);
@@ -249,7 +258,8 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
       latestCandidateReview?.value,
       latestCandidateApproval?.value,
       latestDraftAdoption?.value,
-      latestCandidatePreview?.value
+      latestCandidatePreview?.value,
+      latestCommitReview?.value
     ));
   }
 
@@ -340,8 +350,14 @@ function suggestNextCommand(
   candidateReview: RevisionCandidateReview | undefined,
   candidateApproval: RevisionCandidateAdoptionApproval | undefined,
   draftAdoption: DraftAdoptionManifest | undefined,
-  candidatePreview: CodexCandidatePreviewReport | undefined
+  candidatePreview: CodexCandidatePreviewReport | undefined,
+  candidateCommitReview: CandidateCommitReview | undefined
 ): string {
+  if (candidateCommitReview !== undefined) {
+    return candidateCommitReview.overallDecision === 'human_review_incomplete'
+      ? `record human commit decisions for ${candidateCommitReview.requiredHumanDecisions.map((decision) => decision.statePath).join(', ')}; no commit approval exists`
+      : `review ${candidateCommitReview.recommendedNextStep}; D4A does not approve or execute commit`;
+  }
   if (candidatePreview !== undefined) {
     return candidatePreview.previewComplete
       ? `human commit review required for ${candidatePreview.finalPath ?? candidatePreview.adoptedDraftPath}; D3 does not approve or execute commit`
@@ -448,6 +464,31 @@ function appendCandidateAdoptionAndPreview(
     lines.push(`- storyStateMutated: ${String(preview.value.storyStateMutated)}`);
     lines.push(`- queueCommitted: ${String(preview.value.queueCommitted)}`);
     lines.push(`- recommendedNextStep: ${preview.value.recommendedNextStep}`);
+  }
+}
+
+function appendCandidateCommitReview(
+  lines: string[],
+  review: { path: string; value: CandidateCommitReview } | undefined,
+  evidenceMap: { path: string; value: CandidatePatchEvidenceMap } | undefined
+): void {
+  if (evidenceMap !== undefined) {
+    lines.push('', 'Patch evidence map');
+    lines.push(`- path: ${evidenceMap.path}`);
+    lines.push(`- mutationCount: ${evidenceMap.value.mutationCount}`);
+    lines.push(`- allDiffChangesCovered: ${String(evidenceMap.value.allDiffChangesCovered)}`);
+  }
+  if (review !== undefined) {
+    lines.push('', 'Candidate commit review');
+    lines.push(`- path: ${review.path}`);
+    lines.push(`- overallDecision: ${review.value.overallDecision}`);
+    lines.push(`- changesReviewed: ${review.value.changes.length}`);
+    lines.push(`- highRiskChanges: ${review.value.highRiskChanges.length}`);
+    lines.push(`- requiredHumanDecisions: ${review.value.requiredHumanDecisions.length}`);
+    lines.push(`- recommendedNextStep: ${review.value.recommendedNextStep}`);
+    lines.push(`- commitApprovalGenerated: ${String(review.value.commitApprovalGenerated)}`);
+    lines.push(`- storyStateMutated: ${String(review.value.storyStateMutated)}`);
+    lines.push(`- queueMutated: ${String(review.value.queueMutated)}`);
   }
 }
 

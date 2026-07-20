@@ -58,6 +58,9 @@ describe('M21 Codex CLI', () => {
     expect(resumeCandidate?.description()).toContain('preview-only');
     expect(resumeCandidate?.helpInformation()).toContain('--draft <version>');
     expect(resumeCandidate?.helpInformation()).toContain('--codex-json-retries <count>');
+    const commitReview = codexCommand?.commands.find((command) => command.name() === 'review-candidate-commit');
+    expect(commitReview?.description()).toContain('local/read-only');
+    expect(commitReview?.helpInformation()).toContain('--preview <path|latest>');
   });
 
   test('exec-json command prints parsed JSON artifact path and uses fake codex binary', async () => {

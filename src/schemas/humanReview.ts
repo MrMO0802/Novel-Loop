@@ -5,8 +5,8 @@ import { ConflictItemSchema } from './conflictRecovery.js';
 export const StateDiffChangeSchema = z.object({
   path: z.string(),
   changeType: z.enum(['added', 'removed', 'modified', 'unchanged']),
-  before: z.unknown(),
-  after: z.unknown(),
+  before: z.unknown().optional().default(null),
+  after: z.unknown().optional().default(null),
   riskLevel: z.enum(['low', 'medium', 'high', 'critical']),
   explanation: z.string()
 });

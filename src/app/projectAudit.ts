@@ -60,6 +60,8 @@ import {
   CandidateDispositionSchema,
   CandidateRevisionEvidenceAdjudicationSchema,
   CandidateTimelineContradictionMapSchema,
+  CandidateCommitReviewSchema,
+  CandidatePatchEvidenceMapSchema,
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionExperimentReportSchema,
@@ -769,6 +771,13 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, absolutePath, 'candidate_preview', relativePath, CodexCandidatePreviewReportSchema);
         await checkCandidatePreviewReport(issues, paths, fileStore, absolutePath, relativePath);
       }
+      if (/^candidate_patch_evidence_map_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_commit_review', relativePath, CandidatePatchEvidenceMapSchema);
+      }
+      if (/^candidate_commit_review_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_commit_review', relativePath, CandidateCommitReviewSchema);
+        await checkCandidateCommitReview(issues, paths, fileStore, absolutePath, relativePath);
+      }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
         await checkRevisionOpportunityReport(issues, absolutePath, relativePath, fileStore);
@@ -1077,6 +1086,111 @@ async function checkD3ArtifactHash(
     'Treat the approval/adoption/preview as stale and regenerate from immutable sources.',
     true
   ));
+}
+
+async function checkCandidateCommitReview(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CandidateCommitReviewSchema);
+    const requiredPaths = [
+      report.candidatePath,
+      report.adoptedDraftPath,
+      report.finalPreviewPath,
+      report.patchProposalPath,
+      report.normalizedPatchPath,
+      report.stateDiffPath,
+      report.completenessReportPath,
+      report.candidatePreviewReportPath,
+      report.evidenceMapPath,
+      ...(report.conflictReportPath === null ? [] : [report.conflictReportPath])
+    ];
+    for (const artifactPath of requiredPaths) {
+      if (await fileStore.exists(paths.projectArtifact(artifactPath))) continue;
+      issues.push(issue(
+        `candidate_commit_review_missing_${sanitizeIssueId(artifactPath)}`,
+        'critical',
+        'candidate_commit_review',
+        relativePath,
+        `Candidate commit review references missing artifact ${artifactPath}.`,
+        'Restore the immutable D3/D4A artifact chain and rerun the local review.',
+        true
+      ));
+      return;
+    }
+
+    const [evidenceText, evidenceMap, preview, diff, stateText, queueText, draftText, finalText, patchText, runManifest] = await Promise.all([
+      fileStore.readText(paths.projectArtifact(report.evidenceMapPath)),
+      fileStore.readJson(paths.projectArtifact(report.evidenceMapPath), CandidatePatchEvidenceMapSchema),
+      fileStore.readJson(paths.projectArtifact(report.candidatePreviewReportPath), CodexCandidatePreviewReportSchema),
+      fileStore.readJson(paths.projectArtifact(report.stateDiffPath), StateDiffReportSchema),
+      fileStore.readText(paths.storyState()),
+      fileStore.readText(paths.chapterQueue()),
+      fileStore.readText(paths.projectArtifact(report.adoptedDraftPath)),
+      fileStore.readText(paths.projectArtifact(report.finalPreviewPath)),
+      fileStore.readText(paths.projectArtifact(report.normalizedPatchPath)),
+      fileStore.readJson(paths.runManifest(report.runId), RunManifestV2Schema)
+    ]);
+    const queue = ChapterQueueSchema.parse(JSON.parse(queueText));
+    const storyState = StoryStateSchema.parse(JSON.parse(stateText));
+    const queueItem = queue.chapters.find((chapter) => chapter.chapterNumber === report.chapterNumber);
+    const reportPaths = report.changes.map((change) => change.statePath);
+    const evidencePaths = evidenceMap.mutations.map((mutation) => mutation.statePath);
+    const diffPaths = diff.changes.map((change) => change.path);
+    const reviewCoverageValid = report.changes.length === diff.changes.length &&
+      evidenceMap.mutationCount === diff.changes.length && evidenceMap.diffChangeCount === diff.changes.length && evidenceMap.allDiffChangesCovered &&
+      JSON.stringify(reportPaths) === JSON.stringify(diffPaths) && JSON.stringify(evidencePaths) === JSON.stringify(diffPaths) &&
+      evidenceMap.mutations.every((mutation, index) => mutation.diffChangeIndex === index &&
+        mutation.evidenceSnippets.length === mutation.evidenceParagraphIndexes.length &&
+        mutation.evidenceSnippets.length === mutation.evidenceHashes.length &&
+        mutation.evidenceSnippets.every((snippet, snippetIndex) => snippet.length <= 240 && sha256(snippet) === mutation.evidenceHashes[snippetIndex]));
+    const sourceHashesValid = report.evidenceMapHash === sha256(evidenceText) &&
+      report.sourceStateHash === sha256(stateText) && report.sourceQueueHash === sha256(queueText) &&
+      report.sourceDraftHash === sha256(draftText) && report.finalPreviewHash === sha256(finalText) &&
+      report.normalizedPatchHash === sha256(patchText) && report.stateDiffHash === sha256(await fileStore.readText(paths.projectArtifact(report.stateDiffPath))) &&
+      evidenceMap.finalPreviewHash === report.finalPreviewHash && evidenceMap.normalizedPatchHash === report.normalizedPatchHash && evidenceMap.stateDiffHash === report.stateDiffHash;
+    const highRiskIds = report.changes.filter((change) => change.riskLevel === 'high' || change.riskLevel === 'critical').map((change) => change.mutationId).sort();
+    const requiredIds = new Set(report.requiredHumanDecisions.map((decision) => decision.mutationId));
+    const humanGateValid = highRiskIds.every((mutationId) => requiredIds.has(mutationId)) &&
+      report.overallDecision !== 'approved_for_commit' && !report.commitApprovalGenerated &&
+      report.patchReview.proposalSchemaValid && report.patchReview.normalizedSchemaValid && report.patchReview.proposalNormalizationEquivalent &&
+      report.conflictReview.conflictCheckPassed && report.conflictReview.conflictCount === 0 && report.conflictReview.decision === 'approve';
+    const provenancePath = path.join('runs', report.runId, 'events.ndjson');
+    const eventText = await fileStore.readText(paths.projectArtifact(provenancePath));
+    const runBoundaryValid = runManifest.command === 'codex.review-candidate-commit' &&
+      runManifest.promptCalls.length === 0 && runManifest.llmCalls.length === 0 &&
+      runManifest.stateMutations.length === 0 && runManifest.queueTransitions.length === 0 && runManifest.snapshots.length === 0 &&
+      eventText.includes('CODEX_CANDIDATE_COMMIT_REVIEW_CREATED') && !eventText.includes('STATE_MUTATION_APPLIED');
+    const projectBoundaryValid = preview.previewComplete && preview.recommendedNextStep === 'human_commit_review' &&
+      storyState.latestCommittedChapter === report.chapterNumber - 1 && queueItem !== undefined && !['committed', 'recommitted'].includes(queueItem.status) &&
+      !report.codexInvoked && !report.canonicalArtifactsGenerated && !report.snapshotCreated && !report.storyStateMutated && !report.queueMutated;
+
+    if (!reviewCoverageValid || !sourceHashesValid || !humanGateValid || !runBoundaryValid || !projectBoundaryValid) {
+      issues.push(issue(
+        `candidate_commit_review_chain_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'candidate_commit_review',
+        relativePath,
+        'Candidate commit review has incomplete mutation coverage, stale hashes, missing human gates, or prohibited execution side effects.',
+        'Discard the review and rerun review-candidate-commit from the unchanged complete D3 preview.',
+        true
+      ));
+    }
+  } catch (error) {
+    issues.push(issue(
+      `candidate_commit_review_chain_${sanitizeIssueId(relativePath)}`,
+      'critical',
+      'candidate_commit_review',
+      relativePath,
+      `Candidate commit review provenance could not be verified: ${String(error)}`,
+      'Restore the review, evidence map, and run provenance, then rerun strict audit.',
+      true
+    ));
+  }
 }
 
 async function hasCandidatePreviewCommitArtifact(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<boolean> {

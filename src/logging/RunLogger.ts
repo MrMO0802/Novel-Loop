@@ -783,6 +783,10 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactLineage
   if (/^draft_selection_v\d+\.json$/.test(fileName)) return { artifactType: 'draft_selection', phase: 'revision', schemaName: 'DraftSelectionSchema' };
   if (/^codex_candidate_preview_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_candidate_preview_report', phase: 'commit', schemaName: 'CodexCandidatePreviewReportSchema' };
   if (/^codex_candidate_preview_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_candidate_preview_report', phase: 'commit' };
+  if (/^candidate_patch_evidence_map_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_patch_evidence_map', phase: 'human_commit_review', schemaName: 'CandidatePatchEvidenceMapSchema' };
+  if (/^candidate_patch_evidence_map_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_patch_evidence_map', phase: 'human_commit_review' };
+  if (/^candidate_commit_review_v\d+\.json$/.test(fileName)) return { artifactType: 'candidate_commit_review', phase: 'human_commit_review', schemaName: 'CandidateCommitReviewSchema' };
+  if (/^candidate_commit_review_v\d+\.md$/.test(fileName)) return { artifactType: 'candidate_commit_review', phase: 'human_commit_review' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };
   if (/^codex_chapter_quality_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality' };
   if (fileName === 'chapter_summary_for_context.json') return { artifactType: 'codex_chapter_context_summary', phase: 'context', schemaName: 'ChapterContextSummarySchema' };

@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 import { checkCodexStatus, execCodexJson, execCodexText, runCodexSmoke } from '../../app/codexBoundary.js';
 import { runCodexCandidatePreview } from '../../app/codexCandidatePreview.js';
+import { reviewCodexCandidateCommit } from '../../app/codexCandidateCommitReview.js';
 import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
@@ -82,6 +83,7 @@ interface CodexCommandOptions {
   input?: string;
   candidate?: string;
   draft?: string;
+  preview?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -983,6 +985,43 @@ export function registerCodexCommand(program: Command): void {
         `storyStateMutated: ${String(result.report.storyStateMutated)}`,
         `queueCommitted: ${String(result.report.queueCommitted)}`,
         `recommendedNextStep: ${result.report.recommendedNextStep}`
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('review-candidate-commit').description('[local/read-only] Evidence-review every candidate preview mutation without approving or committing it'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--preview <path|latest>', 'candidate preview report path or latest', 'latest')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await reviewCodexCandidateCommit({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        preview: options.preview ?? 'latest'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidateCommitReview: success',
+        `runId: ${result.runId}`,
+        `reviewPath: ${result.reviewPath}`,
+        `reviewMarkdownPath: ${result.reviewMarkdownPath}`,
+        `evidenceMapPath: ${result.evidenceMapPath}`,
+        `evidenceMapMarkdownPath: ${result.evidenceMapMarkdownPath}`,
+        `changesReviewed: ${result.report.changes.length}`,
+        `highRiskChanges: ${result.report.highRiskChanges.length}`,
+        `requiredHumanDecisions: ${result.report.requiredHumanDecisions.length}`,
+        `overallDecision: ${result.report.overallDecision}`,
+        `recommendedNextStep: ${result.report.recommendedNextStep}`,
+        'codexInvoked: false',
+        'commitApprovalGenerated: false',
+        'storyStateMutated: false',
+        'queueMutated: false',
+        'snapshotCreated: false',
+        'canonicalArtifactsGenerated: false'
       ].join('\n') + '\n');
     });
 

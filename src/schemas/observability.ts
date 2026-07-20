@@ -81,6 +81,8 @@ export const ArtifactTypeSchema = z.enum([
   'draft_adoption_manifest',
   'draft_selection',
   'codex_candidate_preview_report',
+  'candidate_patch_evidence_map',
+  'candidate_commit_review',
   'revision_opportunity_report',
   'codex_chapter_quality_report',
   'codex_chapter_context_summary',

@@ -26,7 +26,8 @@ export type FakeCodexMode =
   | 'codex-expanded-target-incomplete'
   | 'codex-expanded-target-residual-time'
   | 'codex-expanded-target-residual-duplicate'
-  | 'codex-expanded-target-quality-regression';
+  | 'codex-expanded-target-quality-regression'
+  | 'codex-candidate-preview';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
@@ -140,6 +141,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       : chapterNumber === 2
         ? 'Lin Cheng follows the elevator log after the powerless radio names the old building.'
         : 'Lin Cheng reaches the missing floor after the elevator log exposes the impossible stop.';
+  const sourceFinalPath = ((stdin.match(/<source_final_path>\\s*([^<]+)\\s*<\\/source_final_path>/) || [])[1] || 'chapters/chapter_' + nnn + '/final.md').trim();
   const enhancedDiagnosticsContext = stdin.includes('DIAGNOSTICS_CONTEXT_MODE: enhanced');
   if (mode === 'schema-invalid') {
     return { unexpected: true };
@@ -332,7 +334,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
     },
     'memory.extract_canon_patch_proposal_slim': {
       chapterNumber,
-      sourceFinalPath: 'chapters/chapter_' + nnn + '/final.md',
+      sourceFinalPath,
       latestCommittedChapter: chapterNumber,
       newFacts: [
         {

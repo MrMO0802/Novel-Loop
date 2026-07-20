@@ -27,6 +27,11 @@ import {
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionQualityReportSchema,
+  CodexCandidatePreviewReportSchema,
+  DraftAdoptionManifestSchema,
+  DraftSelectionSchema,
+  RevisionCandidateAdoptionApprovalSchema,
+  RevisionCandidateReviewSchema,
   TargetedRevisionCandidateDispositionArtifactSchema,
   TargetedRevisionDiffSchema,
   TargetedRevisionExperimentArtifactSchema,
@@ -44,6 +49,11 @@ import type {
   ExpandedTargetRevisionExperimentReport,
   ExpandedTargetRevisionPlan,
   ExpandedTargetRevisionQualityReport,
+  CodexCandidatePreviewReport,
+  DraftAdoptionManifest,
+  DraftSelection,
+  RevisionCandidateAdoptionApproval,
+  RevisionCandidateReview,
   TargetCoverageClosureReport,
   TargetExpansionApprovalPreview,
   TargetExpansionApprovalRecord,
@@ -122,6 +132,11 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     'target_expansion_approval',
     TargetExpansionApprovalRecordSchema
   )).at(-1);
+  const latestCandidateReview = (await readReports(paths, fileStore, input.chapterNumber, 'revision_candidate_review', RevisionCandidateReviewSchema)).at(-1);
+  const latestCandidateApproval = (await readReports(paths, fileStore, input.chapterNumber, 'revision_candidate_adoption_approval', RevisionCandidateAdoptionApprovalSchema)).at(-1);
+  const latestDraftAdoption = (await readReports(paths, fileStore, input.chapterNumber, 'draft_adoption_manifest', DraftAdoptionManifestSchema)).at(-1);
+  const latestDraftSelection = (await readReports(paths, fileStore, input.chapterNumber, 'draft_selection', DraftSelectionSchema)).at(-1);
+  const latestCandidatePreview = (await readReports(paths, fileStore, input.chapterNumber, 'codex_candidate_preview_report', CodexCandidatePreviewReportSchema)).at(-1);
   const finalPath = relativeChapterArtifact(input.chapterNumber, 'final.md');
   const lines = [
     `Project: ${paths.projectId}`,
@@ -148,6 +163,7 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     appendTargetedRevisionExperiment(lines, latestTargetedExperiment);
     appendTargetCoverage(lines, latestDisposition, latestCoverage, latestApprovalPreview, latestApproval);
     appendExpandedTargetRevision(lines, latestV2Plan, latestV2Disposition, latestV2Diagnostics, latestV2Adjudication, latestV2Quality);
+    appendCandidateAdoptionAndPreview(lines, latestCandidateReview, latestCandidateApproval, latestDraftAdoption, latestDraftSelection, latestCandidatePreview);
   }
 
   if (input.conflicts === true) {
@@ -191,6 +207,13 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_coverage_closure_report', TargetCoverageClosureReportSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_expansion_approval_preview', TargetExpansionApprovalPreviewSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'target_expansion_approval', TargetExpansionApprovalRecordSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'revision_candidate_review', RevisionCandidateReviewSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'revision_candidate_adoption_approval', RevisionCandidateAdoptionApprovalSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'draft_adoption_manifest', DraftAdoptionManifestSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'draft_selection', DraftSelectionSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'codex_candidate_preview_report', CodexCandidatePreviewReportSchema);
+    await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:draft_v2|final_candidate_preview_v2)\.md$/);
+    await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:diagnostics_v2|codex_chapter_quality_report_v2|canon_patch_codex_(?:proposal|normalized)_v2|state_diff_codex_preview_v2)\.(?:json|md)$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^draft_targeted_revision_candidate_v\d+\.md$/);
     await appendPreviewCompleteness(lines, paths, fileStore, input.chapterNumber);
     await appendDiagnosticsHardFailAnalysis(lines, paths, fileStore, input.chapterNumber);
@@ -222,7 +245,11 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
       latestCoverage?.value,
       latestApprovalPreview?.value,
       latestApproval?.value,
-      latestV2Disposition?.value
+      latestV2Disposition?.value,
+      latestCandidateReview?.value,
+      latestCandidateApproval?.value,
+      latestDraftAdoption?.value,
+      latestCandidatePreview?.value
     ));
   }
 
@@ -309,11 +336,29 @@ function suggestNextCommand(
   coverage: TargetCoverageClosureReport | undefined,
   approvalPreview: TargetExpansionApprovalPreview | undefined,
   approval: TargetExpansionApprovalRecord | undefined,
-  v2Disposition: ExpandedTargetRevisionCandidateDisposition | undefined
+  v2Disposition: ExpandedTargetRevisionCandidateDisposition | undefined,
+  candidateReview: RevisionCandidateReview | undefined,
+  candidateApproval: RevisionCandidateAdoptionApproval | undefined,
+  draftAdoption: DraftAdoptionManifest | undefined,
+  candidatePreview: CodexCandidatePreviewReport | undefined
 ): string {
+  if (candidatePreview !== undefined) {
+    return candidatePreview.previewComplete
+      ? `human commit review required for ${candidatePreview.finalPath ?? candidatePreview.adoptedDraftPath}; D3 does not approve or execute commit`
+      : `corepack pnpm novel-loop review ${projectId} ${chapterNumber} --diagnostics --artifacts --state --suggest-next`;
+  }
+  if (draftAdoption !== undefined) {
+    return `corepack pnpm novel-loop codex resume-preview-with-candidate ${projectId} ${chapterNumber} --draft draft_v2 --approval latest --codex-profile clean --codex-json-retries 2 --codex-json-repair`;
+  }
+  if (candidateApproval !== undefined) {
+    return `corepack pnpm novel-loop codex adopt-revision-candidate ${projectId} ${chapterNumber} --candidate latest --approval latest`;
+  }
+  if (candidateReview !== undefined) {
+    return `corepack pnpm novel-loop codex approve-revision-candidate ${projectId} ${chapterNumber} --candidate latest --confirm`;
+  }
   if (v2Disposition !== undefined) {
     return v2Disposition.result === 'accepted_for_preview_review'
-      ? `human review candidate v2 ${v2Disposition.candidatePath}; it remains unadopted and no preview or commit was started`
+      ? `corepack pnpm novel-loop codex review-revision-candidate ${projectId} ${chapterNumber} --candidate latest`
       : 'Candidate v2 requires human review. Automatic revision round 3 is disabled.';
   }
   if (coverage !== undefined && approval === undefined) {
@@ -346,6 +391,64 @@ function suggestNextCommand(
     return `corepack pnpm novel-loop recommit ${projectId} ${chapterNumber} --from-final --confirm`;
   }
   return `corepack pnpm novel-loop review ${projectId} ${chapterNumber} --diagnostics --state --artifacts`;
+}
+
+function appendCandidateAdoptionAndPreview(
+  lines: string[],
+  review: { path: string; value: RevisionCandidateReview } | undefined,
+  approval: { path: string; value: RevisionCandidateAdoptionApproval } | undefined,
+  adoption: { path: string; value: DraftAdoptionManifest } | undefined,
+  selection: { path: string; value: DraftSelection } | undefined,
+  preview: { path: string; value: CodexCandidatePreviewReport } | undefined
+): void {
+  if (review !== undefined) {
+    lines.push('', 'Candidate v2 review');
+    lines.push(`- path: ${review.path}`);
+    lines.push(`- candidatePath: ${review.value.candidatePath}`);
+    lines.push(`- experimentResult: ${review.value.experimentResult}`);
+    lines.push(`- disposition: ${review.value.disposition}`);
+    lines.push(`- checklistPassed: ${String(review.value.humanReviewChecklist.every((item) => item.passed))}`);
+    lines.push(`- approvedForAdoption: ${String(review.value.approvedForAdoption)}`);
+  }
+  if (approval !== undefined) {
+    lines.push('', 'Candidate adoption approval');
+    lines.push(`- path: ${approval.path}`);
+    lines.push(`- approved: ${String(approval.value.approved)}`);
+    lines.push(`- operator: ${approval.value.operator}`);
+    lines.push(`- approvalScope: ${approval.value.approvalScope}`);
+  }
+  if (adoption !== undefined) {
+    lines.push('', 'Draft adoption');
+    lines.push(`- manifestPath: ${adoption.path}`);
+    lines.push(`- candidatePath: ${adoption.value.candidatePath}`);
+    lines.push(`- adoptedDraftPath: ${adoption.value.adoptedDraftPath}`);
+    lines.push(`- canonical: ${String(adoption.value.canonical)}`);
+    lines.push(`- storyStateMutated: ${String(adoption.value.storyStateMutated)}`);
+  }
+  if (selection !== undefined) {
+    lines.push(`- draftSelectionPath: ${selection.path}`);
+    lines.push(`- selectedDraftVersion: ${selection.value.selectedDraftVersion}`);
+    lines.push(`- selectedDraftPath: ${selection.value.selectedDraftPath}`);
+  }
+  if (preview !== undefined) {
+    lines.push('', 'Standard candidate diagnostics');
+    lines.push(`- diagnosticsPath: ${preview.value.diagnosticsPath}`);
+    lines.push(`- diagnosticsPassed: ${String(preview.value.diagnosticsPassed)}`);
+    lines.push(`- abDiagnosticsReused: ${String(preview.value.abDiagnosticsReused)}`);
+    lines.push('', 'Candidate preview');
+    lines.push(`- path: ${preview.path}`);
+    lines.push(`- finalPath: ${preview.value.finalPath ?? 'none'}`);
+    lines.push(`- qualityReportPath: ${preview.value.qualityReportPath ?? 'none'}`);
+    lines.push(`- patchProposalPath: ${preview.value.patchProposalPath ?? 'none'}`);
+    lines.push(`- normalizedPatchPath: ${preview.value.normalizedPatchPath ?? 'none'}`);
+    lines.push(`- conflictReportPath: ${preview.value.conflictReportPath ?? 'none'}`);
+    lines.push(`- stateDiffPath: ${preview.value.stateDiffPath ?? 'none'}`);
+    lines.push(`- completenessReportPath: ${preview.value.completenessReportPath}`);
+    lines.push(`- previewComplete: ${String(preview.value.previewComplete)}`);
+    lines.push(`- storyStateMutated: ${String(preview.value.storyStateMutated)}`);
+    lines.push(`- queueCommitted: ${String(preview.value.queueCommitted)}`);
+    lines.push(`- recommendedNextStep: ${preview.value.recommendedNextStep}`);
+  }
 }
 
 function appendTargetCoverage(

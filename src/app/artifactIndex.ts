@@ -249,7 +249,9 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^draft_v\d+\.md$/.test(fileName)) return { artifactType: 'draft', phase: 'drafting' };
   if (/^diagnostics_v\d+\.json$/.test(fileName)) return { artifactType: 'diagnostics', phase: 'diagnostics', schemaName: 'DiagnosticsReportSchema' };
   if (/^revision_plan_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_plan', phase: 'revision', schemaName: 'RevisionPlanSchema' };
-  if (fileName === 'final.md') return { artifactType: 'final', phase: 'final' };
+  if (fileName === 'final.md' || /^final_candidate_preview_v\d+\.md$/.test(fileName)) return { artifactType: 'final', phase: 'final' };
+  if (/^state_diff_codex_preview_v\d+\.json$/.test(fileName)) return { artifactType: 'state_diff', phase: 'diff', schemaName: 'StateDiffReportSchema' };
+  if (/^state_diff_codex_preview_v\d+\.md$/.test(fileName)) return { artifactType: 'state_diff', phase: 'diff' };
   if (fileName === 'canon_patch.json' || /^canon_patch_manual_v\d+\.json$/.test(fileName) || /^canon_patch_codex_(proposal|normalized)_v\d+\.json$/.test(fileName)) return { artifactType: 'canon_patch', phase: 'commit', schemaName: 'CanonPatchSchema' };
   if (fileName === 'commit_report.json') return { artifactType: 'commit_report', phase: 'commit', schemaName: 'CommitReportSchema' };
   if (/^commit_journal_v\d+\.json$/.test(fileName)) return { artifactType: 'commit_journal', phase: 'commit', schemaName: 'CommitJournalSchema' };
@@ -309,6 +311,15 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^target_expansion_approval_preview_v\d+\.md$/.test(fileName)) return { artifactType: 'target_expansion_approval_preview', phase: 'diagnostics' };
   if (/^target_expansion_approval_v\d+\.json$/.test(fileName)) return { artifactType: 'target_expansion_approval', phase: 'diagnostics', schemaName: 'TargetExpansionApprovalRecordSchema' };
   if (/^target_expansion_approval_v\d+\.md$/.test(fileName)) return { artifactType: 'target_expansion_approval', phase: 'diagnostics' };
+  if (/^revision_candidate_review_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_candidate_review', phase: 'review', schemaName: 'RevisionCandidateReviewSchema' };
+  if (/^revision_candidate_review_v\d+\.md$/.test(fileName)) return { artifactType: 'revision_candidate_review', phase: 'review' };
+  if (/^revision_candidate_adoption_approval_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_candidate_adoption_approval', phase: 'review', schemaName: 'RevisionCandidateAdoptionApprovalSchema' };
+  if (/^revision_candidate_adoption_approval_v\d+\.md$/.test(fileName)) return { artifactType: 'revision_candidate_adoption_approval', phase: 'review' };
+  if (/^draft_adoption_manifest_v\d+\.json$/.test(fileName)) return { artifactType: 'draft_adoption_manifest', phase: 'revision', schemaName: 'DraftAdoptionManifestSchema' };
+  if (/^draft_adoption_manifest_v\d+\.md$/.test(fileName)) return { artifactType: 'draft_adoption_manifest', phase: 'revision' };
+  if (/^draft_selection_v\d+\.json$/.test(fileName)) return { artifactType: 'draft_selection', phase: 'revision', schemaName: 'DraftSelectionSchema' };
+  if (/^codex_candidate_preview_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_candidate_preview_report', phase: 'commit', schemaName: 'CodexCandidatePreviewReportSchema' };
+  if (/^codex_candidate_preview_report_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_candidate_preview_report', phase: 'commit' };
   if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision', schemaName: 'RevisionOpportunityReportSchema' };
   if (/^revision_opportunity_report_v\d+\.md$/.test(fileName)) return { artifactType: 'revision_opportunity_report', phase: 'revision' };
   if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) return { artifactType: 'codex_chapter_quality_report', phase: 'quality', schemaName: 'CodexChapterQualityReportSchema' };

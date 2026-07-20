@@ -39,6 +39,7 @@ export const DiagnosticsNormalizationWarningSchema = z.object({
 export const DiagnosticsReportSchema = z.object({
   chapterNumber: z.number().int().positive(),
   draftVersion: z.number().int().positive(),
+  passed: z.boolean().optional(),
   hard_checks: DiagnosticsHardChecksSchema,
   soft_scores: DiagnosticsSoftScoresSchema,
   hardFailures: z

@@ -513,3 +513,20 @@ export type {
   ExpandedTargetRevisionScopeValidation,
   TargetOperationCoverage
 } from './codexExpandedTargetRevision.js';
+
+export {
+  CodexCandidatePreviewRecommendedNextStepSchema,
+  CodexCandidatePreviewReportSchema,
+  DraftAdoptionManifestSchema,
+  DraftSelectionSchema,
+  RevisionCandidateAdoptionApprovalSchema,
+  RevisionCandidateReviewChecklistItemSchema,
+  RevisionCandidateReviewSchema
+} from './codexRevisionCandidateAdoption.js';
+export type {
+  CodexCandidatePreviewReport,
+  DraftAdoptionManifest,
+  DraftSelection,
+  RevisionCandidateAdoptionApproval,
+  RevisionCandidateReview
+} from './codexRevisionCandidateAdoption.js';

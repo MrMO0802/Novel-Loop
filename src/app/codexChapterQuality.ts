@@ -16,6 +16,7 @@ export interface EvaluateCodexChapterQualityInput {
   finalChapterPath?: string;
   canonPatchPath?: string;
   diagnosticsPath?: string;
+  reportVersion?: number;
 }
 
 export interface EvaluateCodexChapterQualityResult {
@@ -136,7 +137,9 @@ export async function evaluateCodexChapterQuality(
         (warning) => `normalized diagnostics score: ${warning.field} ${warning.originalValue} -> ${warning.normalizedValue}`
       )
     ];
-    const reportArtifact = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_chapter_quality_report');
+    const reportArtifact = input.reportVersion === undefined
+      ? await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_chapter_quality_report')
+      : await exactVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_chapter_quality_report', input.reportVersion);
     const markdownPath = reportArtifact.relativePath.replace(/\.json$/, '.md');
     const report = await fileStore.writeJson(
       reportArtifact.absolutePath,
@@ -258,6 +261,25 @@ async function findLatestCodexPatch(paths: ProjectPaths, fileStore: FileStore, c
   }
   const canonical = relativeChapterArtifact(chapterNumber, 'canon_patch.json');
   return (await fileStore.exists(paths.projectArtifact(canonical))) ? canonical : undefined;
+}
+
+async function exactVersionedChapterArtifact(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterNumber: number,
+  baseName: string,
+  version: number
+) {
+  const fileName = `${baseName}_v${version}.json`;
+  const absolutePath = paths.chapterArtifact(chapterNumber, fileName);
+  if (await fileStore.exists(absolutePath)) {
+    throw new AppError('CODEX_CANDIDATE_PREVIEW_STALE', `${fileName} already exists; refusing to overwrite versioned preview provenance.`, 2);
+  }
+  return {
+    version,
+    absolutePath,
+    relativePath: relativeChapterArtifact(chapterNumber, fileName)
+  };
 }
 
 async function countScenes(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number, finalText: string): Promise<number> {

@@ -20,6 +20,7 @@ export interface BuildDiagnosticsContextManifestInput {
   chapterNumber: number;
   mode: DiagnosticsContextMode;
   contextBudgetBytes?: number;
+  draftPath?: string;
 }
 
 export interface BuildDiagnosticsContextManifestResult {
@@ -62,7 +63,7 @@ export async function buildDiagnosticsContextManifest(
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
   const beforeState = await readOptionalText(paths.storyState(), fileStore);
   const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
-  const candidates = await buildCandidates(paths, fileStore, input.chapterNumber, storyState);
+  const candidates = await buildCandidates(paths, fileStore, input.chapterNumber, storyState, input.draftPath);
   const included = candidates.filter((candidate) => candidate.present && shouldInclude(input.mode, candidate));
   const excluded = candidates.filter((candidate) => !candidate.present || !shouldInclude(input.mode, candidate));
   const missingRequiredArtifacts = candidates
@@ -116,10 +117,16 @@ export async function buildDiagnosticsContextManifest(
   };
 }
 
-async function buildCandidates(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number, storyState: StoryState): Promise<ContextArtifactCandidate[]> {
+async function buildCandidates(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterNumber: number,
+  storyState: StoryState,
+  selectedDraftPath?: string
+): Promise<ContextArtifactCandidate[]> {
   const missionPath = relativeChapterArtifact(chapterNumber, 'mission.json');
   const selectedPlanPath = relativeChapterArtifact(chapterNumber, 'selected_plan.md');
-  const draftPath = relativeChapterArtifact(chapterNumber, 'draft_v1.md');
+  const draftPath = selectedDraftPath ?? relativeChapterArtifact(chapterNumber, 'draft_v1.md');
   const mission = await readOptionalJson(paths.projectArtifact(missionPath), fileStore);
   const selectedPlan = await readOptionalText(paths.projectArtifact(selectedPlanPath), fileStore);
   const draft = await readOptionalText(paths.projectArtifact(draftPath), fileStore);

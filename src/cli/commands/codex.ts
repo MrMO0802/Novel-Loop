@@ -1,6 +1,7 @@
 import type { Command } from 'commander';
 
 import { checkCodexStatus, execCodexJson, execCodexText, runCodexSmoke } from '../../app/codexBoundary.js';
+import { runCodexCandidatePreview } from '../../app/codexCandidatePreview.js';
 import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
@@ -19,6 +20,11 @@ import { generateCodexRuntimeGapReport } from '../../app/codexRuntimeGap.js';
 import { generateCodexRuntimeOptimizationReport } from '../../app/codexRuntimeOptimization.js';
 import { profileCodexRuntime } from '../../app/codexRuntimeProfiler.js';
 import { runCodexRuntimeStageSampling } from '../../app/codexRuntimeSampling.js';
+import {
+  adoptCodexRevisionCandidate,
+  approveCodexRevisionCandidate,
+  reviewCodexRevisionCandidate
+} from '../../app/codexRevisionCandidateAdoption.js';
 import { runCodexSingleChapterSmoke } from '../../app/codexSingleChapterSmoke.js';
 import { inspectProvider } from '../../providers/providerRegistry.js';
 import { AppError } from '../../utils/AppError.js';
@@ -74,6 +80,8 @@ interface CodexCommandOptions {
   approval?: string;
   revisionRound?: string;
   input?: string;
+  candidate?: string;
+  draft?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -826,6 +834,155 @@ export function registerCodexCommand(program: Command): void {
         `commitStarted: ${String(result.report.commitStarted)}`,
         `storyStateMutated: ${String(result.report.storyStateMutated)}`,
         `recommendation: ${result.report.recommendation}`
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('review-revision-candidate').description('[local/read-only] Review an effective isolated revision candidate for preview-only adoption'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--candidate <path|latest>', 'revision candidate path or latest accepted candidate', 'latest')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await reviewCodexRevisionCandidate({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        candidate: options.candidate ?? 'latest'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'revisionCandidateReview: success',
+        `reportPath: ${result.reportPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `candidatePath: ${result.report.candidatePath}`,
+        `experimentResult: ${result.report.experimentResult}`,
+        `disposition: ${result.report.disposition}`,
+        `scopeValid: ${String(result.report.scopeValid)}`,
+        `contradictionsResolved: ${String(result.report.contradictionsResolved)}`,
+        `scoreDelta: ${result.report.scoreDelta ?? 'unavailable'}`,
+        `approvedForAdoption: ${String(result.report.approvedForAdoption)}`,
+        'codexInvoked: false',
+        'storyStateMutated: false',
+        'queueMutated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('approve-revision-candidate').description('[local/read-only] Explicitly approve an eligible candidate for preview-only adoption'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--candidate <path|latest>', 'revision candidate path or latest accepted candidate', 'latest')
+    .option('--confirm', 'confirm preview-only candidate adoption approval', false)
+    .option('--operator <name>', 'operator recorded in the adoption approval')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await approveCodexRevisionCandidate({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        candidate: options.candidate ?? 'latest',
+        confirm: options.confirm === true,
+        ...(options.operator === undefined ? {} : { operator: options.operator })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'revisionCandidateAdoptionApproval: approved',
+        `recordPath: ${result.recordPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `candidatePath: ${result.record.candidatePath}`,
+        `operator: ${result.record.operator}`,
+        `approvalScope: ${result.record.approvalScope}`,
+        `riskAcknowledged: ${String(result.record.riskAcknowledged)}`,
+        'codexInvoked: false',
+        'storyStateMutated: false',
+        'queueMutated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('adopt-revision-candidate').description('[local/preview-only] Copy an approved candidate to draft_v2 without canonical mutation'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--candidate <path|latest>', 'revision candidate path or latest accepted candidate', 'latest')
+    .option('--approval <path|latest>', 'candidate adoption approval path or latest', 'latest')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await adoptCodexRevisionCandidate({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        candidate: options.candidate ?? 'latest',
+        approval: options.approval ?? 'latest'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'revisionCandidateAdoption: success',
+        `adoptedDraftPath: ${result.adoptedDraftPath}`,
+        `manifestPath: ${result.manifestPath}`,
+        `manifestMarkdownPath: ${result.manifestMarkdownPath}`,
+        `draftSelectionPath: ${result.selectionPath}`,
+        `candidatePath: ${result.manifest.candidatePath}`,
+        `candidateHash: ${result.manifest.candidateHash}`,
+        `adoptedDraftHash: ${result.manifest.adoptedDraftHash}`,
+        `adoptionScope: ${result.manifest.adoptionScope}`,
+        `canonical: ${String(result.manifest.canonical)}`,
+        'storyStateMutated: false',
+        'queueCommitted: false'
+      ].join('\n') + '\n');
+    });
+
+  addCodexPilotOptions(addBoundaryOptions(codex.command('resume-preview-with-candidate').description('[pilot/preview-only] Resume standard controlled preview from an approved draft_v2 candidate')))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--draft <version>', 'selected adopted draft version', 'draft_v2')
+    .option('--approval <path|latest>', 'candidate adoption approval path or latest', 'latest')
+    .option('--prompt-root <path>', 'prompt root directory', './prompts')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexCandidatePreview({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        promptRoot: options.promptRoot ?? './prompts',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        draft: options.draft ?? 'draft_v2',
+        approval: options.approval ?? 'latest',
+        ...resolveCodexCliOptions({
+          ...(options.codexBin === undefined ? {} : { codexBin: options.codexBin }),
+          codexProfile: options.codexProfile ?? 'clean',
+          codexJsonRetries: options.codexJsonRetries ?? '2',
+          ...(options.codexJsonRepair === undefined ? {} : { codexJsonRepair: options.codexJsonRepair }),
+          codexJsonRepairRetries: options.codexJsonRepairRetries ?? '1',
+          codexTimeoutMs: options.codexTimeoutMs ?? '180000'
+        })
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        `candidatePreview: ${result.report.previewComplete ? 'complete' : 'incomplete'}`,
+        `runId: ${result.runId}`,
+        `reportPath: ${result.reportPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `adoptedDraftPath: ${result.report.adoptedDraftPath}`,
+        `diagnosticsPath: ${result.report.diagnosticsPath}`,
+        `finalPath: ${result.report.finalPath ?? 'none'}`,
+        `qualityReportPath: ${result.report.qualityReportPath ?? 'none'}`,
+        `patchProposalPath: ${result.report.patchProposalPath ?? 'none'}`,
+        `normalizedPatchPath: ${result.report.normalizedPatchPath ?? 'none'}`,
+        `stateDiffPath: ${result.report.stateDiffPath ?? 'none'}`,
+        `completenessReportPath: ${result.report.completenessReportPath}`,
+        `previewComplete: ${String(result.report.previewComplete)}`,
+        `storyStateMutated: ${String(result.report.storyStateMutated)}`,
+        `queueCommitted: ${String(result.report.queueCommitted)}`,
+        `recommendedNextStep: ${result.report.recommendedNextStep}`
       ].join('\n') + '\n');
     });
 

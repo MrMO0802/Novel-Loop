@@ -45,6 +45,19 @@ describe('M21 Codex CLI', () => {
     const approveTargetExpansion = codexCommand?.commands.find((command) => command.name() === 'approve-target-expansion');
     expect(approveTargetExpansion?.helpInformation()).toContain('--report <path|latest>');
     expect(approveTargetExpansion?.helpInformation()).toContain('--confirm');
+    const reviewCandidate = codexCommand?.commands.find((command) => command.name() === 'review-revision-candidate');
+    expect(reviewCandidate?.description()).toContain('local/read-only');
+    expect(reviewCandidate?.helpInformation()).toContain('--candidate <path|latest>');
+    const approveCandidate = codexCommand?.commands.find((command) => command.name() === 'approve-revision-candidate');
+    expect(approveCandidate?.helpInformation()).toContain('--confirm');
+    expect(approveCandidate?.helpInformation()).toContain('--operator <name>');
+    const adoptCandidate = codexCommand?.commands.find((command) => command.name() === 'adopt-revision-candidate');
+    expect(adoptCandidate?.description()).toContain('preview-only');
+    expect(adoptCandidate?.helpInformation()).toContain('--approval <path|latest>');
+    const resumeCandidate = codexCommand?.commands.find((command) => command.name() === 'resume-preview-with-candidate');
+    expect(resumeCandidate?.description()).toContain('preview-only');
+    expect(resumeCandidate?.helpInformation()).toContain('--draft <version>');
+    expect(resumeCandidate?.helpInformation()).toContain('--codex-json-retries <count>');
   });
 
   test('exec-json command prints parsed JSON artifact path and uses fake codex binary', async () => {

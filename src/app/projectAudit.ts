@@ -29,6 +29,7 @@ import {
   CodexPatchFailureReportSchema,
   CodexPreviewCompletenessReportSchema,
   CodexPreviewFailureReportSchema,
+  CodexCandidatePreviewReportSchema,
   CodexRuntimeBenchmarkReportSchema,
   CodexRuntimeFailureReportSchema,
   CodexRuntimeGapReportSchema,
@@ -49,6 +50,12 @@ import {
   RunManifestSchema,
   RunManifestV2Schema,
   RevisionOpportunityReportSchema,
+  RevisionCandidateReviewSchema,
+  RevisionCandidateAdoptionApprovalSchema,
+  DraftAdoptionManifestSchema,
+  DraftSelectionSchema,
+  DiagnosticsReportSchema,
+  StateDiffReportSchema,
   StoryStateSchema,
   CandidateDispositionSchema,
   CandidateRevisionEvidenceAdjudicationSchema,
@@ -743,6 +750,25 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
         await checkJson(issues, fileStore, absolutePath, 'target_coverage', relativePath, TargetExpansionApprovalRecordSchema);
         await checkTargetExpansionApprovalRecord(issues, paths, fileStore, absolutePath, relativePath);
       }
+      if (/^revision_candidate_review_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_adoption', relativePath, RevisionCandidateReviewSchema);
+        await checkRevisionCandidateReview(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^revision_candidate_adoption_approval_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_adoption', relativePath, RevisionCandidateAdoptionApprovalSchema);
+        await checkRevisionCandidateApproval(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^draft_adoption_manifest_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_adoption', relativePath, DraftAdoptionManifestSchema);
+        await checkDraftAdoptionManifest(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^draft_selection_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_adoption', relativePath, DraftSelectionSchema);
+      }
+      if (/^codex_candidate_preview_report_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_preview', relativePath, CodexCandidatePreviewReportSchema);
+        await checkCandidatePreviewReport(issues, paths, fileStore, absolutePath, relativePath);
+      }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
         await checkRevisionOpportunityReport(issues, absolutePath, relativePath, fileStore);
@@ -784,6 +810,282 @@ async function checkBuildBibleCacheReports(issues: AuditIssue[], paths: ProjectP
       // checkJson already recorded schema problems.
     }
   }
+}
+
+async function checkDraftAdoptionManifest(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const manifest = await fileStore.readJson(absolutePath, DraftAdoptionManifestSchema);
+    const sources: Array<[string, string, string]> = [
+      ['candidate', manifest.candidatePath, manifest.candidateHash],
+      ['adopted_draft', manifest.adoptedDraftPath, manifest.adoptedDraftHash],
+      ['original_draft', manifest.originalDraftPath, manifest.originalDraftHash],
+      ['approval', manifest.approvalPath, manifest.approvalHash],
+      ['experiment', manifest.experimentPath, manifest.experimentHash],
+      ['disposition', manifest.dispositionPath, manifest.dispositionHash],
+      ['story_state', path.join('state', 'story_state.json'), manifest.sourceStateHash],
+      ['chapter_queue', path.join('planning', 'chapter_queue.json'), manifest.sourceQueueHash]
+    ];
+    for (const [label, artifactPath, expectedHash] of sources) {
+      await checkD3ArtifactHash(issues, paths, fileStore, relativePath, `draft_adoption_hash_${label}`, artifactPath, expectedHash);
+    }
+    const [candidateText, adoptedText] = await Promise.all([
+      fileStore.readText(paths.projectArtifact(manifest.candidatePath)),
+      fileStore.readText(paths.projectArtifact(manifest.adoptedDraftPath))
+    ]);
+    if (candidateText !== adoptedText || manifest.candidateHash !== manifest.adoptedDraftHash) {
+      issues.push(issue(
+        `draft_adoption_hash_candidate_copy_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'candidate_adoption',
+        relativePath,
+        'Adopted draft_v2 is not an exact copy of the approved candidate.',
+        'Restore draft_v2 from the approved candidate and regenerate adoption provenance.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson already records malformed manifests; missing linked artifacts are recorded above when parsing succeeds.
+  }
+}
+
+async function checkRevisionCandidateReview(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, RevisionCandidateReviewSchema);
+    const sources: Array<[string, string, string]> = [
+      ['review_candidate', report.candidatePath, report.candidateHash],
+      ['review_source_draft', report.sourceDraftPath, report.sourceDraftHash],
+      ['review_experiment', report.experimentReportPath, report.experimentReportHash],
+      ['review_disposition', report.dispositionPath, report.dispositionHash],
+      ['review_state', report.sourceStatePath, report.sourceStateHash],
+      ['review_queue', report.sourceQueuePath, report.sourceQueueHash]
+    ];
+    for (const [label, artifactPath, expectedHash] of sources) {
+      await checkD3ArtifactHash(issues, paths, fileStore, relativePath, label, artifactPath, expectedHash);
+    }
+  } catch {
+    // checkJson records malformed reports.
+  }
+}
+
+async function checkRevisionCandidateApproval(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const approval = await fileStore.readJson(absolutePath, RevisionCandidateAdoptionApprovalSchema);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'approval_review', approval.reviewReportPath, approval.reviewReportHash);
+    const review = await fileStore.readJson(paths.projectArtifact(approval.reviewReportPath), RevisionCandidateReviewSchema);
+    const sources: Array<[string, string, string]> = [
+      ['approval_candidate', approval.candidatePath, approval.candidateHash],
+      ['approval_experiment', approval.experimentReportPath, approval.experimentReportHash],
+      ['approval_disposition', approval.dispositionPath, approval.dispositionHash],
+      ['approval_source_draft', review.sourceDraftPath, approval.sourceDraftHash],
+      ['approval_state', review.sourceStatePath, approval.sourceStateHash],
+      ['approval_queue', review.sourceQueuePath, approval.sourceQueueHash]
+    ];
+    for (const [label, artifactPath, expectedHash] of sources) {
+      await checkD3ArtifactHash(issues, paths, fileStore, relativePath, label, artifactPath, expectedHash);
+    }
+  } catch {
+    // checkJson and linked hash checks report malformed or stale approvals.
+  }
+}
+
+async function checkCandidatePreviewReport(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, CodexCandidatePreviewReportSchema);
+    const requiredPaths = [
+      report.candidatePath,
+      report.adoptedDraftPath,
+      report.adoptionApprovalPath,
+      report.draftAdoptionManifestPath,
+      report.draftSelectionPath,
+      report.experimentPath,
+      report.diagnosticsContextManifestPath,
+      report.diagnosticsPath,
+      report.completenessReportPath,
+      ...(report.finalPath === null ? [] : [report.finalPath]),
+      ...(report.qualityReportPath === null ? [] : [report.qualityReportPath]),
+      ...(report.patchProposalPath === null ? [] : [report.patchProposalPath]),
+      ...(report.normalizedPatchPath === null ? [] : [report.normalizedPatchPath]),
+      ...(report.stateDiffPath === null ? [] : [report.stateDiffPath])
+    ];
+    for (const artifactPath of requiredPaths) {
+      if (await fileStore.exists(paths.projectArtifact(artifactPath))) continue;
+      issues.push(issue(
+        `candidate_preview_missing_${sanitizeIssueId(artifactPath)}`,
+        'error',
+        'candidate_preview',
+        relativePath,
+        `Candidate preview references missing artifact ${artifactPath}.`,
+        'Restore the immutable preview artifact or rerun from a fresh adopted candidate.',
+        true
+      ));
+    }
+    const runManifestPath = path.join('runs', report.runId, 'run_manifest.json');
+    const runEventsPath = path.join('runs', report.runId, 'events.ndjson');
+    for (const provenancePath of [runManifestPath, runEventsPath]) {
+      if (await fileStore.exists(paths.projectArtifact(provenancePath))) continue;
+      issues.push(issue(
+        `candidate_preview_missing_run_provenance_${sanitizeIssueId(provenancePath)}`,
+        'critical',
+        'candidate_preview',
+        relativePath,
+        `Candidate preview is missing run provenance ${provenancePath}.`,
+        'Restore the immutable run manifest/event log or regenerate the isolated preview.',
+        true
+      ));
+      return;
+    }
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_candidate', report.candidatePath, report.candidateHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_draft', report.adoptedDraftPath, report.adoptedDraftHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_approval', report.adoptionApprovalPath, report.adoptionApprovalHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_experiment', report.experimentPath, report.experimentHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_state', path.join('state', 'story_state.json'), report.sourceStateHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_queue', path.join('planning', 'chapter_queue.json'), report.sourceQueueHash);
+
+    const [manifest, selection, diagnostics, context, completeness, storyState, queue, runManifest] = await Promise.all([
+      fileStore.readJson(paths.projectArtifact(report.draftAdoptionManifestPath), DraftAdoptionManifestSchema),
+      fileStore.readJson(paths.projectArtifact(report.draftSelectionPath), DraftSelectionSchema),
+      fileStore.readJson(paths.projectArtifact(report.diagnosticsPath), DiagnosticsReportSchema),
+      fileStore.readJson(paths.projectArtifact(report.diagnosticsContextManifestPath), DiagnosticsContextManifestSchema),
+      fileStore.readJson(paths.projectArtifact(report.completenessReportPath), CodexPreviewCompletenessReportSchema),
+      fileStore.readJson(paths.storyState(), StoryStateSchema),
+      fileStore.readJson(paths.chapterQueue(), ChapterQueueSchema),
+      fileStore.readJson(paths.runManifest(report.runId), RunManifestV2Schema)
+    ]);
+    const queueItem = queue.chapters.find((chapter) => chapter.chapterNumber === report.chapterNumber);
+    const contextUsesDraftV2 = context.includedArtifacts.some((artifact) => artifact.path === report.adoptedDraftPath);
+    const diagnosticsPassed = diagnostics.passed === true && diagnostics.draftVersion === 2 &&
+      diagnostics.hardFailures.length === 0 && Object.values(diagnostics.hard_checks).every((check) => check.passed);
+    const sourceLinksValid = manifest.adoptedDraftPath === report.adoptedDraftPath &&
+      manifest.adoptedDraftHash === report.adoptedDraftHash &&
+      selection.selectedDraftPath === report.adoptedDraftPath &&
+      selection.selectedDraftHash === report.adoptedDraftHash &&
+      selection.selectedDraftVersion === 2 &&
+      selection.scope === 'preview_only';
+    if (!sourceLinksValid || !contextUsesDraftV2 || report.abDiagnosticsReused || !report.standardDiagnosticsReexecuted || report.diagnosticsPassed !== diagnosticsPassed) {
+      issues.push(issue(
+        `candidate_preview_wrong_draft_or_diagnostics_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'candidate_preview',
+        relativePath,
+        'Candidate preview did not use the approved draft_v2 with freshly executed standard diagnostics.',
+        'Discard the preview and rerun resume-preview-with-candidate from the approved adoption manifest.',
+        true
+      ));
+    }
+
+    if (report.previewComplete) {
+      const patchProposal = await fileStore.readJson(paths.projectArtifact(report.patchProposalPath!), CanonPatchSchema);
+      const normalizedPatch = await fileStore.readJson(paths.projectArtifact(report.normalizedPatchPath!), CanonPatchSchema);
+      const stateDiff = await fileStore.readJson(paths.projectArtifact(report.stateDiffPath!), StateDiffReportSchema);
+      const quality = await fileStore.readJson(paths.projectArtifact(report.qualityReportPath!), CodexChapterQualityReportSchema);
+      const patchValid = patchProposal.sourceFinalPath === report.finalPath &&
+        normalizedPatch.sourceFinalPath === report.finalPath &&
+        stateDiff.patchPath === report.normalizedPatchPath &&
+        !stateDiff.unsafeToCommit;
+      const qualityValid = quality.finalChapterPath === report.finalPath &&
+        quality.canonPatchPath === report.normalizedPatchPath &&
+        quality.diagnosticsPath === report.diagnosticsPath &&
+        !quality.blocking && quality.criticalIssues.length === 0;
+      if (!patchValid || !qualityValid || !completeness.complete || !report.patchSchemaValid || !report.conflictCheckPassed || !report.stateDiffGenerated) {
+        issues.push(issue(
+          `candidate_preview_incomplete_chain_${sanitizeIssueId(relativePath)}`,
+          'critical',
+          'candidate_preview',
+          relativePath,
+          'Complete candidate preview has inconsistent final, quality, patch, conflict, state diff, or completeness provenance.',
+          'Do not use this preview for commit review; regenerate the isolated preview.',
+          true
+        ));
+      }
+    }
+
+    const expectedPromptIds = ['diagnostics.diagnose_chapter_slim', 'memory.extract_canon_patch_proposal_slim'];
+    const promptIds = runManifest.promptCalls.map((call) => call.promptId);
+    const eventText = await fileStore.readText(paths.runEvents(report.runId));
+    const mutationDetected = runManifest.stateMutations.some((mutation) => mutation.applied) ||
+      runManifest.queueTransitions.length > 0 || runManifest.snapshots.length > 0 || eventText.includes('STATE_MUTATION_APPLIED');
+    const canonicalArtifactDetected = await hasCandidatePreviewCommitArtifact(paths, fileStore, report.chapterNumber);
+    if (
+      storyState.latestCommittedChapter !== report.latestCommittedChapterBefore ||
+      report.latestCommittedChapterAfter !== report.latestCommittedChapterBefore ||
+      queueItem === undefined || ['committed', 'recommitted'].includes(queueItem.status) ||
+      report.queueStatusAfter !== queueItem.status || report.storyStateMutated || report.queueCommitted ||
+      report.commitStarted || report.snapshotCreated || report.canonicalPatchGenerated || mutationDetected || canonicalArtifactDetected ||
+      (report.previewComplete && JSON.stringify(promptIds) !== JSON.stringify(expectedPromptIds))
+    ) {
+      issues.push(issue(
+        `candidate_preview_safety_boundary_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'candidate_preview',
+        relativePath,
+        'Candidate preview crossed or inconsistently recorded the no-commit Story State/queue boundary.',
+        'Restore canonical state and queue, remove invalid commit artifacts, and rerun preview without commit confirmation.',
+        true
+      ));
+    }
+  } catch {
+    // Individual schema and missing artifact checks report actionable errors.
+  }
+}
+
+async function checkD3ArtifactHash(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  reportPath: string,
+  issuePrefix: string,
+  artifactPath: string,
+  expectedHash: string
+): Promise<void> {
+  const absolutePath = paths.projectArtifact(artifactPath);
+  if (!(await fileStore.exists(absolutePath))) {
+    issues.push(issue(`${issuePrefix}_missing_${sanitizeIssueId(artifactPath)}`, 'error', 'candidate_adoption', reportPath, `Missing D3 source artifact ${artifactPath}.`, 'Restore the immutable source artifact.', true));
+    return;
+  }
+  const actualHash = sha256(await fileStore.readText(absolutePath));
+  if (actualHash === expectedHash) return;
+  issues.push(issue(
+    `${issuePrefix}_mismatch_${sanitizeIssueId(artifactPath)}`,
+    'critical',
+    'candidate_adoption',
+    reportPath,
+    `D3 artifact hash mismatch for ${artifactPath}.`,
+    'Treat the approval/adoption/preview as stale and regenerate from immutable sources.',
+    true
+  ));
+}
+
+async function hasCandidatePreviewCommitArtifact(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number): Promise<boolean> {
+  const candidates = ['commit_report.json', 'canon_patch.json'];
+  for (const fileName of candidates) {
+    if (await fileStore.exists(paths.chapterArtifact(chapterNumber, fileName))) return true;
+  }
+  if (!(await fileStore.exists(paths.chapterDir(chapterNumber)))) return false;
+  return (await fileStore.list(paths.chapterDir(chapterNumber))).some((fileName) => /^codex_(?:approval_record|commit_report)_v\d+\.json$/.test(fileName));
 }
 
 async function checkCodexPreviewCompletenessReport(

@@ -3,6 +3,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { auditProject } from '../../src/app/projectAudit.js';
 import { runCodexExpandedTargetRevisionExperiment } from '../../src/app/codexExpandedTargetRevisionExperiment.js';
 import { reviewChapter } from '../../src/app/reviewChapter.js';
+import { TargetCoverageClosureReportSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { createTempRoot, removeTempRoot } from './m16Helpers.js';
 import { adjudicationProjectId, prepareApprovedExpandedTargetRevisionProject } from './codexExpandedTargetRevisionFixtures.js';
@@ -20,7 +21,11 @@ afterEach(async () => {
 describe('M27.12D2 review and audit integration', () => {
   test('shows v2 provenance and strict-audits the isolated experiment without canonical mutation', async () => {
     const store = new FileStore();
-    const { paths, fake } = await prepareApprovedExpandedTargetRevisionProject(tempRoot, store);
+    const { paths, coverage, fake } = await prepareApprovedExpandedTargetRevisionProject(tempRoot, store);
+    await store.writeJson(paths.chapterArtifact(1, 'target_coverage_closure_report_v0.json'), {
+      ...coverage.report,
+      reportId: `${coverage.report.reportId}_superseded`
+    }, TargetCoverageClosureReportSchema);
     const protectedBefore = await Promise.all([
       store.readText(paths.storyState()),
       store.readText(paths.chapterQueue()),

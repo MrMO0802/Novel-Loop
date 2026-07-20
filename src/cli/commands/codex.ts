@@ -9,6 +9,7 @@ import { runCodexDiagnosticsSchemaBenchmark } from '../../app/codexDiagnosticsSc
 import { runCodexDiagnosticsEvidenceAdjudication } from '../../app/codexDiagnosticsEvidenceAdjudication.js';
 import { approveCodexTargetExpansion, runCodexDiagnosticsTargetCoverage } from '../../app/codexTargetCoverage.js';
 import { runCodexExpandedTargetRevisionExperiment } from '../../app/codexExpandedTargetRevisionExperiment.js';
+import { runCodexTargetedRevisionContractCheck } from '../../app/codexTargetedRevisionContractCheck.js';
 import { runCodexTargetedRevisionExperiment } from '../../app/codexTargetedRevisionExperiment.js';
 import { evaluateCodexCrossChapterContinuity } from '../../app/codexCrossChapterContinuity.js';
 import { runCodexMissionMicroBenchmark } from '../../app/codexMissionMicroBenchmark.js';
@@ -72,6 +73,7 @@ interface CodexCommandOptions {
   operator?: string;
   approval?: string;
   revisionRound?: string;
+  input?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -768,6 +770,7 @@ export function registerCodexCommand(program: Command): void {
           'codexExpandedTargetRevisionExperiment: success',
           `revisionRound: ${result.report.revisionRound}`,
           `approvalRecordPath: ${result.report.approvalRecordPath}`,
+          `operationNormalizationPath: ${result.operationNormalizationPath}`,
           `planPath: ${result.planPath}`,
           `candidateDraftPath: ${result.candidateDraftPath}`,
           `scopeValidationPath: ${result.scopeValidationPath}`,
@@ -823,6 +826,39 @@ export function registerCodexCommand(program: Command): void {
         `commitStarted: ${String(result.report.commitStarted)}`,
         `storyStateMutated: ${String(result.report.storyStateMutated)}`,
         `recommendation: ${result.report.recommendation}`
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('targeted-revision-contract-check').description('[local/read-only] Replay provider operations through normalization and canonical contract validation'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .requiredOption('--input <parsed_output.json>', 'project-local provider parsed output JSON')
+    .option('--approval <path|latest>', 'approved target expansion record', 'latest')
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await runCodexTargetedRevisionContractCheck({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        inputPath: options.input!,
+        approval: options.approval ?? 'latest'
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'codexTargetedRevisionContractCheck: success',
+        `reportPath: ${result.reportPath}`,
+        `markdownPath: ${result.markdownPath}`,
+        `providerSchemaValid: ${String(result.report.providerSchemaValid)}`,
+        `sourceOperationCount: ${result.report.sourceOperationCount}`,
+        `normalizedOperationCount: ${result.report.normalizedOperationCount}`,
+        `atomicSplitCount: ${result.report.operations.filter((operation) => operation.normalizationMode === 'atomic_split').length}`,
+        `canonicalSchemaValid: ${String(result.report.canonicalSchemaValid)}`,
+        `coveragePreflightPassed: ${String(result.coveragePreflightPassed)}`,
+        `storyStateMutated: ${String(result.report.storyStateMutated)}`,
+        'codexInvoked: false'
       ].join('\n') + '\n');
     });
 

@@ -36,6 +36,10 @@ describe('M21 Codex CLI', () => {
     expect(targetedRevision?.helpInformation()).toContain('--samples <count>');
     expect(targetedRevision?.helpInformation()).toContain('--context-mode <mode>');
     expect(targetedRevision?.helpInformation()).toContain('--timeout-ms <ms>');
+    const targetedRevisionContractCheck = codexCommand?.commands.find((command) => command.name() === 'targeted-revision-contract-check');
+    expect(targetedRevisionContractCheck?.description()).toContain('local/read-only');
+    expect(targetedRevisionContractCheck?.helpInformation()).toContain('--input <parsed_output.json>');
+    expect(targetedRevisionContractCheck?.helpInformation()).toContain('--approval <path|latest>');
     const targetCoverage = codexCommand?.commands.find((command) => command.name() === 'diagnostics-target-coverage');
     expect(targetCoverage?.description()).toContain('local/read-only');
     const approveTargetExpansion = codexCommand?.commands.find((command) => command.name() === 'approve-target-expansion');

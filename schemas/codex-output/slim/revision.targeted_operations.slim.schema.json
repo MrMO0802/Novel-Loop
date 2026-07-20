@@ -9,48 +9,132 @@
       "minItems": 1,
       "maxItems": 16,
       "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": [
-          "operationId",
-          "operationType",
-          "targetIds",
-          "replacementText",
-          "reason",
-          "expectedEffect",
-          "rulesAddressed",
-          "factsPreserved",
-          "newFactsIntroduced"
-        ],
-        "properties": {
-          "operationId": { "type": "string", "minLength": 1 },
-          "operationType": {
-            "type": "string",
-            "enum": ["replace_paragraph", "delete_duplicate_paragraph", "merge_target_paragraphs"]
+        "anyOf": [
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "operationId",
+              "operationType",
+              "targetIds",
+              "replacementText",
+              "reason",
+              "expectedEffect",
+              "rulesAddressed",
+              "factsPreserved",
+              "newFactsIntroduced"
+            ],
+            "properties": {
+              "operationId": { "type": "string", "minLength": 1 },
+              "operationType": { "type": "string", "enum": ["replace_paragraph"] },
+              "targetIds": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "replacementText": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "reason": { "type": "string", "minLength": 1 },
+              "expectedEffect": { "type": "string", "minLength": 1 },
+              "rulesAddressed": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              },
+              "factsPreserved": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "newFactsIntroduced": {
+                "type": "array",
+                "maxItems": 0,
+                "items": { "type": "string" }
+              }
+            }
           },
-          "targetIds": {
-            "type": "array",
-            "minItems": 1,
-            "items": { "type": "string", "minLength": 1 }
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "operationId",
+              "operationType",
+              "targetIds",
+              "replacementText",
+              "reason",
+              "expectedEffect",
+              "rulesAddressed",
+              "factsPreserved",
+              "newFactsIntroduced"
+            ],
+            "properties": {
+              "operationId": { "type": "string", "minLength": 1 },
+              "operationType": { "type": "string", "enum": ["delete_duplicate_paragraph"] },
+              "targetIds": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "replacementText": { "type": "string", "maxLength": 0 },
+              "reason": { "type": "string", "minLength": 1 },
+              "expectedEffect": { "type": "string", "minLength": 1 },
+              "rulesAddressed": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              },
+              "factsPreserved": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "newFactsIntroduced": {
+                "type": "array",
+                "maxItems": 0,
+                "items": { "type": "string" }
+              }
+            }
           },
-          "replacementText": { "type": "string", "maxLength": 2000 },
-          "reason": { "type": "string", "minLength": 1 },
-          "expectedEffect": { "type": "string", "minLength": 1 },
-          "rulesAddressed": {
-            "type": "array",
-            "minItems": 1,
-            "items": { "type": "string" }
-          },
-          "factsPreserved": {
-            "type": "array",
-            "items": { "type": "string" }
-          },
-          "newFactsIntroduced": {
-            "type": "array",
-            "maxItems": 0,
-            "items": { "type": "string" }
+          {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "operationId",
+              "operationType",
+              "targetIds",
+              "replacementText",
+              "reason",
+              "expectedEffect",
+              "rulesAddressed",
+              "factsPreserved",
+              "newFactsIntroduced"
+            ],
+            "properties": {
+              "operationId": { "type": "string", "minLength": 1 },
+              "operationType": { "type": "string", "enum": ["merge_target_paragraphs"] },
+              "targetIds": {
+                "type": "array",
+                "minItems": 2,
+                "items": { "type": "string", "minLength": 1 }
+              },
+              "replacementText": { "type": "string", "minLength": 1, "maxLength": 2000 },
+              "reason": { "type": "string", "minLength": 1 },
+              "expectedEffect": { "type": "string", "minLength": 1 },
+              "rulesAddressed": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              },
+              "factsPreserved": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "newFactsIntroduced": {
+                "type": "array",
+                "maxItems": 0,
+                "items": { "type": "string" }
+              }
+            }
           }
-        }
+        ]
       }
     }
   }

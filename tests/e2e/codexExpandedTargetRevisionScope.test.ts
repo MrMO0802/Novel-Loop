@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { runCodexExpandedTargetRevisionExperiment } from '../../src/app/codexExpandedTargetRevisionExperiment.js';
-import { ExpandedTargetRevisionCandidateDispositionSchema, ExpandedTargetRevisionScopeValidationSchema } from '../../src/schemas/index.js';
+import { ExpandedTargetRevisionCandidateDispositionSchema, ExpandedTargetRevisionScopeValidationSchema, TargetedRevisionOperationNormalizationSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { AppError } from '../../src/utils/AppError.js';
 import { createTempRoot, removeTempRoot } from './m16Helpers.js';
@@ -59,6 +59,13 @@ describe('M27.12D2 expanded target scope', () => {
       codexBin: fake.codexBin
     }, store)).rejects.toMatchObject<AppError>({ code: 'CODEX_TARGETED_REVISION_INCOMPLETE_TARGET_COVERAGE' });
 
+    const normalization = await store.readJson(
+      paths.chapterArtifact(1, 'targeted_revision_operation_normalization_v1.json'),
+      TargetedRevisionOperationNormalizationSchema
+    );
+    expect(normalization.normalizationSucceeded).toBe(true);
+    expect(normalization.canonicalSchemaValid).toBe(true);
+    expect(normalization.coveragePreflightPassed).toBe(false);
     await expect(store.exists(paths.chapterArtifact(1, 'draft_targeted_revision_candidate_v2.md'))).resolves.toBe(false);
   }, 45_000);
 

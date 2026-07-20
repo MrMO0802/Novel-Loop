@@ -8,6 +8,8 @@ export const TargetedRevisionOperationTypeSchema = z.enum([
   'merge_target_paragraphs'
 ]);
 
+export const TargetedRevisionOperationNormalizationModeSchema = z.enum(['passthrough', 'atomic_split']);
+
 export const TargetedRevisionAllowedTargetSchema = z.object({
   targetId: z.string().min(1),
   paragraphIndex: z.number().int().positive(),
@@ -17,7 +19,7 @@ export const TargetedRevisionAllowedTargetSchema = z.object({
   relatedContradictionIds: z.array(z.string())
 }).strict();
 
-export const TargetedRevisionOperationSchema = z.object({
+const TargetedRevisionOperationBaseShape = {
   operationId: z.string().min(1),
   operationType: TargetedRevisionOperationTypeSchema,
   targetIds: z.array(z.string().min(1)).min(1),
@@ -27,7 +29,23 @@ export const TargetedRevisionOperationSchema = z.object({
   rulesAddressed: z.array(z.string()).min(1),
   factsPreserved: z.array(z.string()),
   newFactsIntroduced: z.array(z.string()).max(0)
-}).strict().superRefine((operation, context) => {
+};
+
+const TargetedRevisionCanonicalProvenanceShape = {
+  parentOperationId: z.string().min(1).optional(),
+  sourceOperationId: z.string().min(1).optional(),
+  normalizationMode: TargetedRevisionOperationNormalizationModeSchema.optional(),
+  normalizationReason: z.string().min(1).optional()
+};
+
+function refineCanonicalOperation(
+  operation: {
+    operationType: z.infer<typeof TargetedRevisionOperationTypeSchema>;
+    targetIds: string[];
+    replacementText: string;
+  },
+  context: z.RefinementCtx
+): void {
   if (operation.operationType === 'replace_paragraph' && (operation.targetIds.length !== 1 || operation.replacementText.trim().length === 0)) {
     context.addIssue({ code: 'custom', path: ['targetIds'], message: 'replace_paragraph requires one target and non-empty replacementText' });
   }
@@ -37,10 +55,38 @@ export const TargetedRevisionOperationSchema = z.object({
   if (operation.operationType === 'merge_target_paragraphs' && (operation.targetIds.length < 2 || operation.replacementText.trim().length === 0)) {
     context.addIssue({ code: 'custom', path: ['targetIds'], message: 'merge_target_paragraphs requires at least two targets and non-empty replacementText' });
   }
+}
+
+export const TargetedRevisionOperationSchema = z.object({
+  ...TargetedRevisionOperationBaseShape,
+  ...TargetedRevisionCanonicalProvenanceShape
+}).strict().superRefine(refineCanonicalOperation);
+
+export const NormalizedTargetedRevisionOperationSchema = z.object({
+  ...TargetedRevisionOperationBaseShape,
+  parentOperationId: z.string().min(1),
+  sourceOperationId: z.string().min(1),
+  normalizationMode: TargetedRevisionOperationNormalizationModeSchema,
+  normalizationReason: z.string().min(1)
+}).strict().superRefine(refineCanonicalOperation);
+
+export const TargetedRevisionProviderOperationSchema = z.object(TargetedRevisionOperationBaseShape).strict().superRefine((operation, context) => {
+  if (new Set(operation.targetIds).size !== operation.targetIds.length) {
+    context.addIssue({ code: 'custom', path: ['targetIds'], message: 'provider operation targetIds must be unique' });
+  }
+  if (operation.operationType === 'replace_paragraph' && (operation.targetIds.length !== 1 || operation.replacementText.trim().length === 0)) {
+    context.addIssue({ code: 'custom', path: ['targetIds'], message: 'provider replace_paragraph requires exactly one target and non-empty replacementText' });
+  }
+  if (operation.operationType === 'delete_duplicate_paragraph' && operation.replacementText.length !== 0) {
+    context.addIssue({ code: 'custom', path: ['replacementText'], message: 'provider delete_duplicate_paragraph requires empty replacementText' });
+  }
+  if (operation.operationType === 'merge_target_paragraphs' && (operation.targetIds.length < 2 || operation.replacementText.trim().length === 0)) {
+    context.addIssue({ code: 'custom', path: ['targetIds'], message: 'provider merge_target_paragraphs requires at least two targets and non-empty replacementText' });
+  }
 });
 
 export const TargetedRevisionProviderOutputSchema = z.object({
-  operations: z.array(TargetedRevisionOperationSchema).min(1).max(16)
+  operations: z.array(TargetedRevisionProviderOperationSchema).min(1).max(16)
 }).strict();
 
 export const TargetedRevisionPlanSchema = z.object({
@@ -260,7 +306,9 @@ export const TargetedRevisionExperimentReportSchema = z.object({
 });
 
 export type TargetedRevisionAllowedTarget = z.infer<typeof TargetedRevisionAllowedTargetSchema>;
+export type NormalizedTargetedRevisionOperation = z.infer<typeof NormalizedTargetedRevisionOperationSchema>;
 export type TargetedRevisionOperation = z.infer<typeof TargetedRevisionOperationSchema>;
+export type TargetedRevisionProviderOperation = z.infer<typeof TargetedRevisionProviderOperationSchema>;
 export type TargetedRevisionProviderOutput = z.infer<typeof TargetedRevisionProviderOutputSchema>;
 export type TargetedRevisionPlan = z.infer<typeof TargetedRevisionPlanSchema>;
 export type TargetedRevisionScopeValidation = z.infer<typeof TargetedRevisionScopeValidationSchema>;

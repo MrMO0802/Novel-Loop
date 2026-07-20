@@ -8,6 +8,7 @@ export async function prepareApprovedExpandedTargetRevisionProject(
   fileStore = new FileStore(),
   fakeMode:
     | 'codex-expanded-target-revision'
+    | 'codex-expanded-target-multi-delete'
     | 'codex-expanded-target-incomplete'
     | 'codex-expanded-target-residual-time'
     | 'codex-expanded-target-residual-duplicate'

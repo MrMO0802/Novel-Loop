@@ -61,6 +61,7 @@ export const ArtifactTypeSchema = z.enum([
   'codex_diagnostics_schema_benchmark',
   'codex_diagnostics_evidence_adjudication',
   'timeline_contradiction_map',
+  'targeted_revision_operation_normalization',
   'targeted_revision_plan',
   'targeted_revision_candidate',
   'targeted_revision_scope_validation',

@@ -3,7 +3,7 @@ import path from 'node:path';
 import { RunLogger } from '../logging/RunLogger.js';
 import { resolveCodexOutputSchema } from '../providers/codex/schemas.js';
 import { CodexTextProvider } from '../providers/codexTextProvider.js';
-import type { CodexProfile } from '../providers/providerTypes.js';
+import type { CodexProfile, LLMJsonResult } from '../providers/providerTypes.js';
 import { PromptService } from '../prompts/PromptService.js';
 import {
   CandidateDispositionSchema,
@@ -21,9 +21,10 @@ import {
   RunManifestV2Schema,
   StoryStateSchema,
   TargetCoverageClosureReportSchema,
+  TargetCoverageGraphSchema,
   TargetExpansionApprovalRecordSchema,
   TargetedRevisionDiffSchema,
-  TargetedRevisionProviderOutputSchema,
+  TargetedRevisionOperationNormalizationSchema,
   TimelineContradictionMapSchema
 } from '../schemas/index.js';
 import type {
@@ -38,9 +39,11 @@ import type {
   ExpandedTargetRevisionQualityReport,
   ExpandedTargetRevisionScopeValidation,
   TargetCoverageClosureReport,
+  TargetCoverageGraph,
   TargetExpansionApprovalRecord,
   TargetOperationCoverage,
   TargetedRevisionDiagnosticsSample,
+  NormalizedTargetedRevisionOperation,
   TargetedRevisionOperation
 } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
@@ -60,6 +63,10 @@ import {
   buildTargetedRevisionScopeValidation,
   parseMarkdownParagraphBlocks
 } from './codexTargetedRevisionScope.js';
+import {
+  normalizeTargetedRevisionOperations,
+  renderTargetedRevisionOperationNormalization
+} from './codexTargetedRevisionOperationNormalizer.js';
 
 const DEFAULT_PROJECTS_ROOT = './projects';
 const DEFAULT_PROMPT_ROOT = './prompts';
@@ -85,6 +92,8 @@ export interface RunCodexExpandedTargetRevisionExperimentInput {
 
 export interface RunCodexExpandedTargetRevisionExperimentResult {
   runId: string;
+  operationNormalizationPath: string;
+  operationNormalizationMarkdownPath: string;
   plan: ExpandedTargetRevisionPlan;
   planPath: string;
   planMarkdownPath: string;
@@ -111,13 +120,16 @@ export interface RunCodexExpandedTargetRevisionExperimentResult {
   dispositionMarkdownPath: string;
 }
 
-interface ExpandedSource {
+export interface ExpandedTargetRevisionSource {
   approval: TargetExpansionApprovalRecord;
   approvalPath: string;
   approvalText: string;
   coverage: TargetCoverageClosureReport;
   coveragePath: string;
   coverageText: string;
+  coverageGraph: TargetCoverageGraph;
+  coverageGraphPath: string;
+  coverageGraphText: string;
   disposition: CandidateDisposition;
   dispositionPath: string;
   dispositionText: string;
@@ -137,6 +149,9 @@ interface ExpandedSource {
 
 interface ExpandedArtifacts {
   version: number;
+  normalizationVersion: number;
+  operationNormalizationPath: string;
+  operationNormalizationMarkdownPath: string;
   planPath: string;
   planMarkdownPath: string;
   candidateDraftPath: string;
@@ -164,6 +179,12 @@ interface ProtectedArtifact {
   hash: string;
 }
 
+interface GeneratedProviderOperations {
+  providerOutput: unknown;
+  rawProviderOutputPath: string;
+  rawProviderOutputHash: string;
+}
+
 export async function runCodexExpandedTargetRevisionExperiment(
   input: RunCodexExpandedTargetRevisionExperimentInput,
   fileStore = new FileStore()
@@ -182,7 +203,7 @@ export async function runCodexExpandedTargetRevisionExperiment(
   }
 
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
-  const source = await loadApprovedSource(paths, fileStore, input.chapterNumber, input.approval);
+  const source = await loadApprovedExpandedTargetRevisionSource(paths, fileStore, input.chapterNumber, input.approval);
   const protectedBefore = await captureProtectedArtifacts(paths, fileStore, input.chapterNumber, source);
   const artifacts = await allocateArtifacts(paths, fileStore, input.chapterNumber);
   const sampleCount = Math.max(1, input.samples ?? 3);
@@ -197,6 +218,7 @@ export async function runCodexExpandedTargetRevisionExperiment(
       revisionRound: 2,
       approvalRecordPath: source.approvalPath,
       coverageReportPath: source.coveragePath,
+      operationNormalizationReportPath: artifacts.operationNormalizationPath,
       sourceDraftPath: source.coverage.sourceDraftPath,
       sourceCandidatePath: null,
       samples: sampleCount,
@@ -225,7 +247,47 @@ export async function runCodexExpandedTargetRevisionExperiment(
       telemetry: { paths, runId, fileStore }
     });
     const generatedAt = new Date().toISOString();
-    const operations = await generateOperations(input, fileStore, provider, source);
+    const generatedOperations = await generateOperations(input, fileStore, provider, source, paths);
+    const protectedArtifactsAtNormalization = await verifyProtectedArtifacts(paths, fileStore, protectedBefore);
+    const normalization = normalizeTargetedRevisionOperations({
+      projectId: paths.projectId,
+      chapterNumber: input.chapterNumber,
+      runId,
+      mode: 'pipeline',
+      generatedAt,
+      rawProviderOutputPath: generatedOperations.rawProviderOutputPath,
+      rawProviderOutputHash: generatedOperations.rawProviderOutputHash,
+      approvalRecordPath: source.approvalPath,
+      coverageReportPath: source.coveragePath,
+      targetCoverageGraphPath: source.coverageGraphPath,
+      targetCoverageGraphHash: sha256(source.coverageGraphText),
+      providerOutput: generatedOperations.providerOutput,
+      approvedTargets: source.allowedTargets,
+      coverageGraph: source.coverageGraph,
+      protectedArtifacts: protectedArtifactsAtNormalization,
+      reportId: `targeted_revision_operation_normalization_ch${pad(input.chapterNumber)}_v${artifacts.normalizationVersion}`,
+      codexInvoked: true
+    });
+    await fileStore.writeJson(
+      paths.projectArtifact(artifacts.operationNormalizationPath),
+      normalization.report,
+      TargetedRevisionOperationNormalizationSchema
+    );
+    await fileStore.writeText(
+      paths.projectArtifact(artifacts.operationNormalizationMarkdownPath),
+      renderTargetedRevisionOperationNormalization(normalization.report)
+    );
+    await recordOperationNormalizationArtifacts(
+      runLogger,
+      runId,
+      source,
+      artifacts,
+      generatedOperations.rawProviderOutputPath
+    );
+    if (normalization.failure !== undefined) {
+      throw new AppError(normalization.failure.code, normalization.failure.message, 2);
+    }
+    const operations = normalization.normalizedOperations;
     const operationCoverage = buildOperationCoverage(source.allowedTargets, operations);
     const missingRequired = operationCoverage.filter((target) => target.requiredForClosure && target.disposition === 'preserved_with_justification');
     if (missingRequired.length > 0) {
@@ -246,6 +308,7 @@ export async function runCodexExpandedTargetRevisionExperiment(
       sourceCandidatePath: null,
       approvalRecordPath: source.approvalPath,
       coverageReportPath: source.coveragePath,
+      operationNormalizationReportPath: artifacts.operationNormalizationPath,
       generatedAt,
       objective: 'Resolve the approved full target set for the single delivery event without changing any non-target paragraph or introducing facts.',
       fullApprovedTargetIds: source.fullApprovedTargetIds,
@@ -321,6 +384,7 @@ export async function runCodexExpandedTargetRevisionExperiment(
       generatedAt: new Date().toISOString(),
       approvalRecordPath: source.approvalPath,
       coverageReportPath: source.coveragePath,
+      operationNormalizationReportPath: artifacts.operationNormalizationPath,
       candidateV1DispositionPath: source.dispositionPath,
       sourceAdjudicationPath: source.adjudicationPath,
       sourceDraftPath: source.coverage.sourceDraftPath,
@@ -376,6 +440,8 @@ export async function runCodexExpandedTargetRevisionExperiment(
     await runLogger.endRun(runId, 'success');
     return {
       runId,
+      operationNormalizationPath: artifacts.operationNormalizationPath,
+      operationNormalizationMarkdownPath: artifacts.operationNormalizationMarkdownPath,
       plan,
       planPath: artifacts.planPath,
       planMarkdownPath: artifacts.planMarkdownPath,
@@ -413,12 +479,12 @@ export async function runCodexExpandedTargetRevisionExperiment(
   }
 }
 
-async function loadApprovedSource(
+export async function loadApprovedExpandedTargetRevisionSource(
   paths: ProjectPaths,
   fileStore: FileStore,
   chapterNumber: number,
   requestedApproval: string
-): Promise<ExpandedSource> {
+): Promise<ExpandedTargetRevisionSource> {
   const entries = await fileStore.list(paths.chapterDir(chapterNumber));
   const latestCoveragePath = requireLatestPath(entries, chapterNumber, 'target_coverage_closure_report', 'CODEX_TARGET_EXPANSION_NOT_APPROVED');
   const latestApprovalPath = requireLatestPath(entries, chapterNumber, 'target_expansion_approval', 'CODEX_TARGET_EXPANSION_NOT_APPROVED');
@@ -454,12 +520,13 @@ async function loadApprovedSource(
     coverage.sourceRevisionPlanPath,
     coverage.sourceRevisionDiffPath,
     coverage.rejectedCandidatePath,
-    dispositionPath
+    dispositionPath,
+    coverage.targetCoverageGraphPath
   ];
   for (const sourcePath of sourcePaths) {
     if (!(await fileStore.exists(paths.projectArtifact(sourcePath)))) throw staleSource([`missing ${sourcePath}`]);
   }
-  const [sourceDraft, adjudicationText, timelineMapText, experimentText, revisionPlanText, revisionDiffText, rejectedCandidateText, dispositionText, missionText, selectedPlanText, storyStateText, queueText] = await Promise.all([
+  const [sourceDraft, adjudicationText, timelineMapText, experimentText, revisionPlanText, revisionDiffText, rejectedCandidateText, dispositionText, coverageGraphText, missionText, selectedPlanText, storyStateText, queueText] = await Promise.all([
     fileStore.readText(paths.projectArtifact(coverage.sourceDraftPath)),
     fileStore.readText(paths.projectArtifact(coverage.sourceAdjudicationPath)),
     fileStore.readText(paths.projectArtifact(coverage.sourceTimelineMapPath)),
@@ -468,6 +535,7 @@ async function loadApprovedSource(
     fileStore.readText(paths.projectArtifact(coverage.sourceRevisionDiffPath)),
     fileStore.readText(paths.projectArtifact(coverage.rejectedCandidatePath)),
     fileStore.readText(paths.projectArtifact(dispositionPath)),
+    fileStore.readText(paths.projectArtifact(coverage.targetCoverageGraphPath)),
     fileStore.readText(paths.chapterArtifact(chapterNumber, 'mission.json')),
     fileStore.readText(paths.chapterArtifact(chapterNumber, 'selected_plan.md')),
     fileStore.readText(paths.storyState()),
@@ -486,6 +554,7 @@ async function loadApprovedSource(
   ] as const) {
     if (sha256(actual) !== expected) staleReasons.push(`${label} hash changed`);
   }
+  if (sha256(coverageGraphText) !== coverage.targetCoverageGraphHash) staleReasons.push('target coverage graph hash changed');
   for (const [label, actual, expected] of [
     ['approval source draft', sourceDraft, approval.sourceDraftHash],
     ['approval source adjudication', adjudicationText, approval.sourceAdjudicationHash],
@@ -499,6 +568,7 @@ async function loadApprovedSource(
 
   const adjudication = CodexDiagnosticsEvidenceAdjudicationSchema.parse(JSON.parse(adjudicationText));
   TimelineContradictionMapSchema.parse(JSON.parse(timelineMapText));
+  const coverageGraph = TargetCoverageGraphSchema.parse(JSON.parse(coverageGraphText));
   const disposition = CandidateDispositionSchema.parse(JSON.parse(dispositionText));
   if (disposition.result !== 'rejected_no_improvement' || disposition.eligibleAsNextRevisionBase || disposition.adopted) {
     throw new AppError('CODEX_REJECTED_CANDIDATE_BASE_FORBIDDEN', 'Candidate v1 must remain rejected_no_improvement and ineligible as a revision base.', 2);
@@ -562,6 +632,9 @@ async function loadApprovedSource(
     coverage,
     coveragePath: latestCoveragePath,
     coverageText,
+    coverageGraph,
+    coverageGraphPath: coverage.targetCoverageGraphPath,
+    coverageGraphText,
     disposition,
     dispositionPath,
     dispositionText,
@@ -584,8 +657,9 @@ async function generateOperations(
   input: RunCodexExpandedTargetRevisionExperimentInput,
   fileStore: FileStore,
   provider: CodexTextProvider,
-  source: ExpandedSource
-): Promise<TargetedRevisionOperation[]> {
+  source: ExpandedTargetRevisionSource,
+  paths: ProjectPaths
+): Promise<GeneratedProviderOperations> {
   const descriptor = resolveCodexOutputSchema(OPERATIONS_PROMPT_ID);
   if (descriptor === undefined) throw new AppError('OUTPUT_SCHEMA_NOT_FOUND', `No output schema registered for ${OPERATIONS_PROMPT_ID}.`, 2);
   const promptService = new PromptService(path.join(input.promptRoot ?? DEFAULT_PROMPT_ROOT, 'codex-text'), fileStore);
@@ -604,7 +678,29 @@ async function generateOperations(
     responseFormat: 'json',
     metadata: { outputSchemaPath: descriptor.schemaPath, schemaName: descriptor.schemaName }
   });
-  return TargetedRevisionProviderOutputSchema.parse(response.json).operations;
+  const rawResult = response.raw as LLMJsonResult | undefined;
+  if (rawResult?.requestId === undefined || rawResult.requestId.length === 0) {
+    throw new AppError(
+      'CODEX_TARGETED_REVISION_OPERATION_CONTRACT_MISMATCH',
+      'Codex provider response did not include a request id for raw output provenance.',
+      2
+    );
+  }
+  const rawProviderOutputPath = path.posix.join('codex', 'runs', rawResult.requestId, 'parsed_output.json');
+  const rawAbsolutePath = paths.projectArtifact(rawProviderOutputPath);
+  if (!(await fileStore.exists(rawAbsolutePath))) {
+    throw new AppError(
+      'CODEX_TARGETED_REVISION_OPERATION_CONTRACT_MISMATCH',
+      `Codex parsed output artifact is missing: ${rawProviderOutputPath}.`,
+      2
+    );
+  }
+  const rawText = await fileStore.readText(rawAbsolutePath);
+  return {
+    providerOutput: JSON.parse(rawText) as unknown,
+    rawProviderOutputPath,
+    rawProviderOutputHash: sha256(rawText)
+  };
 }
 
 function buildOperationCoverage(
@@ -647,7 +743,7 @@ function buildExpandedScope(
   chapterNumber: number,
   artifacts: ExpandedArtifacts,
   generatedAt: string,
-  source: ExpandedSource,
+  source: ExpandedTargetRevisionSource,
   plan: ExpandedTargetRevisionPlan,
   applied: ReturnType<typeof applyTargetedRevisionOperations>
 ): ExpandedTargetRevisionScopeValidation {
@@ -726,7 +822,7 @@ async function runDiagnosticsAB(
   provider: CodexTextProvider,
   runLogger: RunLogger,
   runId: string,
-  source: ExpandedSource,
+  source: ExpandedTargetRevisionSource,
   artifacts: ExpandedArtifacts,
   candidateText: string,
   sampleCount: number
@@ -826,7 +922,7 @@ function buildCandidateTimelineMap(
   chapterNumber: number,
   artifacts: ExpandedArtifacts,
   generatedAt: string,
-  source: ExpandedSource,
+  source: ExpandedTargetRevisionSource,
   scope: ExpandedTargetRevisionScopeValidation,
   candidateText: string
 ): CandidateTimelineContradictionMap {
@@ -920,7 +1016,7 @@ function buildQualityReport(
   chapterNumber: number,
   artifacts: ExpandedArtifacts,
   generatedAt: string,
-  source: ExpandedSource,
+  source: ExpandedTargetRevisionSource,
   scope: ExpandedTargetRevisionScopeValidation,
   diagnostics: ExpandedTargetRevisionDiagnosticsAB,
   candidateText: string
@@ -1068,7 +1164,7 @@ function buildScopeViolationDisposition(
   });
 }
 
-async function captureProtectedArtifacts(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number, source: ExpandedSource): Promise<ProtectedArtifact[]> {
+async function captureProtectedArtifacts(paths: ProjectPaths, fileStore: FileStore, chapterNumber: number, source: ExpandedTargetRevisionSource): Promise<ProtectedArtifact[]> {
   const entries = await fileStore.list(paths.chapterDir(chapterNumber));
   const canonical = entries.filter((name) => /^diagnostics_v\d+\.json$/.test(name) || name === 'final.md' || name === 'mission.json' || name === 'selected_plan.md' || /^canon_patch(?:_.*)?\.json$/.test(name) || /^commit_report(?:_.*)?\.json$/.test(name));
   const relativePaths = [...new Set([
@@ -1105,9 +1201,14 @@ async function allocateArtifacts(paths: ProjectPaths, fileStore: FileStore, chap
   const entries = await fileStore.list(paths.chapterDir(chapterNumber));
   const pattern = /^(?:targeted_revision_plan|draft_targeted_revision_candidate|targeted_revision_scope_validation|targeted_revision_diff|targeted_revision_experiment)_v(\d+)\.(?:json|md)$/;
   const version = Math.max(0, ...entries.map((entry) => Number.parseInt(pattern.exec(entry)?.[1] ?? '0', 10))) + 1;
+  const normalizationPattern = /^targeted_revision_operation_normalization_v(\d+)\.json$/;
+  const normalizationVersion = Math.max(0, ...entries.map((entry) => Number.parseInt(normalizationPattern.exec(entry)?.[1] ?? '0', 10))) + 1;
   const artifact = (name: string, extension: 'json' | 'md') => relativeChapterArtifact(chapterNumber, `${name}_v${version}.${extension}`);
   return {
     version,
+    normalizationVersion,
+    operationNormalizationPath: relativeChapterArtifact(chapterNumber, `targeted_revision_operation_normalization_v${normalizationVersion}.json`),
+    operationNormalizationMarkdownPath: relativeChapterArtifact(chapterNumber, `targeted_revision_operation_normalization_v${normalizationVersion}.md`),
     planPath: artifact('targeted_revision_plan', 'json'), planMarkdownPath: artifact('targeted_revision_plan', 'md'),
     candidateDraftPath: relativeChapterArtifact(chapterNumber, `draft_targeted_revision_candidate_v${version}.md`),
     scopePath: artifact('targeted_revision_scope_validation', 'json'), scopeMarkdownPath: artifact('targeted_revision_scope_validation', 'md'),
@@ -1121,7 +1222,27 @@ async function allocateArtifacts(paths: ProjectPaths, fileStore: FileStore, chap
   };
 }
 
-async function recordRevisionArtifacts(runLogger: RunLogger, runId: string, source: ExpandedSource, artifacts: ExpandedArtifacts): Promise<void> {
+async function recordOperationNormalizationArtifacts(
+  runLogger: RunLogger,
+  runId: string,
+  source: ExpandedTargetRevisionSource,
+  artifacts: ExpandedArtifacts,
+  rawProviderOutputPath: string
+): Promise<void> {
+  await runLogger.recordArtifact(runId, artifacts.operationNormalizationPath, {
+    action: 'generated',
+    stage: 'revision',
+    sourcePaths: [rawProviderOutputPath, source.approvalPath, source.coveragePath, source.coverageGraphPath],
+    provenanceNote: 'Provider transport operations normalized to canonical targeted revision operations.'
+  });
+  await runLogger.recordArtifact(runId, artifacts.operationNormalizationMarkdownPath, {
+    action: 'generated',
+    stage: 'revision',
+    sourcePaths: [artifacts.operationNormalizationPath]
+  });
+}
+
+async function recordRevisionArtifacts(runLogger: RunLogger, runId: string, source: ExpandedTargetRevisionSource, artifacts: ExpandedArtifacts): Promise<void> {
   for (const sourcePath of [source.approvalPath, source.coveragePath, source.dispositionPath, source.adjudicationPath, source.coverage.sourceDraftPath]) {
     await runLogger.recordArtifact(runId, sourcePath, { action: 'reused', stage: 'revision', provenanceNote: 'Approved read-only source for expanded-target revision round 2.' });
   }
@@ -1130,7 +1251,7 @@ async function recordRevisionArtifacts(runLogger: RunLogger, runId: string, sour
   }
 }
 
-async function recordOutcomeArtifacts(runLogger: RunLogger, runId: string, source: ExpandedSource, artifacts: ExpandedArtifacts): Promise<void> {
+async function recordOutcomeArtifacts(runLogger: RunLogger, runId: string, source: ExpandedTargetRevisionSource, artifacts: ExpandedArtifacts): Promise<void> {
   for (const generated of [
     artifacts.diagnosticsABPath, artifacts.diagnosticsABMarkdownPath, artifacts.candidateTimelineMapPath, artifacts.candidateTimelineMapMarkdownPath,
     artifacts.candidateAdjudicationPath, artifacts.candidateAdjudicationMarkdownPath, artifacts.qualityPath, artifacts.qualityMarkdownPath,
@@ -1210,7 +1331,7 @@ function recommendationFor(result: ExpandedTargetRevisionExperimentReport['resul
 }
 
 function renderPlan(plan: ExpandedTargetRevisionPlan): string {
-  return `# Expanded Target Revision Plan: Chapter ${plan.chapterNumber}\n\nrevisionRound: 2\nsourceDraftPath: ${plan.sourceDraftPath}\nsourceCandidatePath: null\napprovalRecordPath: ${plan.approvalRecordPath}\ncoverageReportPath: ${plan.coverageReportPath}\n\n## Target Operation Coverage\n${plan.targetOperationCoverage.map((target) => `- ${target.targetId} (p${target.paragraphIndex}): ${target.disposition}; ${target.justification}`).join('\n')}\n`;
+  return `# Expanded Target Revision Plan: Chapter ${plan.chapterNumber}\n\nrevisionRound: 2\nsourceDraftPath: ${plan.sourceDraftPath}\nsourceCandidatePath: null\napprovalRecordPath: ${plan.approvalRecordPath}\ncoverageReportPath: ${plan.coverageReportPath}\noperationNormalizationReportPath: ${plan.operationNormalizationReportPath}\n\n## Target Operation Coverage\n${plan.targetOperationCoverage.map((target) => `- ${target.targetId} (p${target.paragraphIndex}): ${target.disposition}; ${target.justification}`).join('\n')}\n`;
 }
 
 function renderScope(report: ExpandedTargetRevisionScopeValidation): string {

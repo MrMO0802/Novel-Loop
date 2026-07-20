@@ -63,6 +63,9 @@ import {
   TargetCoverageGraphSchema,
   TargetExpansionApprovalPreviewSchema,
   TargetExpansionApprovalRecordSchema,
+  TargetedRevisionOperationNormalizationSchema,
+  TargetedRevisionOperationSchema,
+  TargetedRevisionProviderOutputSchema,
   TargetedRevisionCandidateDispositionArtifactSchema,
   TargetedRevisionDiffSchema,
   TargetedRevisionExperimentArtifactSchema,
@@ -147,6 +150,7 @@ export async function auditProject(input: ProjectAuditInput, fileStore = new Fil
   await checkArchives(issues, paths, fileStore);
   await checkCommitJournals(issues, paths, fileStore);
   await checkCodexM25Artifacts(issues, paths, fileStore);
+  await checkMissingTargetedRevisionOperationNormalizations(issues, paths, fileStore);
   const snapshotAudit = await verifySnapshots({ projectId: paths.projectId, projectsRoot: paths.projectsRoot }, fileStore);
   for (const snapshotIssue of snapshotAudit.report.issues) {
     issues.push(snapshotIssue);
@@ -264,6 +268,67 @@ async function checkRunManifests(issues: AuditIssue[], paths: ProjectPaths, file
     await checkRunEvents(issues, paths, fileStore, runId, manifest);
     await checkRunLineage(issues, paths, fileStore, runId, manifest, latestWriterByPath);
     await checkStateMutations(issues, paths, fileStore, runId, manifest);
+  }
+}
+
+async function checkMissingTargetedRevisionOperationNormalizations(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore
+): Promise<void> {
+  if (!(await fileStore.exists(paths.runsDir())) || !(await fileStore.exists(paths.chaptersDir()))) return;
+  const normalizedRawPaths = new Set<string>();
+  for (const chapterDirName of await fileStore.list(paths.chaptersDir())) {
+    if (!/^chapter_\d{3}$/.test(chapterDirName)) continue;
+    const chapterDir = path.join(paths.chaptersDir(), chapterDirName);
+    for (const fileName of await fileStore.list(chapterDir)) {
+      if (!/^targeted_revision_operation_normalization_v\d+\.json$/.test(fileName)) continue;
+      try {
+        const report = await fileStore.readJson(path.join(chapterDir, fileName), TargetedRevisionOperationNormalizationSchema);
+        normalizedRawPaths.add(report.rawProviderOutputPath);
+      } catch {
+        // The chapter artifact schema scan reports malformed normalization reports.
+      }
+    }
+  }
+
+  for (const runId of await fileStore.list(paths.runsDir())) {
+    try {
+      const manifest = await fileStore.readJson(paths.runManifest(runId), RunManifestSchema);
+      if (!isV2Manifest(manifest)) continue;
+      const candidateParsedOutputPaths = new Set<string>([
+        ...manifest.promptCalls
+          .filter((candidate) => candidate.promptId === 'revision.targeted_revision_operations_slim' && candidate.parsedOutputPath !== undefined)
+          .map((candidate) => candidate.parsedOutputPath!),
+        ...manifest.artifacts
+          .filter((artifact) => artifact.artifactType === 'targeted_revision_operation_normalization')
+          .flatMap((artifact) => artifact.sourcePaths)
+          .filter((sourcePath) => /(?:^|\/)codex\/runs\/[^/]+\/parsed_output\.json$/.test(sourcePath))
+      ]);
+      for (const parsedOutputPath of candidateParsedOutputPaths) {
+        if (normalizedRawPaths.has(parsedOutputPath)) continue;
+        const absoluteParsedPath = paths.projectArtifact(parsedOutputPath);
+        if (!(await fileStore.exists(absoluteParsedPath))) continue;
+        const providerOutput: unknown = JSON.parse(await fileStore.readText(absoluteParsedPath));
+        const providerValidation = TargetedRevisionProviderOutputSchema.safeParse(providerOutput);
+        if (!providerValidation.success) continue;
+        const contractDrift = providerValidation.data.operations.some((operation) =>
+          !TargetedRevisionOperationSchema.safeParse(operation).success
+        );
+        if (!contractDrift) continue;
+        issues.push(issue(
+          `targeted_revision_operation_normalization_missing_${sanitizeIssueId(parsedOutputPath)}`,
+          'critical',
+          'targeted_revision_operation_normalization',
+          parsedOutputPath,
+          'Provider-valid targeted revision operations require canonical normalization, but no normalization report references this parsed output.',
+          'Run codex targeted-revision-contract-check against the immutable parsed output before interpreting or applying the operations.',
+          true
+        ));
+      }
+    } catch {
+      // Run manifest and parsed-output validation is reported by the normal run audit checks.
+    }
   }
 }
 
@@ -628,6 +693,10 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^timeline_contradiction_map_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'timeline_contradiction_map', relativePath, TimelineContradictionMapSchema);
         await checkTimelineContradictionMap(issues, paths, fileStore, absolutePath, relativePath);
+      }
+      if (/^targeted_revision_operation_normalization_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'targeted_revision_operation_normalization', relativePath, TargetedRevisionOperationNormalizationSchema);
+        await checkTargetedRevisionOperationNormalization(issues, paths, fileStore, absolutePath, relativePath);
       }
       if (/^targeted_revision_plan_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'targeted_revision', relativePath, TargetedRevisionPlanArtifactSchema);
@@ -1653,6 +1722,122 @@ async function checkTargetedRevisionExperiment(
   }
 }
 
+async function checkTargetedRevisionOperationNormalization(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  absolutePath: string,
+  relativePath: string
+): Promise<void> {
+  try {
+    const report = await fileStore.readJson(absolutePath, TargetedRevisionOperationNormalizationSchema);
+    const referencedPaths = [
+      report.rawProviderOutputPath,
+      report.approvalRecordPath,
+      report.coverageReportPath,
+      report.targetCoverageGraphPath
+    ];
+    const missing: string[] = [];
+    for (const artifactPath of referencedPaths) {
+      if (!(await fileStore.exists(paths.projectArtifact(artifactPath)))) missing.push(artifactPath);
+    }
+    if (!(await fileStore.exists(paths.runManifest(report.runId)))) {
+      missing.push(path.posix.join('runs', report.runId, 'run_manifest.json'));
+    }
+    if (missing.length > 0) {
+      issues.push(issue(
+        `targeted_revision_operation_normalization_missing_source_${sanitizeIssueId(relativePath)}`,
+        'error',
+        'targeted_revision_operation_normalization',
+        relativePath,
+        `Operation normalization references missing provenance: ${missing.join(', ')}.`,
+        'Restore the immutable provider output and approval/coverage/run provenance, then rerun the contract check.',
+        true
+      ));
+      return;
+    }
+
+    const [rawText, coverage, manifest] = await Promise.all([
+      fileStore.readText(paths.projectArtifact(report.rawProviderOutputPath)),
+      fileStore.readJson(paths.projectArtifact(report.coverageReportPath), TargetCoverageClosureReportSchema),
+      fileStore.readJson(paths.runManifest(report.runId), RunManifestV2Schema)
+    ]);
+    let rawOutput: unknown;
+    try {
+      rawOutput = JSON.parse(rawText) as unknown;
+    } catch {
+      rawOutput = undefined;
+    }
+    const providerValidation = TargetedRevisionProviderOutputSchema.safeParse(rawOutput);
+    const providerOperations = providerValidation.success ? providerValidation.data.operations : [];
+    const providerById = new Map(providerOperations.map((operation) => [operation.operationId, operation]));
+    const entriesBySource = new Map(report.operations.map((operation) => [operation.sourceOperationId, operation]));
+    const normalizedById = new Map(report.normalizedOperations.map((operation) => [operation.operationId, operation]));
+    const approvedFromCoverage = [...coverage.initialTargets, ...coverage.proposedAdditionalTargets]
+      .map((target) => target.targetId)
+      .sort();
+    const reportApproved = [...report.approvedTargetIds].sort();
+
+    const provenanceValid = report.normalizedOperations.every((operation) => {
+      const entry = entriesBySource.get(operation.sourceOperationId);
+      const providerOperation = providerById.get(operation.sourceOperationId);
+      return entry !== undefined && providerOperation !== undefined &&
+        operation.parentOperationId === operation.sourceOperationId &&
+        entry.normalizedOperationIds.includes(operation.operationId) &&
+        entry.normalizedTargetIds.includes(operation.targetIds[0] ?? '') &&
+        entry.normalizationMode === operation.normalizationMode &&
+        providerOperation.operationId === operation.parentOperationId &&
+        operation.targetIds.every((targetId) => report.approvedTargetIds.includes(targetId)) &&
+        (operation.operationType !== 'delete_duplicate_paragraph' || operation.targetIds.length === 1);
+    }) && report.operations.every((entry) => {
+      const children = entry.normalizedOperationIds.map((operationId) => normalizedById.get(operationId));
+      return providerById.has(entry.sourceOperationId) && children.every((operation) => operation !== undefined) &&
+        children.flatMap((operation) => operation?.targetIds ?? []).sort().join('|') === [...entry.normalizedTargetIds].sort().join('|');
+    });
+
+    const rawAndContractValid =
+      sha256(rawText) === report.rawProviderOutputHash &&
+      sha256(await fileStore.readText(paths.projectArtifact(report.targetCoverageGraphPath))) === report.targetCoverageGraphHash &&
+      providerValidation.success === report.providerSchemaValid &&
+      report.sourceOperationCount === (providerValidation.success ? providerOperations.length : rawOperationCountForAudit(rawOutput)) &&
+      approvedFromCoverage.join('|') === reportApproved.join('|') &&
+      report.normalizedOperations.every((operation) => report.approvedTargetIds.every((targetId) => typeof targetId === 'string') &&
+        operation.newFactsIntroduced.length === 0) &&
+      (!report.normalizationSucceeded || (report.canonicalSchemaValid && provenanceValid));
+
+    const protectedValid = await allProtectedArtifactsCurrent(paths, fileStore, report.protectedArtifacts);
+    const generatedPaths = manifest.artifacts.filter((artifact) => artifact.action === 'generated').map((artifact) => artifact.path);
+    const forbiddenReplayArtifacts = generatedPaths.filter((artifactPath) =>
+      /(?:draft_targeted_revision_candidate|targeted_revision_plan|targeted_revision_scope_validation|targeted_revision_diff|targeted_revision_experiment|final\.md|canon_patch|commit_report|snapshot)/i.test(artifactPath)
+    );
+    const runSafetyValid = report.mode !== 'contract_check' || (
+      report.codexInvoked === false && manifest.command === 'codex targeted-revision-contract-check' &&
+      manifest.promptCalls.length === 0 && manifest.stateMutations.length === 0 &&
+      manifest.queueTransitions.length === 0 && manifest.snapshots.length === 0 && forbiddenReplayArtifacts.length === 0
+    );
+
+    if (!rawAndContractValid || !protectedValid || !runSafetyValid || (report.normalizationSucceeded && !provenanceValid)) {
+      issues.push(issue(
+        `targeted_revision_operation_normalization_invalid_${sanitizeIssueId(relativePath)}`,
+        'critical',
+        'targeted_revision_operation_normalization',
+        relativePath,
+        `Operation normalization raw hash, approved targets, canonical linkage, protected artifacts, or replay safety is inconsistent. forbiddenReplayArtifacts=${forbiddenReplayArtifacts.join(', ') || 'none'}.`,
+        'Discard the derived normalization report and rerun normalization from the immutable parsed provider output and latest approval.',
+        true
+      ));
+    }
+  } catch {
+    // checkJson records schema failures; source-specific checks above report valid-schema inconsistencies.
+  }
+}
+
+function rawOperationCountForAudit(value: unknown): number {
+  if (typeof value !== 'object' || value === null || !('operations' in value)) return 0;
+  const operations = (value as { operations?: unknown }).operations;
+  return Array.isArray(operations) ? operations.length : 0;
+}
+
 async function checkExpandedTargetRevisionExperiment(
   issues: AuditIssue[],
   paths: ProjectPaths,
@@ -1663,6 +1848,7 @@ async function checkExpandedTargetRevisionExperiment(
   const requiredPaths = [
     report.approvalRecordPath,
     report.coverageReportPath,
+    report.operationNormalizationReportPath,
     report.candidateV1DispositionPath,
     report.sourceAdjudicationPath,
     report.sourceDraftPath,
@@ -1693,8 +1879,9 @@ async function checkExpandedTargetRevisionExperiment(
   }
 
   try {
-    const [plan, scope, diff, diagnostics, adjudication, timelineMap, quality, approval, coverage, candidateV1Disposition, candidateText, sourceText, manifest] = await Promise.all([
+    const [plan, normalization, scope, diff, diagnostics, adjudication, timelineMap, quality, approval, coverage, candidateV1Disposition, candidateText, sourceText, manifest] = await Promise.all([
       fileStore.readJson(paths.projectArtifact(report.targetedRevisionPlanPath), ExpandedTargetRevisionPlanSchema),
+      fileStore.readJson(paths.projectArtifact(report.operationNormalizationReportPath), TargetedRevisionOperationNormalizationSchema),
       fileStore.readJson(paths.projectArtifact(report.scopeValidationPath), ExpandedTargetRevisionScopeValidationSchema),
       fileStore.readJson(paths.projectArtifact(report.revisionDiffPath), TargetedRevisionDiffSchema),
       fileStore.readJson(paths.projectArtifact(report.diagnosticsABPath), ExpandedTargetRevisionDiagnosticsABSchema),
@@ -1754,6 +1941,7 @@ async function checkExpandedTargetRevisionExperiment(
       report.revisionRound === 2 && plan.revisionRound === 2 && scope.revisionRound === 2 && diagnostics.revisionRound === 2 &&
       report.sourceCandidatePath === null && plan.sourceCandidatePath === null && /draft_v1\.md$/.test(report.sourceDraftPath) &&
       report.approvalRecordPath === plan.approvalRecordPath && report.coverageReportPath === plan.coverageReportPath &&
+      report.operationNormalizationReportPath === plan.operationNormalizationReportPath &&
       approval.coverageReportPath === report.coverageReportPath && approval.coverageReportHash === sha256(await fileStore.readText(paths.projectArtifact(report.coverageReportPath))) &&
       approval.approved && approval.riskAcknowledged && coverage.coverageClosed &&
       candidateV1Disposition.result === 'rejected_no_improvement' && !candidateV1Disposition.eligibleAsNextRevisionBase && !candidateV1Disposition.adopted;
@@ -1763,6 +1951,9 @@ async function checkExpandedTargetRevisionExperiment(
       adjudication.sourceCandidateHash === candidateHash && adjudication.sourceDiagnosticsABPath === report.diagnosticsABPath &&
       adjudication.candidateTimelineContradictionMapPath === report.candidateTimelineMapPath &&
       approvedFullSet.join('|') === planSet.join('|') && planSet.join('|') === operationCoverageSet.join('|') &&
+      normalization.mode === 'pipeline' && normalization.normalizationSucceeded && normalization.codexInvoked &&
+      normalization.canonicalSchemaValid && normalization.coveragePreflightPassed && !normalization.semanticChangesIntroduced &&
+      JSON.stringify(normalization.normalizedOperations) === JSON.stringify(plan.operations) &&
       requiredTargetsHandled && scope.requiredTargetsHandled && scope.fullApprovedTargetSetMatched && scope.nonTargetParagraphsUnchanged &&
       diff.changes.every((change) => planSet.includes(change.targetId)) &&
       diagnostics.executionOrder.join('|') === expectedOrder.join('|') && report.executionOrder.join('|') === expectedOrder.join('|') &&
@@ -1941,12 +2132,25 @@ async function checkTargetCoverageReport(
     }
     const chapterEntries = await fileStore.list(paths.chapterDir(report.chapterNumber));
     const experimentVersion = versionFromArtifactPath(report.sourceExperimentPath);
-    const newerExperimentExists = chapterEntries.some((entry) => {
+    let newerExperimentUsesCoverage = false;
+    for (const entry of chapterEntries) {
       const match = /^targeted_revision_experiment_v(\d+)\.json$/.exec(entry);
-      return match !== null && Number.parseInt(match[1]!, 10) > experimentVersion;
-    });
+      if (match === null || Number.parseInt(match[1]!, 10) <= experimentVersion) continue;
+      try {
+        const experiment = await fileStore.readJson(
+          paths.chapterArtifact(report.chapterNumber, entry),
+          TargetedRevisionExperimentArtifactSchema
+        );
+        if ('coverageReportPath' in experiment && experiment.coverageReportPath === relativePath) {
+          newerExperimentUsesCoverage = true;
+          break;
+        }
+      } catch {
+        // The JSON artifact and its cross-links are validated separately.
+      }
+    }
     const approvalExists = await hasApprovalForCoverage(paths, fileStore, report.chapterNumber, relativePath);
-    if (newerExperimentExists && !approvalExists) {
+    if (newerExperimentUsesCoverage && !approvalExists) {
       issues.push(issue(
         `target_coverage_unapproved_candidate_${sanitizeIssueId(relativePath)}`,
         'critical',

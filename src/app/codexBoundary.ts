@@ -691,24 +691,52 @@ function parseJsonSchema(schemaText: string, schemaPath: string): JsonSchemaNode
 const JsonSchemaNodeSchema: z.ZodType<JsonSchemaNode> = z.lazy(() =>
   z.object({
     type: z.enum(['object', 'array', 'string', 'number', 'integer', 'boolean', 'null']).optional(),
+    enum: z.array(z.unknown()).optional(),
+    anyOf: z.array(JsonSchemaNodeSchema).min(1).optional(),
     required: z.array(z.string()).optional(),
     properties: z.record(z.string(), JsonSchemaNodeSchema).optional(),
     items: JsonSchemaNodeSchema.optional(),
-    additionalProperties: z.union([z.boolean(), JsonSchemaNodeSchema]).optional()
+    additionalProperties: z.union([z.boolean(), JsonSchemaNodeSchema]).optional(),
+    minItems: z.number().int().nonnegative().optional(),
+    maxItems: z.number().int().nonnegative().optional(),
+    minLength: z.number().int().nonnegative().optional(),
+    maxLength: z.number().int().nonnegative().optional()
   })
 );
 
 interface JsonSchemaNode {
   type?: 'object' | 'array' | 'string' | 'number' | 'integer' | 'boolean' | 'null' | undefined;
+  enum?: unknown[] | undefined;
+  anyOf?: JsonSchemaNode[] | undefined;
   required?: string[] | undefined;
   properties?: Record<string, JsonSchemaNode> | undefined;
   items?: JsonSchemaNode | undefined;
   additionalProperties?: boolean | JsonSchemaNode | undefined;
+  minItems?: number | undefined;
+  maxItems?: number | undefined;
+  minLength?: number | undefined;
+  maxLength?: number | undefined;
 }
 
 function validateJsonSchemaSubset(value: unknown, schema: JsonSchemaNode, pointer = '$'): void {
+  if (schema.anyOf !== undefined) {
+    const matched = schema.anyOf.some((candidate) => {
+      try {
+        validateJsonSchemaSubset(value, candidate, pointer);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    if (!matched) {
+      throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: no anyOf branch matched`, 1);
+    }
+  }
   if (schema.type !== undefined && !matchesJsonType(value, schema.type)) {
     throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: expected ${schema.type}`, 1);
+  }
+  if (schema.enum !== undefined && !schema.enum.some((candidate) => JSON.stringify(candidate) === JSON.stringify(value))) {
+    throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: value is not in enum`, 1);
   }
   if (schema.type === 'object' || schema.properties !== undefined) {
     if (!isRecord(value)) {
@@ -732,7 +760,21 @@ function validateJsonSchemaSubset(value: unknown, schema: JsonSchemaNode, pointe
     }
   }
   if ((schema.type === 'array' || schema.items !== undefined) && Array.isArray(value) && schema.items !== undefined) {
+    if (schema.minItems !== undefined && value.length < schema.minItems) {
+      throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: expected at least ${schema.minItems} items`, 1);
+    }
+    if (schema.maxItems !== undefined && value.length > schema.maxItems) {
+      throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: expected at most ${schema.maxItems} items`, 1);
+    }
     value.forEach((item, index) => validateJsonSchemaSubset(item, schema.items!, `${pointer}[${index}]`));
+  }
+  if (typeof value === 'string') {
+    if (schema.minLength !== undefined && value.length < schema.minLength) {
+      throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: string is shorter than ${schema.minLength}`, 1);
+    }
+    if (schema.maxLength !== undefined && value.length > schema.maxLength) {
+      throw new AppError('CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', `Codex JSON output failed schema validation at ${pointer}: string is longer than ${schema.maxLength}`, 1);
+    }
   }
 }
 

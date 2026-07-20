@@ -27,6 +27,10 @@ Rules that the operations should address:
 Constraints:
 - Every targetIds entry must exactly match an allowed targetId.
 - Every allowed target marked requiredForClosure=true must appear in exactly one operation.
+- replace_paragraph must reference exactly one approved target.
+- Prefer one delete_duplicate_paragraph operation per approved target. A delete may reference multiple targets only when all belong to the same approved duplicate sequence; never group unrelated targets.
+- Use merge_target_paragraphs, with at least two approved targets, when multiple paragraphs must become one replacement paragraph.
+- Every operation may reference approved targets only.
 - Do not modify or quote non-target paragraphs.
 - newFactsIntroduced must always be an empty array.
 - Keep replacementText limited to the target paragraph or merged targets.

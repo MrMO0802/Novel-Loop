@@ -280,6 +280,8 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^codex_diagnostics_evidence_adjudication_v\d+\.md$/.test(fileName)) return { artifactType: 'codex_diagnostics_evidence_adjudication', phase: 'diagnostics' };
   if (/^timeline_contradiction_map_v\d+\.json$/.test(fileName)) return { artifactType: 'timeline_contradiction_map', phase: 'diagnostics', schemaName: 'TimelineContradictionMapSchema' };
   if (/^timeline_contradiction_map_v\d+\.md$/.test(fileName)) return { artifactType: 'timeline_contradiction_map', phase: 'diagnostics' };
+  if (/^targeted_revision_operation_normalization_v\d+\.json$/.test(fileName)) return { artifactType: 'targeted_revision_operation_normalization', phase: 'revision', schemaName: 'TargetedRevisionOperationNormalizationSchema' };
+  if (/^targeted_revision_operation_normalization_v\d+\.md$/.test(fileName)) return { artifactType: 'targeted_revision_operation_normalization', phase: 'revision' };
   if (/^targeted_revision_plan_v\d+\.json$/.test(fileName)) return { artifactType: 'targeted_revision_plan', phase: 'revision', schemaName: 'TargetedRevisionPlanArtifactSchema' };
   if (/^targeted_revision_plan_v\d+\.md$/.test(fileName)) return { artifactType: 'targeted_revision_plan', phase: 'revision' };
   if (/^draft_targeted_revision_candidate_v\d+\.md$/.test(fileName)) return { artifactType: 'targeted_revision_candidate', phase: 'revision' };

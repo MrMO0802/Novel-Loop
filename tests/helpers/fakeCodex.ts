@@ -22,6 +22,7 @@ export type FakeCodexMode =
   | 'codex-targeted-revision-no-improvement'
   | 'codex-targeted-revision-scope-violation'
   | 'codex-expanded-target-revision'
+  | 'codex-expanded-target-multi-delete'
   | 'codex-expanded-target-incomplete'
   | 'codex-expanded-target-residual-time'
   | 'codex-expanded-target-residual-duplicate'
@@ -537,6 +538,24 @@ function expandedTargetOperations(stdin, mode) {
       newFactsIntroduced: []
     }
   ];
+  if (mode === 'codex-expanded-target-multi-delete') {
+    return {
+      operations: [
+        {
+          operationId: 'operation_delete_duplicate_sequence',
+          operationType: 'delete_duplicate_paragraph',
+          targetIds: duplicateTargets,
+          replacementText: '',
+          reason: 'Delete the approved repeated opening, handoff, dialogue, and closing sequence.',
+          expectedEffect: 'Leave only the earlier delivery handoff while preserving canonical facts outside the duplicate sequence.',
+          rulesAddressed: ['duplicate_event_repetition'],
+          factsPreserved: ['The earlier delivery handoff remains canonical.'],
+          newFactsIntroduced: []
+        },
+        operations[1]
+      ]
+    };
+  }
   if (mode === 'codex-expanded-target-incomplete') return { operations: operations.slice(1) };
   return { operations };
 }

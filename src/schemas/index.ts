@@ -412,25 +412,42 @@ export {
   TargetedRevisionDiffSchema,
   TargetedRevisionExperimentReportSchema,
   TargetedRevisionExperimentResultSchema,
+  NormalizedTargetedRevisionOperationSchema,
   TargetedRevisionOperationSchema,
+  TargetedRevisionOperationNormalizationModeSchema,
   TargetedRevisionOperationTypeSchema,
   TargetedRevisionPairComparisonSchema,
   TargetedRevisionPlanSchema,
   TargetedRevisionProtectedArtifactSchema,
   TargetedRevisionProviderOutputSchema,
+  TargetedRevisionProviderOperationSchema,
   TargetedRevisionScopeValidationSchema
 } from './codexTargetedRevision.js';
 export type {
+  NormalizedTargetedRevisionOperation,
   TargetedRevisionAllowedTarget,
   TargetedRevisionDiagnosticsSample,
   TargetedRevisionDiagnosticsSummary,
   TargetedRevisionDiff,
   TargetedRevisionExperimentReport,
   TargetedRevisionOperation,
+  TargetedRevisionProviderOperation,
   TargetedRevisionPlan,
   TargetedRevisionProviderOutput,
   TargetedRevisionScopeValidation
 } from './codexTargetedRevision.js';
+
+export {
+  TargetedRevisionNormalizationProtectedArtifactSchema,
+  TargetedRevisionOperationContractErrorCodeSchema,
+  TargetedRevisionOperationNormalizationEntrySchema,
+  TargetedRevisionOperationNormalizationSchema,
+  TargetedRevisionRejectedOperationSchema
+} from './codexTargetedRevisionOperationNormalization.js';
+export type {
+  TargetedRevisionOperationContractErrorCode,
+  TargetedRevisionOperationNormalization
+} from './codexTargetedRevisionOperationNormalization.js';
 
 export {
   CandidateDispositionResultSchema,

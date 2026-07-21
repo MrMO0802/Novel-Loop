@@ -31,6 +31,18 @@ export function formatCliError(error: unknown): string {
       if (error.details.suggestedNextCommand !== undefined) {
         lines.push(`suggestedNextCommand: ${error.details.suggestedNextCommand}`);
       }
+      if (error.details.sourceArtifactPath !== undefined) {
+        lines.push(`sourceArtifactPath: ${error.details.sourceArtifactPath}`);
+      }
+      if (error.details.affectedMutationId !== undefined) {
+        lines.push(`affectedMutationId: ${error.details.affectedMutationId}`);
+      }
+      if (error.details.storyStateMutated !== undefined) {
+        lines.push(`storyStateMutated: ${String(error.details.storyStateMutated)}`);
+      }
+      if (error.details.queueMutated !== undefined) {
+        lines.push(`queueMutated: ${String(error.details.queueMutated)}`);
+      }
       return lines.join('\n');
     }
 

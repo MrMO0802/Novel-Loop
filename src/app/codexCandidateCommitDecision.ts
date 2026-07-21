@@ -9,6 +9,8 @@ import {
   CandidateCommitReviewSchema,
   CandidatePatchEvidenceMapSchema,
   CandidatePatchNoopAnalysisSchema,
+  CodexCandidatePreviewReportSchema,
+  CodexPreviewCompletenessReportSchema,
   ChapterQueueSchema,
   StateDiffReportSchema,
   StoryStateSchema
@@ -381,7 +383,23 @@ export async function approveCandidateCommit(
   if (!input.confirm) throw new AppError('CODEX_CANDIDATE_COMMIT_APPROVAL_CONFIRM_REQUIRED', 'Commit approval requires --confirm.', 2);
   const paths = createPaths(input);
   const finalized = await resolveFinalizedReview(paths, fileStore, input.chapterNumber, input.review ?? 'latest');
-  const sources = await loadDecisionSources(paths, fileStore, input.chapterNumber, finalized.report.sourceReviewPath);
+  const sourceReview = await fileStore.readJson(paths.projectArtifact(finalized.report.sourceReviewPath), CandidateCommitReviewSchema);
+  let sources: DecisionSources;
+  try {
+    sources = await loadDecisionSources(paths, fileStore, input.chapterNumber, finalized.report.sourceReviewPath);
+  } catch (error) {
+    if (sourceReview.normalizedPatchPath.includes('candidate_patch_refined_v')) {
+      throw new AppError('CODEX_REFINED_COMMIT_APPROVAL_SOURCE_STALE', getErrorMessage(error), 2, {
+        chapterNumber: input.chapterNumber,
+        sourceArtifactPath: finalized.report.sourceReviewPath,
+        reason: getErrorMessage(error),
+        suggestedNextCommand: `corepack pnpm novel-loop review ${paths.projectId} ${input.chapterNumber} --diagnostics --artifacts --state --suggest-next`,
+        storyStateMutated: false,
+        queueMutated: false
+      });
+    }
+    throw error;
+  }
   verifyFinalizedFreshness(finalized.report, sources);
   if (finalized.report.overallDecision !== 'approved_for_commit') {
     throw new AppError('CODEX_CANDIDATE_COMMIT_APPROVAL_BLOCKED', `Finalized review is ${finalized.report.overallDecision}; approval requires approved_for_commit.`, 2);
@@ -500,14 +518,16 @@ async function loadDecisionSources(
   if (review.projectId !== paths.projectId || review.chapterNumber !== chapterNumber || review.storyStateMutated || review.queueMutated) {
     throw stale('Commit review project, chapter, or read-only boundary is invalid.');
   }
-  const [evidenceMap, stateDiff, storyStateText, queueText, finalText, patchText, diffText] = await Promise.all([
+  const [evidenceMap, stateDiff, storyStateText, queueText, finalText, patchText, diffText, preview, completeness] = await Promise.all([
     fileStore.readJson(paths.projectArtifact(review.evidenceMapPath), CandidatePatchEvidenceMapSchema),
     fileStore.readJson(paths.projectArtifact(review.stateDiffPath), StateDiffReportSchema),
     fileStore.readText(paths.storyState()),
     fileStore.readText(paths.chapterQueue()),
     fileStore.readText(paths.projectArtifact(review.finalPreviewPath)),
     fileStore.readText(paths.projectArtifact(review.normalizedPatchPath)),
-    fileStore.readText(paths.projectArtifact(review.stateDiffPath))
+    fileStore.readText(paths.projectArtifact(review.stateDiffPath)),
+    fileStore.readJson(paths.projectArtifact(review.candidatePreviewReportPath), CodexCandidatePreviewReportSchema),
+    fileStore.readJson(paths.projectArtifact(review.completenessReportPath), CodexPreviewCompletenessReportSchema)
   ]);
   StoryStateSchema.parse(JSON.parse(storyStateText));
   const queue = ChapterQueueSchema.parse(JSON.parse(queueText));
@@ -521,6 +541,11 @@ async function loadDecisionSources(
     evidenceMap.normalizedPatchHash === review.normalizedPatchHash &&
     evidenceMap.stateDiffHash === review.stateDiffHash;
   if (!hashesValid) throw stale('Commit review source hashes no longer match the protected project artifacts.');
+  if (!preview.previewComplete || !preview.patchSchemaValid || !preview.conflictCheckPassed || !preview.stateDiffGenerated || preview.storyStateMutated || preview.queueCommitted ||
+    preview.normalizedPatchPath !== review.normalizedPatchPath || preview.stateDiffPath !== review.stateDiffPath || preview.completenessReportPath !== review.completenessReportPath ||
+    !completeness.complete || completeness.storyStateMutated || completeness.latestCommittedChapterBefore !== completeness.latestCommittedChapterAfter || completeness.conflictCheckPassed !== true) {
+    throw stale('Commit review preview, completeness, schema, conflict, diff, or read-only gate is no longer valid.');
+  }
   if (queueItem === undefined || ['committed', 'recommitted'].includes(queueItem.status)) throw stale('Chapter queue is no longer eligible for mutation decisions.');
   if (review.changes.length !== evidenceMap.mutations.length || review.changes.length !== stateDiff.changes.length) throw stale('Review, evidence map, and state diff mutation counts differ.');
   return {

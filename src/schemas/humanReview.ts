@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { ConflictItemSchema } from './conflictRecovery.js';
 
 export const StateDiffChangeSchema = z.object({
+  mutationId: z.string().min(1).optional(),
   path: z.string(),
   changeType: z.enum(['added', 'removed', 'modified', 'unchanged']),
   before: z.unknown().optional().default(null),

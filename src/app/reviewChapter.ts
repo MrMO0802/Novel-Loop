@@ -30,6 +30,11 @@ import {
   CandidateCommitMutationDecisionSchema,
   CandidateCommitReviewFinalizedSchema,
   CandidateCommitApprovalSchema,
+  CandidatePatchRefinementManifestSchema,
+  CandidatePatchRefinementEquivalenceSchema,
+  RefinedStateDiffReportSchema,
+  CandidateCommitMutationLineageSchema,
+  CandidateCommitDecisionCarryForwardSchema,
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionQualityReportSchema,
@@ -53,6 +58,11 @@ import type {
   CandidateCommitMutationDecision,
   CandidateCommitReviewFinalized,
   CandidateCommitApproval,
+  CandidatePatchRefinementManifest,
+  CandidatePatchRefinementEquivalence,
+  RefinedStateDiffReport,
+  CandidateCommitMutationLineage,
+  CandidateCommitDecisionCarryForward,
   CandidateDisposition,
   CodexDiagnosticsEvidenceAdjudication,
   ConflictSeverity,
@@ -155,6 +165,11 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
   const latestNoopAnalysis = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_patch_noop_analysis', CandidatePatchNoopAnalysisSchema)).at(-1);
   const latestFinalizedCommitReview = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_review_finalized', CandidateCommitReviewFinalizedSchema)).at(-1);
   const latestCommitApproval = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_approval', CandidateCommitApprovalSchema)).at(-1);
+  const latestPatchRefinement = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_patch_refinement_manifest', CandidatePatchRefinementManifestSchema)).at(-1);
+  const latestPatchEquivalence = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_patch_refinement_equivalence', CandidatePatchRefinementEquivalenceSchema)).at(-1);
+  const latestRefinedDiff = (await readReports(paths, fileStore, input.chapterNumber, 'state_diff_refined', RefinedStateDiffReportSchema)).at(-1);
+  const latestMutationLineage = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_mutation_lineage', CandidateCommitMutationLineageSchema)).at(-1);
+  const latestCarryForward = (await readReports(paths, fileStore, input.chapterNumber, 'candidate_commit_decision_carry_forward_preview', CandidateCommitDecisionCarryForwardSchema)).at(-1);
   const finalPath = relativeChapterArtifact(input.chapterNumber, 'final.md');
   const lines = [
     `Project: ${paths.projectId}`,
@@ -183,7 +198,15 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     appendExpandedTargetRevision(lines, latestV2Plan, latestV2Disposition, latestV2Diagnostics, latestV2Adjudication, latestV2Quality);
     appendCandidateAdoptionAndPreview(lines, latestCandidateReview, latestCandidateApproval, latestDraftAdoption, latestDraftSelection, latestCandidatePreview);
     appendCandidateCommitReview(lines, latestCommitReview, latestEvidenceMap);
-    appendCandidateCommitDecisionFinalization(lines, mutationDecisions, latestNoopAnalysis, latestFinalizedCommitReview, latestCommitApproval);
+    appendCandidateCommitDecisionFinalization(
+      lines,
+      mutationDecisions,
+      latestCommitReview?.path,
+      latestNoopAnalysis,
+      latestFinalizedCommitReview,
+      latestCommitApproval
+    );
+    appendCandidatePatchRefinement(lines, latestPatchRefinement, latestPatchEquivalence, latestRefinedDiff, latestMutationLineage, latestCarryForward);
   }
 
   if (input.conflicts === true) {
@@ -238,6 +261,12 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_mutation_decision', CandidateCommitMutationDecisionSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_review_finalized', CandidateCommitReviewFinalizedSchema);
     await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_approval', CandidateCommitApprovalSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_patch_refinement_manifest', CandidatePatchRefinementManifestSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_patch_refinement_equivalence', CandidatePatchRefinementEquivalenceSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'state_diff_refined', RefinedStateDiffReportSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_mutation_lineage', CandidateCommitMutationLineageSchema);
+    await appendArtifactList(lines, paths, fileStore, input.chapterNumber, 'candidate_commit_decision_carry_forward_preview', CandidateCommitDecisionCarryForwardSchema);
+    await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:candidate_patch_refined|candidate_patch_refined_validation|candidate_patch_refined_conflict|high_risk_state_change_review|codex_candidate_preview_refined|codex_preview_completeness_refined)_v\d+\.(?:json|md)$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:draft_v2|final_candidate_preview_v2)\.md$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^(?:diagnostics_v2|codex_chapter_quality_report_v2|canon_patch_codex_(?:proposal|normalized)_v2|state_diff_codex_preview_v2)\.(?:json|md)$/);
     await appendMatchingFiles(lines, paths, fileStore, input.chapterNumber, /^draft_targeted_revision_candidate_v\d+\.md$/);
@@ -278,7 +307,9 @@ export async function reviewChapter(input: ReviewChapterInput, fileStore = new F
       latestCandidatePreview?.value,
       latestCommitReview?.value,
       latestFinalizedCommitReview?.value,
-      latestCommitApproval?.value
+      latestCommitApproval?.value,
+      latestPatchRefinement?.value,
+      latestCarryForward?.value
     ));
   }
 
@@ -378,10 +409,18 @@ function suggestNextCommand(
   candidatePreview: CodexCandidatePreviewReport | undefined,
   candidateCommitReview: CandidateCommitReview | undefined,
   finalizedCommitReview: CandidateCommitReviewFinalized | undefined,
-  commitApproval: CandidateCommitApproval | undefined
+  commitApproval: CandidateCommitApproval | undefined,
+  patchRefinement: CandidatePatchRefinementManifest | undefined,
+  carryForward: CandidateCommitDecisionCarryForward | undefined
 ): string {
   if (commitApproval !== undefined) {
     return `candidate commit approval ${commitApproval.approvalId} is ready for one controlled local commit; approval remains unconsumed`;
+  }
+  if (carryForward?.approved === true) {
+    return `corepack pnpm novel-loop codex finalize-candidate-commit-review ${projectId} ${chapterNumber} --review latest`;
+  }
+  if (patchRefinement !== undefined && carryForward !== undefined && !carryForward.approved) {
+    return `corepack pnpm novel-loop codex carry-forward-candidate-commit-decisions ${projectId} ${chapterNumber} --preview latest --confirm`;
   }
   if (finalizedCommitReview !== undefined) {
     if (finalizedCommitReview.overallDecision === 'approved_for_commit') {
@@ -534,18 +573,22 @@ function appendCandidateCommitReview(
 function appendCandidateCommitDecisionFinalization(
   lines: string[],
   decisions: Array<{ path: string; value: CandidateCommitMutationDecision }>,
+  activeReviewPath: string | undefined,
   noop: { path: string; value: CandidatePatchNoopAnalysis } | undefined,
   finalized: { path: string; value: CandidateCommitReviewFinalized } | undefined,
   approval: { path: string; value: CandidateCommitApproval } | undefined
 ): void {
+  const reviewDecisions = activeReviewPath === undefined
+    ? decisions
+    : decisions.filter((decision) => decision.value.commitReviewPath === activeReviewPath);
   const effective = new Map<string, { path: string; value: CandidateCommitMutationDecision }>();
-  for (const decision of decisions) effective.set(decision.value.mutationId, decision);
-  if (decisions.length > 0 || noop !== undefined || finalized !== undefined || approval !== undefined) {
+  for (const decision of reviewDecisions) effective.set(decision.value.mutationId, decision);
+  if (reviewDecisions.length > 0 || noop !== undefined || finalized !== undefined || approval !== undefined) {
     lines.push('', 'Candidate commit mutation decisions');
     const mutationCount = finalized?.value.mutationCount ?? noop?.value.mutationCount ?? 0;
     lines.push(`- decision progress: ${effective.size}/${mutationCount}`);
     lines.push(`- active decisions: ${effective.size}`);
-    lines.push(`- superseded decisions: ${decisions.length - effective.size}`);
+    lines.push(`- superseded decisions: ${reviewDecisions.length - effective.size}`);
     for (const decision of effective.values()) {
       lines.push(`  - ${decision.value.mutationId}: ${decision.value.decision} (${decision.value.mutationOrigin})`);
     }
@@ -692,6 +735,46 @@ function appendExpandedTargetRevision(
     lines.push(`- criticalIssueCount: ${quality.value.criticalIssueCount}`);
   }
   lines.push('- next: human review; no automatic preview, commit, or revision round 3');
+}
+
+function appendCandidatePatchRefinement(
+  lines: string[],
+  refinement: { path: string; value: CandidatePatchRefinementManifest } | undefined,
+  equivalence: { path: string; value: CandidatePatchRefinementEquivalence } | undefined,
+  refinedDiff: { path: string; value: RefinedStateDiffReport } | undefined,
+  lineage: { path: string; value: CandidateCommitMutationLineage } | undefined,
+  carryForward: { path: string; value: CandidateCommitDecisionCarryForward } | undefined
+): void {
+  if (refinement === undefined && equivalence === undefined && refinedDiff === undefined && lineage === undefined && carryForward === undefined) return;
+  lines.push('', 'Candidate patch refinement');
+  if (refinement !== undefined) {
+    lines.push(`- manifestPath: ${refinement.path}`);
+    lines.push(`- originalNormalizedPatch: ${refinement.value.sourceNormalizedPatchPath}`);
+    lines.push(`- refinedPatch: ${refinement.value.refinedPatchPath}`);
+    lines.push(`- removedNoopMutations: ${refinement.value.removedMutationIds.join(', ')}`);
+  }
+  if (equivalence !== undefined) {
+    lines.push(`- equivalencePath: ${equivalence.path}`);
+    lines.push(`- projectedStatesEquivalent: ${String(equivalence.value.projectedStatesEquivalent)}`);
+    lines.push(`- businessStatesEquivalent: ${String(equivalence.value.businessStatesEquivalent)}`);
+    lines.push(`- actualStateDeltaEquivalent: ${String(equivalence.value.actualStateDeltaEquivalent)}`);
+  }
+  if (refinedDiff !== undefined) {
+    lines.push(`- refinedStateDiffPath: ${refinedDiff.path}`);
+    lines.push(`- refinedMutationCount: ${refinedDiff.value.changes.length}`);
+    lines.push(`- actualApplyBased: ${String(refinedDiff.value.actualApplyBased)}`);
+  }
+  if (lineage !== undefined) {
+    lines.push(`- mutationLineagePath: ${lineage.path}`);
+    lines.push(`- unchangedMutations: ${lineage.value.unchangedMutationCount}`);
+    lines.push(`- removedNoopMutations: ${lineage.value.removedNoopMutationCount}`);
+    lines.push(`- changedOrAddedMutations: ${lineage.value.changedMutationCount + lineage.value.addedMutationCount}`);
+  }
+  if (carryForward !== undefined) {
+    lines.push(`- decisionCarryForwardPath: ${carryForward.path}`);
+    lines.push(`- carryForwardApproved: ${String(carryForward.value.approved)}`);
+    lines.push(`- carryForwardProgress: ${carryForward.value.approved ? carryForward.value.eligibleDecisionCount : 0}/${carryForward.value.eligibleDecisionCount}`);
+  }
 }
 
 function appendDiagnosticsEvidenceAdjudication(

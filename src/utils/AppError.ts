@@ -10,6 +10,10 @@ export interface AppErrorDetails {
   promptId?: string;
   normalizationErrorPath?: string;
   suggestedNextCommand?: string;
+  sourceArtifactPath?: string;
+  affectedMutationId?: string;
+  storyStateMutated?: boolean;
+  queueMutated?: boolean;
 }
 
 export class AppError extends Error {

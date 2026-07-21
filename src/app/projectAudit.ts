@@ -66,6 +66,14 @@ import {
   CandidateCommitMutationDecisionSchema,
   CandidateCommitReviewFinalizedSchema,
   CandidateCommitApprovalSchema,
+  CandidatePatchRefinementManifestSchema,
+  CandidatePatchRefinementEquivalenceSchema,
+  CandidatePatchRefinedValidationSchema,
+  CandidatePatchRefinedConflictSchema,
+  RefinedStateDiffReportSchema,
+  CandidateCommitMutationLineageSchema,
+  CandidateRefinedHighRiskReviewSchema,
+  CandidateCommitDecisionCarryForwardSchema,
   ExpandedTargetRevisionCandidateDispositionSchema,
   ExpandedTargetRevisionDiagnosticsABSchema,
   ExpandedTargetRevisionExperimentReportSchema,
@@ -794,6 +802,39 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       if (/^candidate_commit_approval_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'candidate_commit_decision', relativePath, CandidateCommitApprovalSchema);
       }
+      if (/^candidate_patch_refinement_manifest_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidatePatchRefinementManifestSchema);
+      }
+      if (/^candidate_patch_refined_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CanonPatchSchema);
+      }
+      if (/^codex_candidate_preview_refined_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CodexCandidatePreviewReportSchema);
+      }
+      if (/^codex_preview_completeness_refined_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CodexPreviewCompletenessReportSchema);
+      }
+      if (/^candidate_patch_refinement_equivalence_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidatePatchRefinementEquivalenceSchema);
+      }
+      if (/^candidate_patch_refined_validation_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidatePatchRefinedValidationSchema);
+      }
+      if (/^candidate_patch_refined_conflict_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidatePatchRefinedConflictSchema);
+      }
+      if (/^state_diff_refined_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, RefinedStateDiffReportSchema);
+      }
+      if (/^candidate_commit_mutation_lineage_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidateCommitMutationLineageSchema);
+      }
+      if (/^high_risk_state_change_review_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidateRefinedHighRiskReviewSchema);
+      }
+      if (/^candidate_commit_decision_carry_forward_preview_v\d+\.json$/.test(fileName)) {
+        await checkJson(issues, fileStore, absolutePath, 'candidate_patch_refinement', relativePath, CandidateCommitDecisionCarryForwardSchema);
+      }
       if (/^revision_opportunity_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'revision_opportunity', relativePath, RevisionOpportunityReportSchema);
         await checkRevisionOpportunityReport(issues, absolutePath, relativePath, fileStore);
@@ -807,6 +848,7 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
       }
     }
     await checkCandidateCommitDecisionChain(issues, paths, fileStore, chapterDirName, chapterDir);
+    await checkCandidatePatchRefinementChain(issues, paths, fileStore, chapterDirName, chapterDir);
   }
 }
 
@@ -1262,7 +1304,20 @@ async function checkCandidateCommitDecisionChain(
         decision.sourceFinalHash === sha256(await fileStore.readText(paths.projectArtifact(review.finalPreviewPath))) &&
         decision.sourcePatchHash === sha256(await fileStore.readText(paths.projectArtifact(review.normalizedPatchPath))) &&
         decision.sourceDiffHash === sha256(await fileStore.readText(paths.projectArtifact(review.stateDiffPath)));
+      let carryForwardValid = true;
+      if (decision.carriedForwardFromDecisionId !== null) {
+        if (decision.carryForwardReportPath === null || decision.oldMutationId === null || decision.newMutationId === null || decision.mutationFingerprint === null || !decision.operatorConfirmed) {
+          carryForwardValid = false;
+        } else {
+          const carry = await fileStore.readJson(paths.projectArtifact(decision.carryForwardReportPath), CandidateCommitDecisionCarryForwardSchema);
+          const item = carry.decisions.find((candidate) => candidate.previousDecisionId === decision.carriedForwardFromDecisionId && candidate.newMutationId === decision.newMutationId);
+          carryForwardValid = carry.approved && carry.confirmedAt !== null && carry.newReviewPath === decision.commitReviewPath && item !== undefined && item.eligible &&
+            item.oldMutationId === decision.oldMutationId && item.mutationFingerprint === decision.mutationFingerprint &&
+            item.previousDecision === decision.decision && item.previousNote === decision.note;
+        }
+      }
       if (change === undefined || change.statePath !== decision.statePath || change.mutationType !== decision.mutationType || !sourceHashesValid ||
+        !carryForwardValid ||
         (decision.semanticNoop && decision.decision === 'approve') ||
         (decision.mutationOrigin === 'engine_metadata' && !['conditional-approve', 'reject'].includes(decision.decision)) ||
         (decision.mutationOrigin !== 'engine_metadata' && decision.decision === 'conditional-approve')) {
@@ -1352,6 +1407,99 @@ async function checkCandidateCommitDecisionChain(
       issuePath,
       `Candidate commit decision chain could not be verified: ${String(error)}`,
       'Restore all D4A.1 artifacts and rerun strict audit.',
+      true
+    ));
+  }
+}
+
+async function checkCandidatePatchRefinementChain(
+  issues: AuditIssue[],
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  chapterDirName: string,
+  chapterDir: string
+): Promise<void> {
+  const entries = await fileStore.list(chapterDir);
+  const manifestFile = entries.filter((entry) => /^candidate_patch_refinement_manifest_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare).at(-1);
+  if (manifestFile === undefined) return;
+  const issuePath = path.join('chapters', chapterDirName, manifestFile);
+  try {
+    const latest = (pattern: RegExp) => entries.filter((entry) => pattern.test(entry)).sort(versionedArtifactCompare).at(-1);
+    const equivalenceFile = latest(/^candidate_patch_refinement_equivalence_v\d+\.json$/);
+    const validationFile = latest(/^candidate_patch_refined_validation_v\d+\.json$/);
+    const conflictFile = latest(/^candidate_patch_refined_conflict_v\d+\.json$/);
+    const diffFile = latest(/^state_diff_refined_v\d+\.json$/);
+    const lineageFile = latest(/^candidate_commit_mutation_lineage_v\d+\.json$/);
+    const carryFile = latest(/^candidate_commit_decision_carry_forward_preview_v\d+\.json$/);
+    if ([equivalenceFile, validationFile, conflictFile, diffFile, lineageFile, carryFile].some((entry) => entry === undefined)) {
+      throw new Error('refinement provenance chain is incomplete');
+    }
+    const [manifest, equivalence, validation, conflict, refinedDiff, lineage, carry, stateText, queueText] = await Promise.all([
+      fileStore.readJson(path.join(chapterDir, manifestFile), CandidatePatchRefinementManifestSchema),
+      fileStore.readJson(path.join(chapterDir, equivalenceFile!), CandidatePatchRefinementEquivalenceSchema),
+      fileStore.readJson(path.join(chapterDir, validationFile!), CandidatePatchRefinedValidationSchema),
+      fileStore.readJson(path.join(chapterDir, conflictFile!), CandidatePatchRefinedConflictSchema),
+      fileStore.readJson(path.join(chapterDir, diffFile!), RefinedStateDiffReportSchema),
+      fileStore.readJson(path.join(chapterDir, lineageFile!), CandidateCommitMutationLineageSchema),
+      fileStore.readJson(path.join(chapterDir, carryFile!), CandidateCommitDecisionCarryForwardSchema),
+      fileStore.readText(paths.storyState()),
+      fileStore.readText(paths.chapterQueue())
+    ]);
+    const [sourcePatchText, refinedPatchText, sourceDiffText, newReview, sourceNoop, sourceDecision, runManifest, runEvents] = await Promise.all([
+      fileStore.readText(paths.projectArtifact(manifest.sourceNormalizedPatchPath)),
+      fileStore.readText(paths.projectArtifact(manifest.refinedPatchPath)),
+      fileStore.readText(paths.projectArtifact(manifest.sourceStateDiffPath)),
+      fileStore.readJson(paths.projectArtifact(carry.newReviewPath), CandidateCommitReviewSchema),
+      fileStore.readJson(paths.projectArtifact(manifest.sourceNoopAnalysisPath), CandidatePatchNoopAnalysisSchema),
+      fileStore.readJson(paths.projectArtifact(manifest.sourceDecisionPath), CandidateCommitMutationDecisionSchema),
+      fileStore.readJson(paths.runManifest(manifest.runId), RunManifestV2Schema),
+      fileStore.readText(paths.runEvents(manifest.runId))
+    ]);
+    CanonPatchSchema.parse(JSON.parse(refinedPatchText) as unknown);
+    StateDiffReportSchema.parse(JSON.parse(sourceDiffText) as unknown);
+    StoryStateSchema.parse(JSON.parse(stateText) as unknown);
+    ChapterQueueSchema.parse(JSON.parse(queueText) as unknown);
+    const removed = new Set(manifest.removedMutationIds);
+    const removedNoops = sourceNoop.mutations.filter((mutation) => removed.has(mutation.mutationId));
+    const sourceIntegrityValid = manifest.sourceNormalizedPatchHash === sha256(sourcePatchText) &&
+      manifest.sourceStateDiffHash === sha256(sourceDiffText) && manifest.refinedPatchHash === sha256(refinedPatchText) &&
+      equivalence.sourceStateHash === sha256(stateText);
+    const equivalenceValid = equivalence.sourcePatchPath === manifest.sourceNormalizedPatchPath && equivalence.refinedPatchPath === manifest.refinedPatchPath &&
+      equivalence.projectedStatesEquivalent && equivalence.businessStatesEquivalent && equivalence.engineMetadataEquivalent &&
+      equivalence.removedOperationWasUnconsumed && equivalence.actualStateDeltaEquivalent && equivalence.differences.length === 0;
+    const gateValid = validation.refinedPatchPath === manifest.refinedPatchPath && validation.refinedPatchHash === manifest.refinedPatchHash &&
+      conflict.refinedPatchPath === manifest.refinedPatchPath && conflict.refinedPatchHash === manifest.refinedPatchHash && conflict.conflictCheckPassed && conflict.hard.length === 0;
+    const diffValid = refinedDiff.patchPath === manifest.refinedPatchPath && refinedDiff.sourceDiffPath === manifest.sourceStateDiffPath && refinedDiff.actualApplyBased &&
+      refinedDiff.removedMutationIds.length === removed.size && refinedDiff.removedMutationIds.every((mutationId) => removed.has(mutationId)) &&
+      refinedDiff.changes.every((change) => change.mutationId === undefined || !removed.has(change.mutationId)) &&
+      refinedDiff.addedMutationCount === 0 && refinedDiff.changedMutationCount === 0;
+    const lineageValid = lineage.refinedDiffPath === path.join('chapters', chapterDirName, diffFile!) &&
+      lineage.removedNoopMutationCount === removed.size && lineage.changedMutationCount === 0 && lineage.addedMutationCount === 0 &&
+      lineage.entries.filter((entry) => entry.status === 'removed_noop').every((entry) => entry.oldMutationId !== null && removed.has(entry.oldMutationId)) &&
+      lineage.entries.filter((entry) => entry.status !== 'removed_noop').every((entry) => entry.status === 'unchanged');
+    const carryValid = carry.lineagePath === path.join('chapters', chapterDirName, lineageFile!) && carry.newReviewPath !== manifest.sourceReviewPath &&
+      carry.sourceStateHash === sha256(stateText) && carry.sourceQueueHash === sha256(queueText) &&
+      carry.sourcePatchHash === newReview.normalizedPatchHash && carry.sourceDiffHash === newReview.stateDiffHash &&
+      carry.decisions.every((decision) => decision.eligible ? decision.evidenceUnchanged && decision.newMutationId !== null : removed.has(decision.oldMutationId));
+    const authorizationValid = removedNoops.length === removed.size && removedNoops.every((mutation) => mutation.semanticNoop && !mutation.metadataChanged) &&
+      sourceDecision.decision === 'modify-required' && sourceDecision.semanticNoop && removed.has(sourceDecision.mutationId);
+    const runBoundaryValid = runManifest.command === 'codex.refine-candidate-patch' && runManifest.promptCalls.length === 0 && runManifest.llmCalls.length === 0 &&
+      runManifest.stateMutations.length === 0 && runManifest.queueTransitions.length === 0 && runManifest.snapshots.length === 0 &&
+      runEvents.includes('CODEX_CANDIDATE_PATCH_REFINED') && !runEvents.includes('STATE_MUTATION_APPLIED');
+    const canonicalBoundaryValid = !(await fileStore.exists(paths.chapterArtifact(manifest.chapterNumber, 'final.md'))) &&
+      !(await fileStore.exists(paths.chapterArtifact(manifest.chapterNumber, 'canon_patch.json'))) &&
+      !(await fileStore.exists(paths.chapterArtifact(manifest.chapterNumber, 'commit_report.json')));
+    if (!sourceIntegrityValid || !equivalenceValid || !gateValid || !diffValid || !lineageValid || !carryValid || !authorizationValid || !runBoundaryValid || !canonicalBoundaryValid) {
+      throw new Error('source, equivalence, gate, diff, lineage, carry-forward, authorization, run, or canonical boundary check failed');
+    }
+  } catch (error) {
+    issues.push(issue(
+      `candidate_patch_refinement_chain_${sanitizeIssueId(chapterDirName)}`,
+      'critical',
+      'candidate_patch_refinement',
+      issuePath,
+      `Candidate patch refinement provenance could not be verified: ${String(error)}`,
+      'Restore immutable D4A.1 sources and regenerate the local no-op refinement chain.',
       true
     ));
   }

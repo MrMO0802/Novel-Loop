@@ -574,3 +574,28 @@ export type {
   CandidateCommitReviewFinalized,
   CandidateCommitApproval
 } from './codexCandidateCommitReview.js';
+
+export {
+  CandidatePatchRemovedOperationSchema,
+  CandidatePatchRefinementManifestSchema,
+  CandidatePatchRefinementEquivalenceSchema,
+  CandidatePatchRefinedValidationSchema,
+  CandidatePatchRefinedConflictSchema,
+  RefinedStateDiffReportSchema,
+  CandidateCommitMutationLineageEntrySchema,
+  CandidateCommitMutationLineageSchema,
+  CandidateRefinedHighRiskReviewSchema,
+  CandidateCommitDecisionCarryForwardItemSchema,
+  CandidateCommitDecisionCarryForwardSchema
+} from './codexCandidatePatchRefinement.js';
+export type {
+  CandidatePatchRefinementManifest,
+  CandidatePatchRefinementEquivalence,
+  CandidatePatchRefinedValidation,
+  CandidatePatchRefinedConflict,
+  RefinedStateDiffReport,
+  CandidateCommitMutationLineage,
+  CandidateRefinedHighRiskReview,
+  CandidateCommitDecisionCarryForward,
+  CandidatePatchRefined
+} from './codexCandidatePatchRefinement.js';

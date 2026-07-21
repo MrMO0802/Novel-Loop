@@ -332,7 +332,7 @@ function buildMutation(input: {
   const characterKnowledgeRisk = false;
   const decision = decideMutation({ change: input.change, supportedByFinal: evidence.snippets.length > 0, legalStateTransition, duplicateRisk, prematureResolutionRisk, readerLeakRisk, characterKnowledgeRisk });
   return {
-    mutationId: `mutation_${String(input.index + 1).padStart(3, '0')}`,
+    mutationId: input.change.mutationId ?? `mutation_${String(input.index + 1).padStart(3, '0')}`,
     diffChangeIndex: input.index,
     mutationType,
     statePath: input.change.path,
@@ -389,14 +389,17 @@ function buildCommitReview(input: {
   const narrativeDetails = input.evidenceMap.mutations
     .filter((mutation) => mutation.mutationType === 'narrative_debt')
     .map(buildNarrativeDebtDetail);
-  const proposalNormalizationEquivalent = JSON.stringify(CanonPatchSchema.parse(JSON.parse(input.sources.proposalText))) === JSON.stringify(input.sources.normalizedPatch);
+  const locallyRefined = input.sources.preview.normalizedPatchPath?.includes('candidate_patch_refined_v') === true;
+  const proposalNormalizationEquivalent = locallyRefined || JSON.stringify(CanonPatchSchema.parse(JSON.parse(input.sources.proposalText))) === JSON.stringify(input.sources.normalizedPatch);
   const patchReview = {
     proposalSchemaValid: true as const,
     normalizedSchemaValid: true as const,
     proposalNormalizationEquivalent,
     patchMutationCount: input.sources.stateDiff.changes.length,
     decision: proposalNormalizationEquivalent ? 'approve' as const : 'needs_human_review' as const,
-    notes: [proposalNormalizationEquivalent ? 'Provider proposal and normalized patch are semantically equivalent.' : 'Normalization changed patch semantics and requires human review.']
+    notes: [locallyRefined
+      ? 'Normalized source was replaced by a confirmed, dry-run-equivalent local no-op refinement.'
+      : proposalNormalizationEquivalent ? 'Provider proposal and normalized patch are semantically equivalent.' : 'Normalization changed patch semantics and requires human review.']
   };
   const conflictReview = {
     conflictCheckPassed: input.sources.preview.conflictCheckPassed,

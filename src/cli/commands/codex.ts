@@ -9,6 +9,10 @@ import {
   decideCandidateCommitChange,
   finalizeCandidateCommitReview
 } from '../../app/codexCandidateCommitDecision.js';
+import {
+  carryForwardCandidateCommitDecisions,
+  refineCandidatePatch
+} from '../../app/codexCandidatePatchRefinement.js';
 import { generateCodexBusinessOptimizationPlan } from '../../app/codexBusinessOptimizationPlan.js';
 import { generateCodexCallReductionReport } from '../../app/codexCallReduction.js';
 import { generateCodexChapterRegressionAnalysis } from '../../app/codexChapterRegressionAnalysis.js';
@@ -94,6 +98,7 @@ interface CodexCommandOptions {
   mutation?: string;
   decision?: string;
   note?: string;
+  removeNoop?: string;
 }
 
 export function registerCodexCommand(program: Command): void {
@@ -1157,6 +1162,81 @@ export function registerCodexCommand(program: Command): void {
         `conditionalEngineMutations: ${result.record.conditionalEngineMutationIds.length}`,
         `highRiskMutations: ${result.record.highRiskMutationIds.length}`,
         `consumed: ${String(result.record.consumed)}`,
+        'storyStateMutated: false',
+        'queueMutated: false',
+        'snapshotCreated: false',
+        'canonicalArtifactsGenerated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('refine-candidate-patch').description('[local/read-only] Remove one human-authorized semantic no-op into a versioned derived patch'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--review <path|latest>', 'source finalized candidate commit review path or latest', 'latest')
+    .requiredOption('--remove-noop <mutationId>', 'confirmed semantic no-op mutation id')
+    .option('--confirm', 'confirm deterministic local no-op removal', false)
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await refineCandidatePatch({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        review: options.review ?? 'latest',
+        removeNoop: options.removeNoop!,
+        confirm: options.confirm === true
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidatePatchRefinement: success',
+        `refinedPatchPath: ${result.refinedPatchPath}`,
+        `manifestPath: ${result.manifestPath}`,
+        `equivalencePath: ${result.equivalencePath}`,
+        `conflictPath: ${result.conflictPath}`,
+        `stateDiffPath: ${result.stateDiffPath}`,
+        `lineagePath: ${result.lineagePath}`,
+        `refinedReviewPath: ${result.review.reviewPath}`,
+        `refinedMutationCount: ${result.review.report.changes.length}`,
+        `semanticNoopCount: ${result.noopAnalysis.report.semanticNoopCount}`,
+        `carryForwardPreviewPath: ${result.carryForwardPreview.previewPath}`,
+        `eligibleCarryForwardDecisions: ${result.carryForwardPreview.report.eligibleDecisionCount}`,
+        'projectedStatesEquivalent: true',
+        'businessStatesEquivalent: true',
+        'actualStateDeltaEquivalent: true',
+        'storyStateMutated: false',
+        'queueMutated: false',
+        'snapshotCreated: false',
+        'canonicalArtifactsGenerated: false'
+      ].join('\n') + '\n');
+    });
+
+  addBoundaryOptions(codex.command('carry-forward-candidate-commit-decisions').description('[local/read-only] Confirm and append decisions for fingerprint- and evidence-identical refined mutations'))
+    .argument('<projectId>', 'project id')
+    .argument('<chapterNumber>', 'chapter number')
+    .option('--preview <path|latest>', 'decision carry-forward preview path or latest', 'latest')
+    .option('--confirm', 'confirm explicit decision carry-forward', false)
+    .action(async (projectId: string, chapterNumber: string, options: CodexCommandOptions, command: Command) => {
+      options = mergedOptions(options, command);
+      const result = await carryForwardCandidateCommitDecisions({
+        projectId,
+        projectsRoot: options.root ?? './projects',
+        chapterNumber: parsePositiveInteger(chapterNumber, 'chapterNumber'),
+        preview: options.preview ?? 'latest',
+        confirm: options.confirm === true
+      });
+      if (options.json === true) {
+        process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'candidateCommitDecisionCarryForward: confirmed',
+        `reportPath: ${result.reportPath}`,
+        `carriedDecisionCount: ${result.records.length}`,
+        `eligibleDecisionCount: ${result.report.eligibleDecisionCount}`,
+        `ineligibleDecisionCount: ${result.report.ineligibleDecisionCount}`,
+        `operatorConfirmed: ${String(result.report.approved)}`,
         'storyStateMutated: false',
         'queueMutated: false',
         'snapshotCreated: false',

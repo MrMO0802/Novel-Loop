@@ -611,10 +611,12 @@ function PendingChangesView({
 }
 
 export function StoryRecordViews({
-  initialTab = 'characters',
+  activeTab,
+  onTabChange,
   project
 }: {
-  initialTab?: StoryRecordTab;
+  activeTab: StoryRecordTab;
+  onTabChange: (tab: StoryRecordTab) => void;
   project: RainRadioProject;
 }) {
   const [query, setQuery] = useState('');
@@ -626,7 +628,12 @@ export function StoryRecordViews({
   );
 
   return (
-    <Tabs.Root className="nl-story-record" defaultValue={initialTab} orientation="horizontal">
+    <Tabs.Root
+      className="nl-story-record"
+      onValueChange={(value) => onTabChange(value as StoryRecordTab)}
+      orientation="horizontal"
+      value={activeTab}
+    >
       <div className="nl-story-record__controls">
         <Tabs.List aria-label={t('record.title')} className="nl-story-record__tabs">
           {tabs.map((tab) => (

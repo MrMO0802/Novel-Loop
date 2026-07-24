@@ -243,6 +243,7 @@ export const zhCN = {
   'record.worldRules.description': '当前章节必须遵守的故事规则。',
   'record.canon.description': '只列出已正式提交章节确认的事实。',
   'record.pending.title': '第二章待确认变更',
+  'record.pending.pageDescription': '审阅第二章尚未写入故事档案的变更，确认后再正式提交。',
   'record.pending.changes': '变更预览',
   'record.pending.description': '以下内容来自第二章提交预览，与已正式提交的故事档案分开显示。',
   'record.pending.characters': '人物变化预览',

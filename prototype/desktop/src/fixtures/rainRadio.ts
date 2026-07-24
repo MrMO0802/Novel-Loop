@@ -520,7 +520,7 @@ export const rainRadio: RainRadioProject = {
       key: 'chapter-one-commit',
       when: '昨天',
       title: '第一章已正式提交',
-      detail: '4 项事实与 5 个时间点已写入故事档案。'
+      detail: '4 项事实与 6 个时间点已写入故事档案。'
     }
   ]
 };

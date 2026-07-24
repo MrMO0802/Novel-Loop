@@ -44,6 +44,7 @@ describe('project overview', () => {
     expect(within(recommendation).getAllByRole('button')).toHaveLength(1);
     expect(within(recommendation).getByRole('button', { name: '审阅故事档案变更' })).toBeVisible();
     expect(screen.getByText('4 个尚未兑现，其中 2 个需要在本卷留意。')).toBeVisible();
+    expect(screen.getByText('4 项事实与 6 个时间点已写入故事档案。')).toBeVisible();
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
   });
 
@@ -58,6 +59,8 @@ describe('project overview', () => {
     expect(screen.getByRole('tab', { name: '待确认变更' })).toHaveAttribute('aria-selected', 'true');
     expect(screen.getByRole('heading', { name: '第二章待确认变更' })).toBeVisible();
     expect(screen.getByText('待审阅，尚未写入故事档案')).toBeVisible();
+    expect(screen.getByText('审阅第二章尚未写入故事档案的变更，确认后再正式提交。')).toBeVisible();
+    expect(screen.queryByText('查看人物、时间线与仍需兑现的故事承诺。这里的内容来自已正式提交的章节。')).toBeNull();
   });
 });
 
@@ -84,6 +87,21 @@ describe('Story Record', () => {
       /story_state|narrative_debt|reader_state|canon_patch|character_id|mystery_id|\.json|\/projects\//i
     );
     expect(document.body).not.toHaveTextContent(/^\s*[\[{].*[\]}]\s*$/);
+  });
+
+  test('returns to the canonical default when a mounted pending route loses its view query', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/story-record?view=pending');
+
+    expect(screen.getByRole('tab', { name: '待确认变更' })).toHaveAttribute('aria-selected', 'true');
+
+    await user.click(screen.getByRole('link', { name: '故事档案' }));
+
+    expect(window.location.pathname).toBe('/project/rain-radio/story-record');
+    expect(window.location.search).toBe('');
+    expect(screen.getByRole('tab', { name: '人物' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: '林澈' })).toBeVisible();
+    expect(screen.getByText('查看人物、时间线与仍需兑现的故事承诺。这里的内容来自已正式提交的章节。')).toBeVisible();
   });
 
   test('selecting 时间线 replaces character detail with the chronological story view', async () => {

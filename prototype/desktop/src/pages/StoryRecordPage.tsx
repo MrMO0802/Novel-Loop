@@ -1,11 +1,22 @@
+import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { StoryRecordViews } from '../features/story-record/StoryRecordViews';
+import {
+  StoryRecordViews,
+  type StoryRecordTab
+} from '../features/story-record/StoryRecordViews';
 import { rainRadio } from '../fixtures/rainRadio';
 import { t } from '../i18n/t';
 
 export function StoryRecordPage() {
   const [searchParams] = useSearchParams();
-  const initialTab = searchParams.get('view') === 'pending' ? 'pending' : 'characters';
+  const requestedTab: StoryRecordTab = searchParams.get('view') === 'pending'
+    ? 'pending'
+    : 'characters';
+  const [activeTab, setActiveTab] = useState<StoryRecordTab>(requestedTab);
+
+  useEffect(() => {
+    setActiveTab(requestedTab);
+  }, [requestedTab]);
 
   return (
     <div className="nl-page nl-story-record-page">
@@ -14,9 +25,17 @@ export function StoryRecordPage() {
           <p>{rainRadio.title}</p>
           <h1>{t('record.title')}</h1>
         </div>
-        <span>{t('record.description')}</span>
+        <span>
+          {activeTab === 'pending'
+            ? t('record.pending.pageDescription')
+            : t('record.description')}
+        </span>
       </header>
-      <StoryRecordViews initialTab={initialTab} project={rainRadio} />
+      <StoryRecordViews
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        project={rainRadio}
+      />
     </div>
   );
 }

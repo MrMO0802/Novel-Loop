@@ -283,8 +283,8 @@ export const rainRadio: RainRadioProject = {
       '不要解释十七层如何存在，只让值班表和楼层按钮互相矛盾。'
     ],
     review: {
-      result: '时间顺序问题已经解决',
-      detail: '抵达门厅的时间与站点后门场景现在能够连续衔接，没有新的关键矛盾。'
+      result: '修订候选已解决时间顺序问题',
+      detail: '候选稿已经接顺抵达门厅与站点后门的时间；当前显示的原稿尚未采用这项修改，仍需你决定。'
     },
     nextAction: '比较修订',
     versions: {

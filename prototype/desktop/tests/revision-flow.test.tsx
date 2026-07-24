@@ -138,6 +138,17 @@ describe('Chapter 2 diagnostics', () => {
 });
 
 describe('revision candidate comparison', () => {
+  test('describes the corrected candidate without claiming the active original is fixed', () => {
+    renderRoute('/project/rain-radio/chapter/2');
+
+    const assistant = screen.getByRole('complementary', { name: '本章写作提示' });
+    expect(within(assistant).getByText('修订候选已解决时间顺序问题')).toBeVisible();
+    expect(
+      within(assistant).getByText(/当前显示的原稿尚未采用这项修改，仍需你决定/)
+    ).toBeVisible();
+    expect(within(assistant).queryByText('时间顺序问题已经解决')).toBeNull();
+  });
+
   test('provides a whole revised chapter and derives every changed passage from both manuscripts', () => {
     const originalParagraphs = parseManuscriptParagraphs(
       rainRadio.chapterWorkspace.versions.draft
@@ -248,6 +259,13 @@ describe('revision candidate comparison', () => {
 
     await user.selectOptions(versionSelector, 'accepted_draft');
     expect(editor).toHaveValue(editedAccepted);
+
+    await user.click(screen.getByRole('button', { name: '比较修订' }));
+    expect(screen.getByText('已接受草稿')).toBeVisible();
+    expect(screen.queryByText('候选已过期')).toBeNull();
+    expect(
+      screen.queryByText(/这份候选不能再接受或保留为备选版本/)
+    ).toBeNull();
   }, 15_000);
 
   test('blocks stale candidate adoption and preserves source edits across route navigation', async () => {
@@ -275,6 +293,13 @@ describe('revision candidate comparison', () => {
     expect(screen.getByText('候选已过期')).toBeVisible();
     expect(screen.getByRole('button', { name: '接受候选' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '保留为备选版本' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: '拒绝候选' }));
+    expect(screen.getByText('候选已拒绝')).toBeVisible();
+    expect(screen.queryByText('候选已过期')).toBeNull();
+    expect(
+      screen.queryByText(/这份候选不能再接受或保留为备选版本/)
+    ).toBeNull();
   }, 15_000);
 
   test('persists rejection while preserving the edited original session draft', async () => {
@@ -314,10 +339,18 @@ describe('revision candidate comparison', () => {
       .toHaveValue(originalDraft);
     expect(screen.getByText('草稿（可编辑）')).toBeVisible();
 
+    const editor = screen.getByRole('textbox', { name: '章节正文' });
+    fireEvent.change(editor, {
+      target: { value: `${originalDraft}\n\n林澈在原稿里补上新的雨夜记录。` }
+    });
     await user.click(screen.getByRole('button', { name: '比较修订' }));
     expect(screen.getByText('已保留两个版本')).toBeVisible();
     expect(screen.getByText('当前使用：我的草稿')).toBeVisible();
     expect(screen.getByText('备选版本：修订候选')).toBeVisible();
+    expect(screen.queryByText('候选已过期')).toBeNull();
+    expect(
+      screen.queryByText(/这份候选不能再接受或保留为备选版本/)
+    ).toBeNull();
     expect(screen.queryByText('本章已正式提交')).toBeNull();
   }, 15_000);
 });

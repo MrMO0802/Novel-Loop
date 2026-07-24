@@ -147,7 +147,7 @@ export function RevisionComparisonPage() {
         </div>
       </header>
 
-      {!candidateIsFresh && (
+      {!candidateIsFresh && decision === null && (
         <InlineNotice title={t('revision.stale.title')} tone="warning">
           <p>{t('revision.stale.body')}</p>
         </InlineNotice>

@@ -22,16 +22,23 @@ function ChangeLabel({ kind }: { kind: 'added' | 'removed' }) {
 
 function ChangedPassage({
   change,
-  kind
+  kind,
+  stackHeading = false
 }: {
   change: RevisionParagraphChange;
   kind: 'added' | 'removed';
+  stackHeading?: boolean;
 }) {
   const Passage = kind === 'removed' ? 'del' : 'ins';
   const passage = kind === 'removed' ? change.original : change.candidate;
 
   return (
     <div className={`nl-paragraph-diff__passage nl-paragraph-diff__passage--${kind}`}>
+      {stackHeading && (
+        <span aria-hidden="true" className="nl-paragraph-diff__stack-heading">
+          {t(kind === 'removed' ? 'revision.original.heading' : 'revision.candidate.heading')}
+        </span>
+      )}
       <ChangeLabel kind={kind} />
       <Passage>{passage}</Passage>
     </div>
@@ -68,8 +75,8 @@ export function ParagraphDiff({ changes, mode }: ParagraphDiffProps) {
       {changes.map((change) => (
         <article className="nl-paragraph-diff__row" key={change.id}>
           <h3>{t('revision.diff.paragraph', { paragraph: change.paragraph })}</h3>
-          <ChangedPassage change={change} kind="removed" />
-          <ChangedPassage change={change} kind="added" />
+          <ChangedPassage change={change} kind="removed" stackHeading />
+          <ChangedPassage change={change} kind="added" stackHeading />
         </article>
       ))}
     </section>

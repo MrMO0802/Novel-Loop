@@ -25,6 +25,12 @@ const versionDefinitions: Record<ChapterWorkspaceVersion, VersionDefinition> = {
     status: t('chapter.version.draft'),
     tone: 'draft'
   },
+  accepted_draft: {
+    icon: PencilSimple,
+    option: t('chapter.version.acceptedOption'),
+    status: t('chapter.version.accepted'),
+    tone: 'draft'
+  },
   revision_candidate: {
     icon: ArrowsClockwise,
     option: t('chapter.version.candidateOption'),
@@ -60,6 +66,7 @@ export interface ManuscriptEditorProps {
   chapter: number;
   onChange: (value: string) => void;
   onVersionChange: (version: ChapterWorkspaceVersion) => void;
+  showAcceptedDraft?: boolean;
   title: string;
   value: string;
   version: ChapterWorkspaceVersion;
@@ -74,6 +81,7 @@ export function ManuscriptEditor({
   chapter,
   onChange,
   onVersionChange,
+  showAcceptedDraft = false,
   title,
   value,
   version
@@ -82,7 +90,7 @@ export function ManuscriptEditor({
   const autosaveDefinition = autosaveDefinitions[autosave];
   const VersionIcon = versionDefinition.icon;
   const AutosaveIcon = autosaveDefinition.icon;
-  const isReadOnly = version !== 'draft';
+  const isReadOnly = version !== 'draft' && version !== 'accepted_draft';
 
   return (
     <section className="nl-manuscript-editor" aria-labelledby="chapter-editor-title">
@@ -114,9 +122,11 @@ export function ManuscriptEditor({
               onChange={(event) => onVersionChange(event.currentTarget.value as ChapterWorkspaceVersion)}
               value={version}
             >
-              {(Object.entries(versionDefinitions) as [ChapterWorkspaceVersion, VersionDefinition][]).map(
-                ([key, definition]) => <option key={key} value={key}>{definition.option}</option>
-              )}
+              {(Object.entries(versionDefinitions) as [ChapterWorkspaceVersion, VersionDefinition][])
+                .filter(([key]) => key !== 'accepted_draft' || showAcceptedDraft)
+                .map(([key, definition]) => (
+                  <option key={key} value={key}>{definition.option}</option>
+                ))}
             </select>
           </label>
           <span

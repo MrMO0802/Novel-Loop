@@ -89,18 +89,26 @@ function getTaskFixture(value: string | null): TaskTrayFixtureState {
 }
 
 export function ChapterWorkspacePage() {
-  const { chapterDrafts, setChapterDraft, state } = usePrototypeContext();
+  const {
+    chapterDrafts,
+    chapterRevisions,
+    setChapterDraft,
+    state
+  } = usePrototypeContext();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const workspace = rainRadio.chapterWorkspace;
   const chapterDraftKey = `rain-radio:chapter:${workspace.chapter}`;
+  const revision = chapterRevisions.get(chapterDraftKey);
   const [draft, setDraft] = useState(
     () => chapterDrafts.get(chapterDraftKey) ?? workspace.versions.draft,
   );
-  const [version, setVersion] = useState<ChapterWorkspaceVersion>('draft');
+  const [version, setVersion] = useState<ChapterWorkspaceVersion>(
+    () => revision?.disposition === 'accepted' ? 'accepted_draft' : 'draft'
+  );
   const [autosave, setAutosave] = useState<PrototypeState['autosave']>('saved');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const values = { ...workspace.versions, draft };
+  const values = { ...workspace.versions, accepted_draft: draft, draft };
   const focusTarget = searchParams.get('focus');
 
   useEffect(
@@ -115,7 +123,14 @@ export function ChapterWorkspacePage() {
 
   useEffect(() => {
     if (focusTarget === 'review') {
-      document.getElementById('chapter-review-action')?.focus();
+      const compact = window.matchMedia?.('(max-width: 1024px)').matches ?? false;
+      const focusTargetElement = compact
+        ? document.querySelector<HTMLButtonElement>(
+            '.nl-chapter-workspace__drawer-trigger--assistant'
+          )
+        : document.getElementById('chapter-review-action');
+
+      focusTargetElement?.focus();
     }
   }, [focusTarget]);
 
@@ -137,7 +152,7 @@ export function ChapterWorkspacePage() {
   function changeVersion(nextVersion: ChapterWorkspaceVersion) {
     setVersion(nextVersion);
 
-    if (nextVersion !== 'draft') {
+    if (nextVersion !== 'draft' && nextVersion !== 'accepted_draft') {
       if (autosaveTimerRef.current !== null) {
         clearTimeout(autosaveTimerRef.current);
         autosaveTimerRef.current = null;
@@ -155,6 +170,7 @@ export function ChapterWorkspacePage() {
           chapter={workspace.chapter}
           onChange={updateDraft}
           onVersionChange={changeVersion}
+          showAcceptedDraft={revision?.disposition === 'accepted'}
           title={workspace.title}
           value={values[version]}
           version={version}

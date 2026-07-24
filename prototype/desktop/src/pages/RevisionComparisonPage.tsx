@@ -1,12 +1,17 @@
 import { CheckCircle } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import {
+  usePrototypeContext,
+  type ChapterRevisionDisposition
+} from '../app/PrototypeContext';
 import { Button } from '../components/Button';
 import { InlineNotice } from '../components/InlineNotice';
 import { StatusLabel } from '../components/StatusLabel';
 import { DiagnosticFinding } from '../features/diagnostics/DiagnosticFinding';
 import { ParagraphDiff, type ComparisonMode } from '../features/revisions/ParagraphDiff';
 import { chapterTwoDiagnostics } from '../fixtures/diagnostics';
+import { rainRadio } from '../fixtures/rainRadio';
 import { chapterTwoRevision } from '../fixtures/revisions';
 import { t } from '../i18n/t';
 
@@ -14,7 +19,7 @@ const chapterPath = '/project/rain-radio/chapter/2';
 const reviewPath = `${chapterPath}/review`;
 const revisionPath = `${chapterPath}/revision`;
 
-type CandidateDecision = 'accepted' | 'alternate' | 'rejected' | null;
+type CandidateDecision = ChapterRevisionDisposition | null;
 
 export function ChapterDiagnosticsPage() {
   const navigate = useNavigate();
@@ -88,10 +93,39 @@ function DecisionNotice({ decision }: { decision: Exclude<CandidateDecision, nul
 }
 
 export function RevisionComparisonPage() {
+  const {
+    chapterDrafts,
+    chapterRevisions,
+    decideChapterRevision,
+    setChapterDraft
+  } = usePrototypeContext();
   const navigate = useNavigate();
+  const chapterDraftKey = 'rain-radio:chapter:2';
+  const revision = chapterRevisions.get(chapterDraftKey);
+  const decision = revision?.disposition ?? null;
+  const originalDraft = revision?.originalDraft
+    ?? chapterDrafts.get(chapterDraftKey)
+    ?? rainRadio.chapterWorkspace.versions.draft;
   const [mode, setMode] = useState<ComparisonMode>('side-by-side');
-  const [decision, setDecision] = useState<CandidateDecision>(null);
-  const [acceptedDraft, setAcceptedDraft] = useState(chapterTwoRevision.acceptedDraft);
+  const [acceptedDraft, setAcceptedDraft] = useState(
+    () => revision?.disposition === 'accepted'
+      ? chapterDrafts.get(chapterDraftKey) ?? revision.candidateDraft
+      : chapterTwoRevision.candidateDraft
+  );
+
+  function decide(disposition: ChapterRevisionDisposition) {
+    decideChapterRevision(
+      chapterDraftKey,
+      disposition,
+      originalDraft,
+      chapterTwoRevision.candidateDraft
+    );
+  }
+
+  function updateAcceptedDraft(draft: string) {
+    setAcceptedDraft(draft);
+    setChapterDraft(chapterDraftKey, draft);
+  }
 
   return (
     <div className="nl-review-page nl-revision-page">
@@ -118,7 +152,7 @@ export function RevisionComparisonPage() {
           <h2 id="accepted-draft-title">{t('revision.accepted.editorTitle')}</h2>
           <textarea
             aria-label={t('revision.accepted.editorLabel')}
-            onChange={(event) => setAcceptedDraft(event.currentTarget.value)}
+            onChange={(event) => updateAcceptedDraft(event.currentTarget.value)}
             spellCheck="false"
             value={acceptedDraft}
           />
@@ -180,19 +214,19 @@ export function RevisionComparisonPage() {
       <footer className="nl-revision-actions">
         <Button
           disabled={decision !== null}
-          onClick={() => setDecision('rejected')}
+          onClick={() => decide('rejected')}
           variant="quiet"
         >
           {t('revision.action.reject')}
         </Button>
         <Button
           disabled={decision !== null}
-          onClick={() => setDecision('alternate')}
+          onClick={() => decide('alternate')}
           variant="secondary"
         >
           {t('revision.action.keepAlternate')}
         </Button>
-        <Button disabled={decision !== null} onClick={() => setDecision('accepted')}>
+        <Button disabled={decision !== null} onClick={() => decide('accepted')}>
           {t('revision.action.accept')}
         </Button>
       </footer>

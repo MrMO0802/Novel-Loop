@@ -1644,6 +1644,14 @@
   padding: 10px 16px 18px;
 }
 
+.nl-paragraph-diff__stack-heading {
+  display: none;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 22px;
+  margin-bottom: 8px;
+}
+
 .nl-paragraph-diff__row .nl-paragraph-diff__passage--added {
   border-left: 1px solid var(--nl-border);
 }
@@ -1759,6 +1767,14 @@
 }
 
 @media (max-width: 1100px) {
+  .nl-paragraph-diff__headings {
+    display: none;
+  }
+
+  .nl-paragraph-diff__stack-heading {
+    display: block;
+  }
+
   .nl-paragraph-diff__row {
     grid-template-columns: minmax(0, 1fr);
   }
@@ -1796,15 +1812,6 @@
   .nl-diagnostic-evidence li {
     gap: 4px;
     grid-template-columns: minmax(0, 1fr);
-  }
-
-  .nl-paragraph-diff__headings {
-    grid-template-columns: minmax(0, 1fr);
-  }
-
-  .nl-paragraph-diff__headings h2 + h2 {
-    border-left: 0;
-    border-top: 1px solid var(--nl-border);
   }
 
   .nl-revision-outcome {

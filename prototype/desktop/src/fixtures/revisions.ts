@@ -1,3 +1,6 @@
+import { parseManuscriptParagraphs } from './diagnostics';
+import { rainRadio } from './rainRadio';
+
 export interface RevisionParagraphChange {
   candidate: string;
   id: string;
@@ -6,11 +9,28 @@ export interface RevisionParagraphChange {
 }
 
 export interface RevisionCandidateFixture {
-  acceptedDraft: string;
+  candidateDraft: string;
   changeReason: string;
   changes: readonly RevisionParagraphChange[];
   newIssueSummary: string;
   resolvedIssues: readonly string[];
+}
+
+const sourceParagraphs = parseManuscriptParagraphs(
+  rainRadio.chapterWorkspace.versions.draft
+);
+const candidateDraft = rainRadio.chapterWorkspace.versions.revision_candidate;
+const candidateParagraphs = parseManuscriptParagraphs(candidateDraft);
+
+function changeAt(id: string, paragraph: number): RevisionParagraphChange {
+  const original = sourceParagraphs[paragraph - 1];
+  const candidate = candidateParagraphs[paragraph - 1];
+
+  if (!original || !candidate) {
+    throw new Error(`第 ${paragraph} 段不存在，无法建立修订对照。`);
+  }
+
+  return { candidate, id, original, paragraph };
 }
 
 export const chapterTwoRevision: RevisionCandidateFixture = {
@@ -18,32 +38,14 @@ export const chapterTwoRevision: RevisionCandidateFixture = {
   resolvedIssues: [
     '时间冲突已解决',
     '重复交接已删除',
-    '没有新增指令或收件人'
+    '没有新增订单或收件人'
   ],
   newIssueSummary: '没有发现新的问题',
   changes: [
-    {
-      id: 'arrival-time',
-      paragraph: 2,
-      original: '下午四点，林澈接过许雯递来的订单，地址写着临江里三栋十七层 1704。',
-      candidate: '零点四十分后，林澈接过许雯递来的订单，地址写着临江里三栋十七层 1704。'
-    },
-    {
-      id: 'security-memory',
-      paragraph: 20,
-      original: '保安记得那次交接发生在天还亮着的时候。',
-      candidate: '保安只记得林澈冒雨进门，没有为那次交接补上另一个时间。'
-    },
-    {
-      id: 'duplicate-handoff',
-      paragraph: 22,
-      original: '许雯又把那张写着十七层的单子推给他。',
-      candidate: '林澈把订单折好收进口袋，转身走进更密的雨里。'
-    }
+    changeAt('delivery-time', 20),
+    changeAt('handoff-memory', 21),
+    changeAt('duplicate-handoff', 22),
+    changeAt('security-memory', 32)
   ],
-  acceptedDraft: `零点四十分后，林澈接过许雯递来的订单，地址写着临江里三栋十七层 1704。
-
-登记表把同一份送达记在零点五十分。林澈冒雨进门，没有人为这次交接补上另一个时间。
-
-他把订单折好收进口袋，转身走进更密的雨里。`
+  candidateDraft
 };

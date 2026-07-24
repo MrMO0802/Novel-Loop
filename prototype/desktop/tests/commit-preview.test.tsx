@@ -145,6 +145,26 @@ describe('controlled commit preview', () => {
     ).toBeNull();
   });
 
+  test('resets stale review state before showing a refreshed preview', async () => {
+    const user = userEvent.setup();
+    renderRoute(`${commitPreviewPath}?state=stale`);
+
+    const approve = screen.getByRole('radio', { name: '批准这项变化' });
+    await user.click(approve);
+    expect(approve).toBeChecked();
+    expect(screen.getByRole('button', { name: '正式提交本章' })).toBeDisabled();
+
+    await user.click(screen.getByRole('button', { name: '刷新提交预览' }));
+
+    expect(screen.getByRole('radio', { name: '批准这项变化' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: '返回修改这项变化' })).not.toBeChecked();
+    expect(screen.getByRole('radio', { name: '拒绝这项变化' })).not.toBeChecked();
+    expect(screen.getByRole('button', { name: '正式提交本章' })).toBeDisabled();
+    expect(screen.getByText('请先决定如何处理 1 项高风险变化。')).toBeVisible();
+    expect(screen.queryByRole('dialog', { name: '最终确认正式提交' })).toBeNull();
+    expect(screen.queryByText('交互模拟完成，真实故事档案仍未改变')).toBeNull();
+  });
+
   test('continues naturally from an accepted revision into commit preview', async () => {
     const user = userEvent.setup();
     renderRoute('/project/rain-radio/chapter/2/revision');

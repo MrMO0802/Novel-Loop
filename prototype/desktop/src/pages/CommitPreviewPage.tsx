@@ -66,6 +66,13 @@ export function CommitPreviewPage() {
           ? t('commit.state.rejectRequired')
           : t('commit.state.decisionRequired');
 
+  function refreshPreview() {
+    setDecision(null);
+    setConfirmationOpen(false);
+    setSimulated(false);
+    setSearchParams({}, { replace: true });
+  }
+
   return (
     <div className="nl-commit-preview">
       <header className="nl-commit-preview__header">
@@ -88,7 +95,7 @@ export function CommitPreviewPage() {
         <InlineNotice title={t('commit.stale.title')} tone="warning">
           <p>{t('commit.stale.body')}</p>
           <div className="nl-commit-preview__stale-actions">
-            <Button onClick={() => setSearchParams({}, { replace: true })}>
+            <Button onClick={refreshPreview}>
               {t('commit.action.refresh')}
             </Button>
             <Button

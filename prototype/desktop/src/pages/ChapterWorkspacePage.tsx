@@ -3,6 +3,7 @@ import { SidebarSimple, X } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { usePrototypeContext } from '../app/PrototypeContext';
+import type { PrototypeState } from '../app/prototypeState';
 import { Button } from '../components/Button';
 import { IconButton } from '../components/IconButton';
 import { ManuscriptEditor } from '../features/editor/ManuscriptEditor';
@@ -83,11 +84,12 @@ function getTaskFixture(value: string | null): TaskTrayFixtureState {
 }
 
 export function ChapterWorkspacePage() {
-  const { setAutosave, state } = usePrototypeContext();
+  const { state } = usePrototypeContext();
   const [searchParams] = useSearchParams();
   const workspace = rainRadio.chapterWorkspace;
   const [draft, setDraft] = useState(workspace.versions.draft);
   const [version, setVersion] = useState<ChapterWorkspaceVersion>('draft');
+  const [autosave, setAutosave] = useState<PrototypeState['autosave']>('saved');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const values = { ...workspace.versions, draft };
 
@@ -95,6 +97,7 @@ export function ChapterWorkspacePage() {
     () => () => {
       if (autosaveTimerRef.current !== null) {
         clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
       }
     },
     [],
@@ -131,7 +134,7 @@ export function ChapterWorkspacePage() {
       <div className="nl-chapter-workspace__body">
         {!state.focusMode && <ChapterNavigator />}
         <ManuscriptEditor
-          autosave={state.autosave}
+          autosave={autosave}
           chapter={workspace.chapter}
           onChange={updateDraft}
           onVersionChange={changeVersion}

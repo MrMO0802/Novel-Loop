@@ -45,3 +45,7 @@ artifacts/
 *.tmp
 *.temp
 .DS_Store
+
+# Local development worktrees and agent progress ledgers
+.worktrees/
+.superpowers/

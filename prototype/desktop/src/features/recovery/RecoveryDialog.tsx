@@ -3,11 +3,16 @@ import { ShieldCheck, X } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { Button } from '../../components/Button';
 import { IconButton } from '../../components/IconButton';
-import type { RecoveryAction, RecoveryFixture } from '../../fixtures/tasks';
+import {
+  getRecoveryCopyKey,
+  type RecoveryAction,
+  type RecoveryFixture
+} from '../../fixtures/tasks';
 import { t } from '../../i18n/t';
 
 interface RecoveryDialogProps {
   onOpenChange: (open: boolean) => void;
+  onActionComplete: (actionLabel: string, destructive: boolean) => void;
   open: boolean;
   recovery: RecoveryFixture;
   triggerLabel: string;
@@ -37,12 +42,14 @@ function TechnicalDetails({ recovery }: { recovery: RecoveryFixture }) {
 
 interface DestructiveConfirmationProps {
   action: RecoveryAction;
+  onConfirm: () => void;
   onOpenChange: (open: boolean) => void;
   open: boolean;
 }
 
 function DestructiveConfirmation({
   action,
+  onConfirm,
   onOpenChange,
   open
 }: DestructiveConfirmationProps) {
@@ -58,13 +65,15 @@ function DestructiveConfirmation({
           className="nl-modal nl-recovery-confirmation"
           role="alertdialog"
         >
-          <Dialog.Title>{confirmation.title}</Dialog.Title>
-          <Dialog.Description>{confirmation.body}</Dialog.Description>
+          <Dialog.Title>{t(confirmation.titleKey)}</Dialog.Title>
+          <Dialog.Description>{t(confirmation.bodyKey)}</Dialog.Description>
           <div className="nl-modal__actions">
             <Dialog.Close asChild>
               <Button variant="secondary">{t('recovery.confirm.back')}</Button>
             </Dialog.Close>
-            <Button variant="danger">{confirmation.confirmLabel}</Button>
+            <Button onClick={onConfirm} variant="danger">
+              {t(confirmation.confirmLabelKey)}
+            </Button>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -73,6 +82,7 @@ function DestructiveConfirmation({
 }
 
 export function RecoveryDialog({
+  onActionComplete,
   onOpenChange,
   open,
   recovery,
@@ -84,6 +94,16 @@ export function RecoveryDialog({
   function handleOpenChange(nextOpen: boolean) {
     if (!nextOpen) setDestructiveAction(null);
     onOpenChange(nextOpen);
+  }
+
+  function completeAction(
+    action: RecoveryAction,
+    destructive: boolean,
+    completedLabel = t(action.labelKey)
+  ) {
+    onActionComplete(completedLabel, destructive);
+    setDestructiveAction(null);
+    handleOpenChange(false);
   }
 
   return (
@@ -99,11 +119,17 @@ export function RecoveryDialog({
             event.preventDefault();
             document.getElementById(triggerId)?.focus();
           }}
+          onOpenAutoFocus={(event) => {
+            event.preventDefault();
+            document.getElementById(`${triggerId}-safest`)?.focus();
+          }}
         >
           <div className="nl-modal__header">
             <div>
               <p>{t('recovery.eyebrow')}</p>
-              <Dialog.Title>{recovery.title}</Dialog.Title>
+              <Dialog.Title>
+                {t(getRecoveryCopyKey(recovery.key, 'title'))}
+              </Dialog.Title>
             </div>
             <Dialog.Close asChild>
               <IconButton icon={X} label={t('recovery.close')} />
@@ -111,7 +137,7 @@ export function RecoveryDialog({
           </div>
 
           <Dialog.Description className="nl-recovery-dialog__happened">
-            {recovery.happened}
+            {t(getRecoveryCopyKey(recovery.key, 'happened'))}
           </Dialog.Description>
 
           <div
@@ -121,7 +147,7 @@ export function RecoveryDialog({
             <ShieldCheck aria-hidden="true" size={20} weight="regular" />
             <div>
               <strong>{t('recovery.protected')}</strong>
-              <p>{recovery.protectedCopy}</p>
+              <p>{t(getRecoveryCopyKey(recovery.key, 'protected'))}</p>
             </div>
           </div>
 
@@ -137,15 +163,20 @@ export function RecoveryDialog({
           >
             <h2 id={`recovery-next-${recovery.key}`}>{t('recovery.next')}</h2>
             <div className="nl-recovery-dialog__actions">
-              {recovery.actions.map((action) => (
+              {recovery.actions.map((action, index) => (
                 <Button
-                  key={action.label}
+                  id={index === 0 ? `${triggerId}-safest` : undefined}
+                  key={action.labelKey}
                   onClick={() => {
-                    if (action.destructive) setDestructiveAction(action);
+                    if (action.destructive) {
+                      setDestructiveAction(action);
+                      return;
+                    }
+                    completeAction(action, false);
                   }}
                   variant={action.variant}
                 >
-                  {action.label}
+                  {t(action.labelKey)}
                 </Button>
               ))}
             </div>
@@ -158,6 +189,13 @@ export function RecoveryDialog({
       {destructiveAction && (
         <DestructiveConfirmation
           action={destructiveAction}
+          onConfirm={() => completeAction(
+            destructiveAction,
+            true,
+            destructiveAction.confirmation
+              ? t(destructiveAction.confirmation.confirmLabelKey)
+              : t(destructiveAction.labelKey)
+          )}
           onOpenChange={(nextOpen) => {
             if (!nextOpen) setDestructiveAction(null);
           }}

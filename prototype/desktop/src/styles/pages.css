@@ -1405,8 +1405,20 @@
   gap: 7px;
 }
 
-.nl-commit-readiness svg {
+.nl-commit-readiness li.is-pass svg {
   color: var(--nl-accent);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.nl-commit-readiness li.is-warning svg {
+  color: var(--nl-warning);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.nl-commit-readiness li.is-fail svg {
+  color: var(--nl-danger);
   flex: 0 0 auto;
   margin-top: 2px;
 }
@@ -1574,6 +1586,12 @@
   color: var(--nl-text-secondary);
 }
 
+.nl-commit-preview__footer-actions {
+  align-items: center;
+  display: flex !important;
+  gap: 8px !important;
+}
+
 .nl-modal-overlay {
   background: rgb(32 37 33 / 42%);
   inset: 0;
@@ -1698,6 +1716,18 @@
   border-left: 3px solid var(--nl-accent);
   font-weight: 600;
   padding-left: 10px;
+}
+
+.nl-run-current__result,
+.nl-recovery-result {
+  background: var(--nl-accent-soft);
+  border-left: 3px solid var(--nl-accent);
+  margin: 16px 0 0;
+  padding: 10px 12px;
+}
+
+.nl-recovery-result p {
+  margin: 3px 0 0;
 }
 
 .nl-run-current__actions {

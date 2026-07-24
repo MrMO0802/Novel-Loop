@@ -6,8 +6,10 @@ import { RecoveryDialog } from '../features/recovery/RecoveryDialog';
 import {
   currentTask,
   getRecoveryFixture,
+  getRecoveryCopyKey,
   recentTasks
 } from '../fixtures/tasks';
+import type { TaskStatus } from '../fixtures/types';
 import { t } from '../i18n/t';
 
 function RunTechnicalDetails() {
@@ -36,6 +38,14 @@ export function RunCenterPage() {
   const [searchParams] = useSearchParams();
   const recovery = getRecoveryFixture(searchParams.get('recovery'));
   const [recoveryOpen, setRecoveryOpen] = useState(() => recovery !== null);
+  const [taskStatus, setTaskStatus] = useState<TaskStatus>(currentTask.status);
+  const [taskResult, setTaskResult] = useState<string | null>(null);
+  const [recoveryResult, setRecoveryResult] = useState<string | null>(null);
+  const taskStage = taskStatus === 'running'
+    ? t('run.current.stage.running')
+    : taskStatus === 'cancelling'
+      ? t('run.current.stage.cancelling')
+      : currentTask.stage;
 
   useEffect(() => {
     setRecoveryOpen(recovery !== null);
@@ -60,28 +70,71 @@ export function RunCenterPage() {
             <p>{t('run.current.eyebrow')}</p>
             <h2 id="run-current-title">{t('run.current.title')}</h2>
           </div>
-          <StatusLabel status={currentTask.status} />
+          <StatusLabel status={taskStatus} />
         </header>
         <div className="nl-run-current__body">
           <h3>{currentTask.title}</h3>
-          <strong>{currentTask.stage}</strong>
+          <strong>{taskStage}</strong>
           <span>{currentTask.elapsed}</span>
           <p className="nl-run-current__safe-stage">{currentTask.lastSafeStage}</p>
           <p>{currentTask.destination}</p>
         </div>
+        {taskResult && (
+          <p className="nl-run-current__result" role="status">
+            {taskResult}
+          </p>
+        )}
         <div className="nl-run-current__actions">
-          <Button>{t('run.action.resume')}</Button>
-          <Button variant="secondary">{t('run.action.cancel')}</Button>
+          {taskStatus === 'recoverable' && (
+            <Button
+              onClick={() => {
+                setTaskStatus('running');
+                setTaskResult(t('run.current.result.resume'));
+              }}
+            >
+              {t('run.action.resume')}
+            </Button>
+          )}
+          <Button
+            disabled={taskStatus === 'cancelling'}
+            onClick={() => {
+              setTaskStatus('cancelling');
+              setTaskResult(t('run.current.result.cancel'));
+            }}
+            variant="secondary"
+          >
+            {t('run.action.cancel')}
+          </Button>
           {recovery && (
             <RecoveryDialog
+              onActionComplete={(actionLabel, destructive) => {
+                setRecoveryResult(
+                  destructive
+                    ? t('recovery.result.destructive', { action: actionLabel })
+                    : t('recovery.result.safe', { action: actionLabel })
+                );
+              }}
               onOpenChange={setRecoveryOpen}
               open={recoveryOpen}
               recovery={recovery}
-              triggerLabel={t('recovery.trigger', { label: recovery.shortLabel })}
+              triggerLabel={t('recovery.trigger', {
+                label: t(getRecoveryCopyKey(recovery.key, 'short'))
+              })}
             />
           )}
         </div>
       </section>
+
+      {recoveryResult && (
+        <div
+          aria-label={t('recovery.result.label')}
+          className="nl-recovery-result"
+          role="status"
+        >
+          <strong>{t('recovery.result.label')}</strong>
+          <p>{recoveryResult}</p>
+        </div>
+      )}
 
       <section
         aria-labelledby="run-recent-title"

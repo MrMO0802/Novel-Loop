@@ -60,6 +60,29 @@ describe('controlled commit preview', () => {
     expect(screen.getByText('高风险变化已完成审阅，可以进入最终确认。')).toBeVisible();
   });
 
+  test.each([
+    [
+      '返回修改这项变化',
+      '这项变化需要先返回章节修改，再重新生成提交预览；当前不能正式提交。'
+    ],
+    [
+      '拒绝这项变化',
+      '拒绝不会从预览中静默移除这项变化；请返回章节调整内容，再重新生成提交预览。'
+    ]
+  ])(
+    'keeps formal commit blocked after choosing %s',
+    async (decisionLabel, explanation) => {
+      const user = userEvent.setup();
+      renderRoute(commitPreviewPath);
+
+      await user.click(screen.getByRole('radio', { name: decisionLabel }));
+
+      expect(screen.getByRole('button', { name: '正式提交本章' })).toBeDisabled();
+      expect(screen.getByText(explanation)).toBeVisible();
+      expect(screen.getByRole('button', { name: '返回本章修改' })).toBeVisible();
+    }
+  );
+
   test('keeps technical identifiers absent until details are explicitly opened', async () => {
     const user = userEvent.setup();
     renderRoute(commitPreviewPath);
@@ -82,7 +105,9 @@ describe('controlled commit preview', () => {
     await user.click(commitButton);
 
     const dialog = screen.getByRole('dialog', { name: '最终确认正式提交' });
-    expect(dialog).toContainElement(document.activeElement as HTMLElement | null);
+    expect(
+      within(dialog).getByRole('button', { name: '返回继续审阅' })
+    ).toHaveFocus();
     expect(within(dialog).getByText(/真实提交会创建正式故事内容/)).toBeVisible();
     expect(within(dialog).getByText(/操作前后创建安全还原点/)).toBeVisible();
 
@@ -109,6 +134,15 @@ describe('controlled commit preview', () => {
     expect(screen.getByRole('button', { name: '正式提交本章' })).toBeDisabled();
     expect(screen.getByRole('button', { name: '刷新提交预览' })).toBeVisible();
     expect(screen.getByRole('button', { name: '查看最近的故事档案变化' })).toBeVisible();
+
+    const readiness = screen.getByRole('region', { name: '提交准备情况' });
+    expect(
+      within(readiness).getByText('需要刷新：故事档案已在这份预览生成后发生变化。')
+    ).toBeVisible();
+    expect(within(readiness).getByLabelText('未通过')).toBeVisible();
+    expect(
+      within(readiness).queryByText('当前故事档案是生成预览时的版本')
+    ).toBeNull();
   });
 
   test('continues naturally from an accepted revision into commit preview', async () => {

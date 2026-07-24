@@ -18,6 +18,11 @@ export interface CommitChangeGroupFixture {
 
 export type HighRiskDecision = 'approve' | 'revise' | 'reject';
 
+export interface CommitReadinessFixture {
+  label: string;
+  status: 'fail' | 'pass' | 'warning';
+}
+
 export interface CommitPreviewFixture {
   acceptedDraftLabel: string;
   groups: readonly CommitChangeGroupFixture[];
@@ -26,7 +31,7 @@ export interface CommitPreviewFixture {
     question: string;
     transition: string;
   };
-  readiness: readonly string[];
+  readiness: readonly CommitReadinessFixture[];
   sourceChapter: string;
   technical: {
     basis: string;
@@ -144,9 +149,9 @@ export const chapterTwoCommitPreview: CommitPreviewFixture = {
     evidence: '第二章让求救信号再次出现，并把它与 1704 室的收件地址联系起来；正文支持升级悬念，但没有揭示求救者身份。'
   },
   readiness: [
-    '第二章关键一致性检查已通过',
-    '已接受草稿与本次预览来源一致',
-    '当前故事档案是生成预览时的版本'
+    { label: '第二章关键一致性检查已通过', status: 'pass' },
+    { label: '已接受草稿与本次预览来源一致', status: 'pass' },
+    { label: '当前故事档案是生成预览时的版本', status: 'pass' }
   ],
   sourceChapter: '第二章 · 收件地址',
   technical: {
@@ -157,6 +162,14 @@ export const chapterTwoCommitPreview: CommitPreviewFixture = {
 
 export const staleChapterTwoCommitPreview: CommitPreviewFixture = {
   ...chapterTwoCommitPreview,
+  readiness: [
+    { label: '第二章关键一致性检查已通过', status: 'pass' },
+    { label: '已接受草稿与本次预览来源一致', status: 'pass' },
+    {
+      label: '需要刷新：故事档案已在这份预览生成后发生变化。',
+      status: 'fail'
+    }
+  ],
   technical: {
     basis: 'preview.chapter-2.accepted-draft.stale',
     reviewReference: 'story-record.changed-after-preview'

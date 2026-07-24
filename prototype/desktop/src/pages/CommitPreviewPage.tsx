@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
-import { CheckCircle, WarningCircle } from '@phosphor-icons/react';
-import { useRef, useState } from 'react';
+import { CheckCircle, WarningCircle, XCircle } from '@phosphor-icons/react';
+import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { InlineNotice } from '../components/InlineNotice';
@@ -55,8 +55,16 @@ export function CommitPreviewPage() {
   const [decision, setDecision] = useState<HighRiskDecision | null>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [simulated, setSimulated] = useState(false);
-  const confirmationRef = useRef<HTMLDivElement>(null);
-  const commitAvailable = !stale && decision !== null;
+  const commitAvailable = !stale && decision === 'approve';
+  const decisionState = stale
+    ? t('commit.state.stale')
+    : decision === 'approve'
+      ? t('commit.state.ready')
+      : decision === 'revise'
+        ? t('commit.state.reviseRequired')
+        : decision === 'reject'
+          ? t('commit.state.rejectRequired')
+          : t('commit.state.decisionRequired');
 
   return (
     <div className="nl-commit-preview">
@@ -102,12 +110,24 @@ export function CommitPreviewPage() {
           <p>{t('commit.readiness.body')}</p>
         </div>
         <ul>
-          {preview.readiness.map((item) => (
-            <li key={item}>
-              <CheckCircle aria-hidden="true" size={18} weight="regular" />
-              {item}
-            </li>
-          ))}
+          {preview.readiness.map((item) => {
+            const ReadinessIcon = item.status === 'pass'
+              ? CheckCircle
+              : item.status === 'warning'
+                ? WarningCircle
+                : XCircle;
+
+            return (
+              <li className={`is-${item.status}`} key={item.label}>
+                <ReadinessIcon
+                  aria-label={t(`commit.readiness.status.${item.status}`)}
+                  size={18}
+                  weight="regular"
+                />
+                {item.label}
+              </li>
+            );
+          })}
         </ul>
       </section>
 
@@ -190,22 +210,23 @@ export function CommitPreviewPage() {
 
       <footer className="nl-commit-preview__footer">
         <div>
-          <strong>
-            {stale
-              ? t('commit.state.stale')
-              : decision
-                ? t('commit.state.ready')
-                : t('commit.state.decisionRequired')}
-          </strong>
+          <strong>{decisionState}</strong>
           <span>{t('commit.state.readOnly')}</span>
         </div>
-        <Button
-          disabled={!commitAvailable}
-          id="formal-commit-trigger"
-          onClick={() => setConfirmationOpen(true)}
-        >
-          {t('commit.action.submit')}
-        </Button>
+        <div className="nl-commit-preview__footer-actions">
+          {(decision === 'revise' || decision === 'reject') && (
+            <Button onClick={() => navigate(chapterPath)} variant="secondary">
+              {t('commit.action.returnToEdit')}
+            </Button>
+          )}
+          <Button
+            disabled={!commitAvailable}
+            id="formal-commit-trigger"
+            onClick={() => setConfirmationOpen(true)}
+          >
+            {t('commit.action.submit')}
+          </Button>
+        </div>
       </footer>
 
       <Dialog.Root onOpenChange={setConfirmationOpen} open={confirmationOpen}>
@@ -217,12 +238,6 @@ export function CommitPreviewPage() {
               event.preventDefault();
               document.getElementById('formal-commit-trigger')?.focus();
             }}
-            onOpenAutoFocus={(event) => {
-              event.preventDefault();
-              confirmationRef.current?.focus();
-            }}
-            ref={confirmationRef}
-            tabIndex={-1}
           >
             <Dialog.Title>{t('commit.dialog.title')}</Dialog.Title>
             <Dialog.Description>{t('commit.dialog.body')}</Dialog.Description>

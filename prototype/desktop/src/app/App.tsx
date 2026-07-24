@@ -1,3 +1,13 @@
+import { BrowserRouter } from 'react-router-dom';
+import { PrototypeContextProvider } from './PrototypeContext';
+import { PrototypeRoutes } from './routes';
+
 export function App() {
-  return <main aria-label="Novel Loop 原型">Novel Loop</main>;
+  return (
+    <BrowserRouter>
+      <PrototypeContextProvider>
+        <PrototypeRoutes />
+      </PrototypeContextProvider>
+    </BrowserRouter>
+  );
 }

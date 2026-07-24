@@ -38,7 +38,7 @@ const forbiddenPatterns: ForbiddenPattern[] = [
   },
   {
     name: 'Electron API',
-    pattern: /\b(?:BrowserWindow|contextBridge|ipcMain|ipcRenderer|nativeImage|session|shell|webContents)\b/
+    pattern: /\b(?:BrowserWindow|contextBridge|ipcMain|ipcRenderer|nativeImage|session|webContents)\b|\bshell\s*(?:\.\s*(?!css(?:['"]|$))[A-Za-z_$]|\[)/
   },
   {
     name: 'Codex invocation',
@@ -67,9 +67,15 @@ describe('prototype boundary', () => {
     ['a process API', 'const projectPath = process.cwd();', 'Node process API'],
     ['a filesystem API', "fs.readFileSync('project.json', 'utf8');", 'filesystem API'],
     ['an Electron API binding', "window.ipcRenderer.send('open-project');", 'Electron API'],
+    ['an Electron shell API binding', "shell.openPath('draft.txt');", 'Electron API'],
     ['a Codex process invocation', "spawn('codex', ['exec', '--json']);", 'Codex invocation']
   ])('rejects %s', (_description, source, expectedName) => {
     expect(findForbiddenPatterns(source).map(({ name }) => name)).toContain(expectedName);
+  });
+
+  test('allows imports from the prototype presentation shell', () => {
+    expect(findForbiddenPatterns("import { ApplicationShell } from '../shell/ApplicationShell';")).toEqual([]);
+    expect(findForbiddenPatterns("import './styles/shell.css';")).toEqual([]);
   });
 
   test('does not import production engine, Node, Electron, or Codex modules', () => {

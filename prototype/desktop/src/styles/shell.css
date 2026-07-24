@@ -1,0 +1,216 @@
+.nl-application-shell {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 100vh;
+}
+
+.nl-application-shell__header {
+  align-items: center;
+  background: var(--nl-surface);
+  border-bottom: 1px solid var(--nl-border);
+  display: flex;
+  gap: 12px;
+  min-height: 48px;
+  padding: 8px 16px;
+  white-space: nowrap;
+}
+
+.nl-application-shell__brand {
+  background: transparent;
+  border: 0;
+  color: var(--nl-text);
+  cursor: pointer;
+  font-size: 15px;
+  font-weight: 700;
+  line-height: 20px;
+  padding: 6px 0;
+}
+
+.nl-application-shell__project {
+  border-left: 1px solid var(--nl-border);
+  color: var(--nl-text-secondary);
+  min-width: 0;
+  overflow: hidden;
+  padding-left: 12px;
+  text-overflow: ellipsis;
+}
+
+.nl-application-shell__actions {
+  align-items: center;
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.nl-application-shell__workspace {
+  display: grid;
+  grid-template-columns: 224px minmax(0, 1fr);
+  min-height: 0;
+}
+
+.nl-application-shell__main {
+  min-width: 0;
+}
+
+.nl-project-navigation {
+  background: var(--nl-surface);
+  border-right: 1px solid var(--nl-border);
+  padding: 20px 12px;
+}
+
+.nl-project-navigation__title {
+  color: var(--nl-text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 20px;
+  margin: 0 8px 8px;
+}
+
+.nl-project-navigation__links {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nl-project-navigation__link {
+  border-radius: var(--nl-radius-control);
+  color: var(--nl-text-secondary);
+  display: block;
+  line-height: 20px;
+  padding: 6px 8px;
+  text-decoration: none;
+}
+
+.nl-project-navigation__link:hover,
+.nl-project-navigation__link.is-active {
+  background: var(--nl-accent-soft);
+  color: var(--nl-text);
+}
+
+.nl-project-navigation__drawer-trigger {
+  display: none;
+}
+
+.nl-drawer__overlay,
+.nl-command-palette__overlay {
+  background: rgb(32 37 33 / 30%);
+  inset: 0;
+  position: fixed;
+}
+
+.nl-drawer__content {
+  background: var(--nl-surface);
+  box-shadow: var(--nl-shadow-overlay);
+  height: 100vh;
+  left: 0;
+  max-width: min(360px, calc(100vw - 24px));
+  padding: 16px 12px;
+  position: fixed;
+  top: 0;
+  width: 100%;
+}
+
+.nl-drawer__header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.nl-drawer__title {
+  font-size: 15px;
+  line-height: 20px;
+  margin: 0 8px;
+}
+
+.nl-command-palette {
+  background: var(--nl-surface);
+  border: 1px solid var(--nl-border);
+  border-radius: var(--nl-radius-card);
+  box-shadow: var(--nl-shadow-overlay);
+  left: 50%;
+  max-width: calc(100vw - 32px);
+  padding: 12px;
+  position: fixed;
+  top: 15vh;
+  transform: translateX(-50%);
+  width: 420px;
+}
+
+.nl-command-palette__title {
+  font-size: 15px;
+  line-height: 20px;
+  margin: 4px 8px 8px;
+}
+
+.nl-command-palette__commands {
+  display: grid;
+  gap: 2px;
+}
+
+.nl-command-palette__command {
+  background: transparent;
+  border: 0;
+  border-radius: var(--nl-radius-control);
+  color: var(--nl-text);
+  cursor: pointer;
+  min-height: 36px;
+  padding: 8px;
+  text-align: left;
+}
+
+.nl-command-palette__command:hover {
+  background: var(--nl-surface-subtle);
+}
+
+.nl-route-placeholder {
+  padding: 32px;
+}
+
+.nl-route-placeholder h1 {
+  font-size: 20px;
+  line-height: 28px;
+  margin: 0;
+}
+
+.nl-application-shell--focus-mode .nl-project-navigation--desktop,
+.nl-application-shell--focus-mode .nl-project-navigation__drawer-trigger {
+  display: none;
+}
+
+.nl-application-shell--focus-mode .nl-application-shell__workspace {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+@media (max-width: 1024px) {
+  .nl-application-shell__workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-project-navigation--desktop {
+    display: none;
+  }
+
+  .nl-project-navigation__drawer-trigger {
+    display: inline-flex;
+  }
+}
+
+@media (max-width: 640px) {
+  .nl-application-shell__header {
+    gap: 8px;
+    padding-inline: 12px;
+  }
+
+  .nl-application-shell__actions {
+    gap: 4px;
+  }
+
+  .nl-application-shell__actions .nl-button--secondary {
+    display: none;
+  }
+
+  .nl-route-placeholder {
+    padding: 24px 16px;
+  }
+}

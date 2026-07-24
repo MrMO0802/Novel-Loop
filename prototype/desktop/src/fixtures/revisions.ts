@@ -14,11 +14,11 @@ export interface RevisionCandidateFixture {
   changes: readonly RevisionParagraphChange[];
   newIssueSummary: string;
   resolvedIssues: readonly string[];
+  sourceDraft: string;
 }
 
-const sourceParagraphs = parseManuscriptParagraphs(
-  rainRadio.chapterWorkspace.versions.draft
-);
+const sourceDraft = rainRadio.chapterWorkspace.versions.draft;
+const sourceParagraphs = parseManuscriptParagraphs(sourceDraft);
 const candidateDraft = rainRadio.chapterWorkspace.versions.revision_candidate;
 const candidateParagraphs = parseManuscriptParagraphs(candidateDraft);
 
@@ -47,5 +47,6 @@ export const chapterTwoRevision: RevisionCandidateFixture = {
     changeAt('duplicate-handoff', 22),
     changeAt('security-memory', 32)
   ],
-  candidateDraft
+  candidateDraft,
+  sourceDraft
 };

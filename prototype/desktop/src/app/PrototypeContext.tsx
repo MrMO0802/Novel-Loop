@@ -6,6 +6,7 @@ type SessionChapterDrafts = ReadonlyMap<string, string>;
 export type ChapterRevisionDisposition = 'accepted' | 'alternate' | 'rejected';
 
 export interface SessionChapterRevision {
+  acceptedDraft: string;
   candidateDraft: string;
   disposition: ChapterRevisionDisposition;
   originalDraft: string;
@@ -23,6 +24,7 @@ type PrototypeContextValue = {
     originalDraft: string,
     candidateDraft: string
   ) => void;
+  updateAcceptedChapterDraft: (chapterKey: string, draft: string) => void;
   setChapterDraft: (chapterKey: string, draft: string) => void;
   setActiveProjectId: (projectId: string | null) => void;
   toggleFocusMode: () => void;
@@ -50,13 +52,25 @@ export function PrototypeContextProvider({ children, initialState }: PrototypeCo
     chapterRevisions,
     state,
     decideChapterRevision: (chapterKey, disposition, originalDraft, candidateDraft) => {
-      if (disposition === 'accepted') {
-        chapterDraftsRef.current.set(chapterKey, candidateDraft);
-      }
-
       setChapterRevisions((current) => {
         const next = new Map(current);
-        next.set(chapterKey, { candidateDraft, disposition, originalDraft });
+        next.set(chapterKey, {
+          acceptedDraft: candidateDraft,
+          candidateDraft,
+          disposition,
+          originalDraft
+        });
+        return next;
+      });
+    },
+    updateAcceptedChapterDraft: (chapterKey, draft) => {
+      setChapterRevisions((current) => {
+        const revision = current.get(chapterKey);
+
+        if (!revision) return current;
+
+        const next = new Map(current);
+        next.set(chapterKey, { ...revision, acceptedDraft: draft });
         return next;
       });
     },

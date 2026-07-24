@@ -9,6 +9,7 @@ import { chapterTwoRevision } from '../src/fixtures/revisions';
 
 afterEach(() => {
   cleanup();
+  vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
 
@@ -27,6 +28,32 @@ function getCandidateDraft() {
 function renderRoute(path: string) {
   window.history.pushState({}, '', path);
   return render(<App />);
+}
+
+function stubReviewControlVisibility(desktopVisible: boolean) {
+  function createClientRects(visible: boolean) {
+    const rects = visible ? [new DOMRect(0, 0, 1, 1)] : [];
+    return Object.assign(rects, {
+      item: (index: number) => rects[index] ?? null
+    }) as unknown as DOMRectList;
+  }
+
+  const visibleRects = createClientRects(true);
+  const hiddenRects = createClientRects(false);
+
+  vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(function getClientRects(
+    this: Element
+  ) {
+    if (this.id === 'chapter-review-action') {
+      return desktopVisible ? visibleRects : hiddenRects;
+    }
+
+    if (this.classList.contains('nl-chapter-workspace__drawer-trigger--assistant')) {
+      return desktopVisible ? hiddenRects : visibleRects;
+    }
+
+    return visibleRects;
+  });
 }
 
 describe('Chapter 2 diagnostics', () => {
@@ -164,6 +191,9 @@ describe('revision candidate comparison', () => {
   test('summarizes the resolved conflict and confirms no new order or recipient', () => {
     renderRoute('/project/rain-radio/chapter/2/revision');
 
+    expect(
+      screen.getByRole('heading', { name: '候选稿已经解决' })
+    ).toBeVisible();
     expect(screen.getByText('时间冲突已解决')).toBeVisible();
     expect(screen.getByText('重复交接已删除')).toBeVisible();
     expect(screen.getByText('没有新增订单或收件人')).toBeVisible();
@@ -172,9 +202,11 @@ describe('revision candidate comparison', () => {
     expect(screen.getByText('故事档案不会因本页操作而改变')).toBeVisible();
   });
 
-  test('accepts the whole candidate into the editable session draft without committing it', async () => {
+  test('accepts the whole candidate into an independent editable buffer without committing it', async () => {
     const user = userEvent.setup();
     renderRoute('/project/rain-radio/chapter/2/revision');
+    const sourceDraft = rainRadio.chapterWorkspace.versions.draft;
+    const acceptedDraft = getCandidateDraft();
 
     await user.click(screen.getByRole('button', { name: '接受候选' }));
     expect(screen.getByText('已接受草稿')).toBeVisible();
@@ -189,15 +221,61 @@ describe('revision candidate comparison', () => {
       'accepted_draft'
     );
     expect(screen.getByRole('textbox', { name: '章节正文' }))
-      .toHaveValue(getCandidateDraft());
+      .toHaveValue(acceptedDraft);
     expect(screen.getByRole('textbox', { name: '章节正文' }))
       .not.toHaveAttribute('readonly');
     expect(screen.queryByText('本章已正式提交')).toBeNull();
     expect(screen.queryByText('故事档案已更新')).toBeNull();
 
+    const versionSelector = screen.getByRole('combobox', { name: '查看章节版本' });
+    const editor = screen.getByRole('textbox', { name: '章节正文' });
+
+    await user.selectOptions(versionSelector, 'draft');
+    expect(editor).toHaveValue(sourceDraft);
+    expect(screen.getByText('草稿（可编辑）')).toBeVisible();
+
+    const editedSource = `${sourceDraft}\n\n林澈在原稿里补记了门牌。`;
+    fireEvent.change(editor, { target: { value: editedSource } });
+
+    await user.selectOptions(versionSelector, 'accepted_draft');
+    expect(editor).toHaveValue(acceptedDraft);
+
+    const editedAccepted = `${acceptedDraft}\n\n林澈在已接受草稿里补记了雨声。`;
+    fireEvent.change(editor, { target: { value: editedAccepted } });
+
+    await user.selectOptions(versionSelector, 'draft');
+    expect(editor).toHaveValue(editedSource);
+
+    await user.selectOptions(versionSelector, 'accepted_draft');
+    expect(editor).toHaveValue(editedAccepted);
+  }, 15_000);
+
+  test('blocks stale candidate adoption and preserves source edits across route navigation', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/chapter/2');
+
+    const editor = screen.getByRole('textbox', { name: '章节正文' });
+    const editedSource = `${(editor as HTMLTextAreaElement).value}\n\n林澈保留了新的现场笔记。`;
+    fireEvent.change(editor, { target: { value: editedSource } });
     await user.click(screen.getByRole('button', { name: '比较修订' }));
-    expect(screen.getByText('已接受草稿')).toBeVisible();
-  });
+
+    expect(screen.getByText('候选已过期')).toBeVisible();
+    expect(
+      screen.getByText(/这份候选不能再接受或保留为备选版本/)
+    ).toBeVisible();
+    expect(screen.getByRole('button', { name: '接受候选' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保留为备选版本' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '拒绝候选' })).toBeEnabled();
+
+    await user.click(screen.getByRole('button', { name: '返回本章' }));
+    expect(screen.getByRole('textbox', { name: '章节正文' })).toHaveValue(editedSource);
+    expect(screen.queryByText('已接受草稿（可编辑，尚未正式提交）')).toBeNull();
+
+    await user.click(screen.getByRole('button', { name: '比较修订' }));
+    expect(screen.getByText('候选已过期')).toBeVisible();
+    expect(screen.getByRole('button', { name: '接受候选' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '保留为备选版本' })).toBeDisabled();
+  }, 15_000);
 
   test('persists rejection while preserving the edited original session draft', async () => {
     const user = userEvent.setup();
@@ -245,7 +323,8 @@ describe('revision candidate comparison', () => {
 });
 
 describe('revision flow navigation', () => {
-  test('opens the comparison from Chapter 2 and returns focus to the review action', async () => {
+  test('returns focus to the rendered desktop review action at 1440px', async () => {
+    stubReviewControlVisibility(true);
     const user = userEvent.setup();
     renderRoute('/project/rain-radio/chapter/2');
 
@@ -259,17 +338,11 @@ describe('revision flow navigation', () => {
     expect(screen.getByRole('button', { name: '比较修订' })).toHaveFocus();
   });
 
-  test('returns focus to the visible assistant drawer trigger at 1024', async () => {
-    vi.stubGlobal('matchMedia', vi.fn((query: string) => ({
-      addEventListener: vi.fn(),
-      addListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-      matches: query === '(max-width: 1024px)',
-      media: query,
-      onchange: null,
-      removeEventListener: vi.fn(),
-      removeListener: vi.fn()
-    })));
+  test.each([
+    [1280],
+    [1024]
+  ])('returns focus to the rendered assistant drawer trigger at %ipx', async () => {
+    stubReviewControlVisibility(false);
     const user = userEvent.setup();
     renderRoute('/project/rain-radio/chapter/2');
 

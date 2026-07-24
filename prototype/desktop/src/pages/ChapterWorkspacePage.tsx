@@ -93,7 +93,8 @@ export function ChapterWorkspacePage() {
     chapterDrafts,
     chapterRevisions,
     setChapterDraft,
-    state
+    state,
+    updateAcceptedChapterDraft
   } = usePrototypeContext();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -108,7 +109,11 @@ export function ChapterWorkspacePage() {
   );
   const [autosave, setAutosave] = useState<PrototypeState['autosave']>('saved');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const values = { ...workspace.versions, accepted_draft: draft, draft };
+  const values = {
+    ...workspace.versions,
+    accepted_draft: revision?.acceptedDraft ?? workspace.versions.accepted_draft,
+    draft
+  };
   const focusTarget = searchParams.get('focus');
 
   useEffect(
@@ -123,20 +128,27 @@ export function ChapterWorkspacePage() {
 
   useEffect(() => {
     if (focusTarget === 'review') {
-      const compact = window.matchMedia?.('(max-width: 1024px)').matches ?? false;
-      const focusTargetElement = compact
-        ? document.querySelector<HTMLButtonElement>(
-            '.nl-chapter-workspace__drawer-trigger--assistant'
-          )
-        : document.getElementById('chapter-review-action');
+      const desktopAction = document.getElementById('chapter-review-action');
+      const drawerTrigger = document.querySelector<HTMLButtonElement>(
+        '.nl-chapter-workspace__drawer-trigger--assistant'
+      );
 
-      focusTargetElement?.focus();
+      if (desktopAction?.getClientRects().length) {
+        desktopAction.focus();
+      } else if (drawerTrigger?.getClientRects().length) {
+        drawerTrigger.focus();
+      }
     }
   }, [focusTarget]);
 
   function updateDraft(value: string) {
-    setDraft(value);
-    setChapterDraft(chapterDraftKey, value);
+    if (version === 'accepted_draft') {
+      updateAcceptedChapterDraft(chapterDraftKey, value);
+    } else {
+      setDraft(value);
+      setChapterDraft(chapterDraftKey, value);
+    }
+
     setAutosave('saving');
 
     if (autosaveTimerRef.current !== null) {

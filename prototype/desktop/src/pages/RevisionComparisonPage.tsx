@@ -97,34 +97,36 @@ export function RevisionComparisonPage() {
     chapterDrafts,
     chapterRevisions,
     decideChapterRevision,
-    setChapterDraft
+    updateAcceptedChapterDraft
   } = usePrototypeContext();
   const navigate = useNavigate();
   const chapterDraftKey = 'rain-radio:chapter:2';
   const revision = chapterRevisions.get(chapterDraftKey);
   const decision = revision?.disposition ?? null;
-  const originalDraft = revision?.originalDraft
-    ?? chapterDrafts.get(chapterDraftKey)
+  const currentSourceDraft = chapterDrafts.get(chapterDraftKey)
     ?? rainRadio.chapterWorkspace.versions.draft;
+  const candidateIsFresh = currentSourceDraft === chapterTwoRevision.sourceDraft;
   const [mode, setMode] = useState<ComparisonMode>('side-by-side');
-  const [acceptedDraft, setAcceptedDraft] = useState(
-    () => revision?.disposition === 'accepted'
-      ? chapterDrafts.get(chapterDraftKey) ?? revision.candidateDraft
-      : chapterTwoRevision.candidateDraft
-  );
+  const acceptedDraft = revision?.acceptedDraft ?? chapterTwoRevision.candidateDraft;
 
   function decide(disposition: ChapterRevisionDisposition) {
+    if (
+      !candidateIsFresh
+      && (disposition === 'accepted' || disposition === 'alternate')
+    ) {
+      return;
+    }
+
     decideChapterRevision(
       chapterDraftKey,
       disposition,
-      originalDraft,
+      currentSourceDraft,
       chapterTwoRevision.candidateDraft
     );
   }
 
   function updateAcceptedDraft(draft: string) {
-    setAcceptedDraft(draft);
-    setChapterDraft(chapterDraftKey, draft);
+    updateAcceptedChapterDraft(chapterDraftKey, draft);
   }
 
   return (
@@ -144,6 +146,12 @@ export function RevisionComparisonPage() {
           </Button>
         </div>
       </header>
+
+      {!candidateIsFresh && (
+        <InlineNotice title={t('revision.stale.title')} tone="warning">
+          <p>{t('revision.stale.body')}</p>
+        </InlineNotice>
+      )}
 
       {decision && <DecisionNotice decision={decision} />}
 
@@ -220,13 +228,16 @@ export function RevisionComparisonPage() {
           {t('revision.action.reject')}
         </Button>
         <Button
-          disabled={decision !== null}
+          disabled={decision !== null || !candidateIsFresh}
           onClick={() => decide('alternate')}
           variant="secondary"
         >
           {t('revision.action.keepAlternate')}
         </Button>
-        <Button disabled={decision !== null} onClick={() => decide('accepted')}>
+        <Button
+          disabled={decision !== null || !candidateIsFresh}
+          onClick={() => decide('accepted')}
+        >
           {t('revision.action.accept')}
         </Button>
       </footer>

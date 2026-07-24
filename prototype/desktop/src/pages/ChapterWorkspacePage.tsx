@@ -84,10 +84,13 @@ function getTaskFixture(value: string | null): TaskTrayFixtureState {
 }
 
 export function ChapterWorkspacePage() {
-  const { state } = usePrototypeContext();
+  const { chapterDrafts, setChapterDraft, state } = usePrototypeContext();
   const [searchParams] = useSearchParams();
   const workspace = rainRadio.chapterWorkspace;
-  const [draft, setDraft] = useState(workspace.versions.draft);
+  const chapterDraftKey = `rain-radio:chapter:${workspace.chapter}`;
+  const [draft, setDraft] = useState(
+    () => chapterDrafts.get(chapterDraftKey) ?? workspace.versions.draft,
+  );
   const [version, setVersion] = useState<ChapterWorkspaceVersion>('draft');
   const [autosave, setAutosave] = useState<PrototypeState['autosave']>('saved');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,6 +108,7 @@ export function ChapterWorkspacePage() {
 
   function updateDraft(value: string) {
     setDraft(value);
+    setChapterDraft(chapterDraftKey, value);
     setAutosave('saving');
 
     if (autosaveTimerRef.current !== null) {

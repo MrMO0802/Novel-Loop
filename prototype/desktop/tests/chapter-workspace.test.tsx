@@ -103,12 +103,13 @@ describe('chapter workspace', () => {
     expect(screen.getByText('已自动保存')).toBeVisible();
   });
 
-  test('does not leave shared autosave saving when the chapter unmounts during the save delay', () => {
+  test('restores the edited draft as saved when the chapter unmounts during the save delay', () => {
     vi.useFakeTimers();
     renderRoute();
 
     const editor = screen.getByRole('textbox', { name: '章节正文' });
-    fireEvent.change(editor, { target: { value: `${(editor as HTMLTextAreaElement).value}雨声更近了。` } });
+    const editedDraft = `${(editor as HTMLTextAreaElement).value}雨声更近了。`;
+    fireEvent.change(editor, { target: { value: editedDraft } });
     expect(screen.getByText('正在保存')).toBeVisible();
 
     fireEvent.click(screen.getByRole('link', { name: '项目概览' }));
@@ -118,6 +119,7 @@ describe('chapter workspace', () => {
     fireEvent.click(screen.getByRole('link', { name: '第二章' }));
     expect(window.location.pathname).toBe('/project/rain-radio/chapter/2');
     expect(screen.getByText('已自动保存')).toBeVisible();
+    expect(screen.getByRole('textbox', { name: '章节正文' })).toHaveValue(editedDraft);
 
     act(() => vi.advanceTimersByTime(800));
     expect(screen.getByText('已自动保存')).toBeVisible();

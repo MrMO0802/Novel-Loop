@@ -1302,6 +1302,522 @@
   grid-template-columns: minmax(680px, 1fr);
 }
 
+.nl-review-page {
+  margin: 0 auto;
+  max-width: 1160px;
+  padding: 32px 40px 56px;
+  width: 100%;
+}
+
+.nl-review-page__header {
+  align-items: flex-start;
+  border-bottom: 1px solid var(--nl-border);
+  display: flex;
+  gap: 28px;
+  justify-content: space-between;
+  margin-bottom: 24px;
+  padding-bottom: 22px;
+}
+
+.nl-review-page__header > div:first-child {
+  min-width: 0;
+}
+
+.nl-review-page__header h1 {
+  font-size: 24px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 34px;
+  margin: 2px 0 5px;
+}
+
+.nl-review-page__header p,
+.nl-review-page__header span {
+  color: var(--nl-text-secondary);
+  margin: 0;
+}
+
+.nl-review-page__header p {
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.nl-review-page__header span {
+  display: block;
+  max-width: 72ch;
+}
+
+.nl-review-page > .nl-inline-notice {
+  margin-bottom: 28px;
+}
+
+.nl-review-page .nl-inline-notice p {
+  margin: 2px 0 0;
+}
+
+.nl-diagnostic-list {
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-diagnostic-finding {
+  border-top: 1px solid var(--nl-border);
+  padding: 24px 0;
+}
+
+.nl-diagnostic-finding__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+}
+
+.nl-diagnostic-finding__header > svg {
+  color: var(--nl-text-secondary);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.nl-diagnostic-finding--blocking .nl-diagnostic-finding__header > svg,
+.nl-diagnostic-finding--blocking .nl-diagnostic-finding__severity {
+  color: var(--nl-danger);
+}
+
+.nl-diagnostic-finding--advisory .nl-diagnostic-finding__header > svg,
+.nl-diagnostic-finding--advisory .nl-diagnostic-finding__severity {
+  color: var(--nl-warning);
+}
+
+.nl-diagnostic-finding__severity {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 0 0 2px;
+}
+
+.nl-diagnostic-finding h2 {
+  font-size: 17px;
+  letter-spacing: 0;
+  line-height: 25px;
+  margin: 0;
+}
+
+.nl-diagnostic-finding__summary {
+  margin: 10px 0 0 32px;
+  max-width: 76ch;
+}
+
+.nl-diagnostic-evidence {
+  margin: 16px 0 0 32px;
+  max-width: 820px;
+}
+
+.nl-diagnostic-evidence ul {
+  border-bottom: 1px solid var(--nl-border);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nl-diagnostic-evidence li {
+  border-top: 1px solid var(--nl-border);
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 72px minmax(0, 1fr);
+  padding: 11px 0;
+}
+
+.nl-diagnostic-evidence strong {
+  color: var(--nl-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nl-diagnostic-evidence q {
+  font-family: var(--nl-font-manuscript);
+  font-size: 15px;
+  line-height: 24px;
+}
+
+.nl-diagnostic-evidence > .nl-button {
+  margin-top: 8px;
+}
+
+.nl-diagnostic-evidence[role="region"]:focus,
+.nl-diagnostic-finding__actions .nl-button:focus {
+  box-shadow: var(--nl-focus);
+  outline: 2px solid var(--nl-accent);
+  outline-offset: 3px;
+}
+
+.nl-diagnostic-finding__importance {
+  border-left: 3px solid var(--nl-border);
+  margin: 17px 0 0 32px;
+  max-width: 76ch;
+  padding-left: 12px;
+}
+
+.nl-diagnostic-finding__importance h3 {
+  font-size: 13px;
+  margin: 0 0 3px;
+}
+
+.nl-diagnostic-finding__importance p {
+  color: var(--nl-text-secondary);
+  margin: 0;
+}
+
+.nl-diagnostic-finding__actions {
+  margin: 18px 0 0 32px;
+}
+
+.nl-technical-details {
+  border-top: 1px solid var(--nl-border);
+  margin: 20px 0 0 32px;
+  max-width: 820px;
+  padding-top: 12px;
+}
+
+.nl-technical-details summary {
+  color: var(--nl-text-secondary);
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.nl-technical-details dl {
+  color: var(--nl-text-secondary);
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+}
+
+.nl-technical-details dl > div {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: 84px minmax(0, 1fr);
+}
+
+.nl-technical-details dt {
+  font-size: 12px;
+}
+
+.nl-technical-details dd {
+  margin: 0;
+}
+
+.nl-technical-details code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 12px;
+}
+
+.nl-review-page__footer {
+  align-items: center;
+  display: flex;
+  gap: 24px;
+  justify-content: space-between;
+  padding-top: 24px;
+}
+
+.nl-review-page__footer > div {
+  display: grid;
+  gap: 2px;
+}
+
+.nl-review-page__footer span {
+  color: var(--nl-text-secondary);
+}
+
+.nl-revision-page__header .nl-status-label {
+  margin-bottom: 2px;
+}
+
+.nl-revision-page__header-actions {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+.nl-revision-decision {
+  margin-bottom: 20px;
+}
+
+.nl-accepted-draft {
+  border-bottom: 1px solid var(--nl-border);
+  margin-bottom: 20px;
+  padding: 0 0 24px;
+}
+
+.nl-accepted-draft h2,
+.nl-revision-reason h2,
+.nl-revision-outcome h2 {
+  font-size: 16px;
+  letter-spacing: 0;
+  line-height: 24px;
+  margin: 0 0 10px;
+}
+
+.nl-accepted-draft textarea {
+  background: var(--nl-surface);
+  border: 1px solid var(--nl-border);
+  border-radius: var(--nl-radius-control);
+  color: var(--nl-text);
+  font-family: var(--nl-font-manuscript);
+  font-size: 16px;
+  line-height: 28px;
+  min-height: 190px;
+  padding: 18px;
+  resize: vertical;
+  width: 100%;
+}
+
+.nl-revision-toolbar {
+  align-items: center;
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.nl-revision-toolbar > span {
+  color: var(--nl-text-secondary);
+  font-size: 12px;
+}
+
+.nl-revision-mode {
+  border: 1px solid var(--nl-border);
+  border-radius: var(--nl-radius-control);
+  display: inline-flex;
+  padding: 2px;
+}
+
+.nl-revision-mode .nl-button {
+  min-height: 28px;
+}
+
+.nl-revision-mode .nl-button[aria-pressed="true"] {
+  background: var(--nl-accent-soft);
+  color: var(--nl-accent);
+}
+
+.nl-paragraph-diff {
+  background: var(--nl-surface);
+  border: 1px solid var(--nl-border);
+}
+
+.nl-paragraph-diff__headings {
+  background: var(--nl-surface-subtle);
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nl-paragraph-diff__headings h2 {
+  font-size: 14px;
+  letter-spacing: 0;
+  line-height: 22px;
+  margin: 0;
+  padding: 10px 16px;
+}
+
+.nl-paragraph-diff__headings h2 + h2 {
+  border-left: 1px solid var(--nl-border);
+}
+
+.nl-paragraph-diff__row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.nl-paragraph-diff__row > h3,
+.nl-paragraph-diff__change > h3 {
+  border-top: 1px solid var(--nl-border);
+  color: var(--nl-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+  grid-column: 1 / -1;
+  letter-spacing: 0;
+  line-height: 18px;
+  margin: 0;
+  padding: 8px 16px 0;
+}
+
+.nl-paragraph-diff__passage {
+  min-width: 0;
+  padding: 10px 16px 18px;
+}
+
+.nl-paragraph-diff__row .nl-paragraph-diff__passage--added {
+  border-left: 1px solid var(--nl-border);
+}
+
+.nl-paragraph-diff__label {
+  align-items: center;
+  display: flex;
+  font-size: 12px;
+  font-weight: 600;
+  gap: 4px;
+  margin-bottom: 7px;
+}
+
+.nl-paragraph-diff__label--removed {
+  color: var(--nl-danger);
+}
+
+.nl-paragraph-diff__label--added {
+  color: var(--nl-accent);
+}
+
+.nl-paragraph-diff del,
+.nl-paragraph-diff ins {
+  color: var(--nl-text);
+  display: block;
+  font-family: var(--nl-font-manuscript);
+  font-size: 16px;
+  line-height: 28px;
+  text-decoration: none;
+}
+
+.nl-paragraph-diff__passage--removed {
+  background: var(--nl-danger-soft);
+}
+
+.nl-paragraph-diff__passage--removed del {
+  text-decoration: line-through;
+  text-decoration-thickness: 1px;
+}
+
+.nl-paragraph-diff__passage--added {
+  background: var(--nl-accent-soft);
+}
+
+.nl-paragraph-diff--unified {
+  margin: 0 auto;
+  max-width: 780px;
+}
+
+.nl-paragraph-diff__change + .nl-paragraph-diff__change {
+  border-top: 8px solid var(--nl-canvas);
+}
+
+.nl-paragraph-diff__change > h3 {
+  border-top: 0;
+}
+
+.nl-paragraph-diff__change .nl-paragraph-diff__passage + .nl-paragraph-diff__passage {
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-revision-reason {
+  border-top: 1px solid var(--nl-border);
+  margin-top: 28px;
+  padding-top: 20px;
+}
+
+.nl-revision-reason p {
+  margin: 0;
+  max-width: 76ch;
+}
+
+.nl-revision-outcome {
+  border-bottom: 1px solid var(--nl-border);
+  border-top: 1px solid var(--nl-border);
+  display: grid;
+  gap: 48px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 24px 0;
+  padding: 20px 0;
+}
+
+.nl-revision-outcome ul {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.nl-revision-outcome li,
+.nl-revision-outcome p {
+  align-items: flex-start;
+  display: flex;
+  gap: 7px;
+  margin: 0;
+}
+
+.nl-revision-outcome svg {
+  color: var(--nl-accent);
+  flex: 0 0 auto;
+  margin-top: 2px;
+}
+
+.nl-revision-actions {
+  align-items: center;
+  border-top: 1px solid var(--nl-border);
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 24px;
+  padding-top: 20px;
+}
+
+@media (max-width: 1100px) {
+  .nl-paragraph-diff__row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-paragraph-diff__row .nl-paragraph-diff__passage--added {
+    border-left: 0;
+    border-top: 1px solid var(--nl-border);
+  }
+}
+
+@media (max-width: 760px) {
+  .nl-review-page {
+    padding: 24px 20px 40px;
+  }
+
+  .nl-review-page__header,
+  .nl-review-page__footer,
+  .nl-revision-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .nl-revision-page__header-actions {
+    flex-wrap: wrap;
+  }
+
+  .nl-diagnostic-finding__summary,
+  .nl-diagnostic-evidence,
+  .nl-diagnostic-finding__importance,
+  .nl-diagnostic-finding__actions,
+  .nl-technical-details {
+    margin-left: 0;
+  }
+
+  .nl-diagnostic-evidence li {
+    gap: 4px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-paragraph-diff__headings {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-paragraph-diff__headings h2 + h2 {
+    border-left: 0;
+    border-top: 1px solid var(--nl-border);
+  }
+
+  .nl-revision-outcome {
+    gap: 22px;
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-revision-actions {
+    align-items: stretch;
+    flex-direction: column-reverse;
+  }
+}
+
 .nl-chapter-workspace--focus-mode .nl-manuscript-editor__header {
   padding-inline: max(24px, calc((100% - 760px) / 2));
 }

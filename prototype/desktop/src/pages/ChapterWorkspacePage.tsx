@@ -1,7 +1,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { SidebarSimple, X } from '@phosphor-icons/react';
 import { useEffect, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { usePrototypeContext } from '../app/PrototypeContext';
 import type { PrototypeState } from '../app/prototypeState';
 import { Button } from '../components/Button';
@@ -15,7 +15,12 @@ import { t } from '../i18n/t';
 import { ChapterNavigator } from '../shell/ChapterNavigator';
 import { TaskTray, type TaskTrayFixtureState } from '../shell/TaskTray';
 
-function ChapterAssistantContent() {
+interface ChapterAssistantContentProps {
+  actionId?: string;
+  onReview: () => void;
+}
+
+function ChapterAssistantContent({ actionId, onReview }: ChapterAssistantContentProps) {
   const workspace = rainRadio.chapterWorkspace;
 
   return (
@@ -37,17 +42,17 @@ function ChapterAssistantContent() {
       </section>
       <section className="nl-chapter-assistant__next">
         <h2>{t('chapter.assistant.next')}</h2>
-        <Button>{workspace.nextAction}</Button>
+        <Button id={actionId} onClick={onReview}>{workspace.nextAction}</Button>
       </section>
     </div>
   );
 }
 
-function ChapterAssistant() {
+function ChapterAssistant({ onReview }: Pick<ChapterAssistantContentProps, 'onReview'>) {
   return (
     <>
       <aside aria-label={t('chapter.assistant.label')} className="nl-chapter-assistant nl-chapter-assistant--desktop">
-        <ChapterAssistantContent />
+        <ChapterAssistantContent actionId="chapter-review-action" onReview={onReview} />
       </aside>
 
       <Dialog.Root>
@@ -70,7 +75,7 @@ function ChapterAssistant() {
                 <IconButton icon={X} label={t('chapter.assistant.close')} />
               </Dialog.Close>
             </div>
-            <ChapterAssistantContent />
+            <ChapterAssistantContent onReview={onReview} />
           </Dialog.Content>
         </Dialog.Portal>
       </Dialog.Root>
@@ -85,6 +90,7 @@ function getTaskFixture(value: string | null): TaskTrayFixtureState {
 
 export function ChapterWorkspacePage() {
   const { chapterDrafts, setChapterDraft, state } = usePrototypeContext();
+  const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const workspace = rainRadio.chapterWorkspace;
   const chapterDraftKey = `rain-radio:chapter:${workspace.chapter}`;
@@ -95,6 +101,7 @@ export function ChapterWorkspacePage() {
   const [autosave, setAutosave] = useState<PrototypeState['autosave']>('saved');
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const values = { ...workspace.versions, draft };
+  const focusTarget = searchParams.get('focus');
 
   useEffect(
     () => () => {
@@ -105,6 +112,12 @@ export function ChapterWorkspacePage() {
     },
     [],
   );
+
+  useEffect(() => {
+    if (focusTarget === 'review') {
+      document.getElementById('chapter-review-action')?.focus();
+    }
+  }, [focusTarget]);
 
   function updateDraft(value: string) {
     setDraft(value);
@@ -146,7 +159,11 @@ export function ChapterWorkspacePage() {
           value={values[version]}
           version={version}
         />
-        {!state.focusMode && <ChapterAssistant />}
+        {!state.focusMode && (
+          <ChapterAssistant
+            onReview={() => navigate('/project/rain-radio/chapter/2/revision')}
+          />
+        )}
       </div>
       <TaskTray initialState={getTaskFixture(searchParams.get('task'))} />
     </div>

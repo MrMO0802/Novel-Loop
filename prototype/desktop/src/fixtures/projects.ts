@@ -61,6 +61,7 @@ export const newNovelDraftFixture = {
   storyLength: 240000,
   styleReference: '雨夜的城市细节要具体，异常始终从日常缝隙里出现',
   title: '雨夜电台',
+  volumePacing: '前十章建立异常规律，中段加快地址追踪，卷末揭示姐姐留下的线索',
   voice: '克制、清晰，保留悬念',
   worldPlace: '一座沿江而建、老城区正在拆迁的南方城市',
   worldRule: '收音机只在雨夜播出，并且每次求救都指向一处即将消失的地址',

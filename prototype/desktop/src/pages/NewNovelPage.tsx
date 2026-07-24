@@ -1,9 +1,9 @@
 import { BookOpenText, Check, Circle } from '@phosphor-icons/react';
-import { useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { newNovelDraftFixture, storyBibleReviewFixture } from '../fixtures/projects';
-import { t, type MessageKey } from '../i18n/t';
+import { t, type PlainMessageKey } from '../i18n/t';
 import '../styles/onboarding.css';
 
 type WizardData = {
@@ -18,6 +18,7 @@ type WizardData = {
   storyLength: number;
   styleReference: string;
   title: string;
+  volumePacing: string;
   voice: string;
   worldPlace: string;
   worldRule: string;
@@ -26,7 +27,7 @@ type WizardData = {
 type TextField = Exclude<keyof WizardData, 'chapterCount' | 'storyLength'>;
 type NumberField = Extract<keyof WizardData, 'chapterCount' | 'storyLength'>;
 
-const stages: { id: string; labelKey: MessageKey }[] = [
+const stages = [
   { id: 'idea', labelKey: 'wizard.idea' },
   { id: 'reader', labelKey: 'wizard.reader' },
   { id: 'protagonist', labelKey: 'wizard.protagonist' },
@@ -35,7 +36,7 @@ const stages: { id: string; labelKey: MessageKey }[] = [
   { id: 'plan', labelKey: 'wizard.plan' },
   { id: 'review', labelKey: 'wizard.review' },
   { id: 'story-bible', labelKey: 'wizard.storyBible' }
-];
+] as const satisfies readonly { id: string; labelKey: PlainMessageKey }[];
 
 const initialWizardData: WizardData = { ...newNovelDraftFixture };
 
@@ -46,7 +47,7 @@ function TextAreaField({
   value
 }: {
   field: TextField;
-  labelKey: MessageKey;
+  labelKey: PlainMessageKey;
   onChange: (field: TextField, value: string) => void;
   value: string;
 }) {
@@ -71,7 +72,7 @@ function TextInputField({
   value
 }: {
   field: TextField;
-  labelKey: MessageKey;
+  labelKey: PlainMessageKey;
   onChange: (field: TextField, value: string) => void;
   value: string;
 }) {
@@ -91,18 +92,25 @@ function TextInputField({
 
 function ReviewSummary({ data }: { data: WizardData }) {
   const summary = [
-    [t('wizard.review.idea'), data.centralSituation],
-    [t('wizard.review.reader'), `${data.genre} · ${data.audience}`],
-    [t('wizard.review.protagonist'), `${data.protagonistName} · ${data.protagonistDesire}`],
-    [t('wizard.review.world'), `${data.worldPlace} · ${data.worldRule}`],
-    [t('wizard.review.style'), `${data.voice} · ${data.styleReference}`],
+    [t('wizard.review.situation'), data.centralSituation],
+    [t('wizard.review.feeling'), data.desiredFeeling],
+    [t('wizard.review.genre'), data.genre],
+    [t('wizard.review.audience'), data.audience],
+    [t('wizard.review.protagonistName'), data.protagonistName],
+    [t('wizard.review.protagonistDesire'), data.protagonistDesire],
+    [t('wizard.review.protagonistFear'), data.protagonistFear],
+    [t('wizard.review.worldPlace'), data.worldPlace],
+    [t('wizard.review.worldRule'), data.worldRule],
+    [t('wizard.review.voice'), data.voice],
+    [t('wizard.review.styleReference'), data.styleReference],
+    [t('wizard.review.volumePacing'), data.volumePacing],
     [
-      t('wizard.review.plan'),
-      t('wizard.review.planValue', {
-        chapters: data.chapterCount,
-        words: new Intl.NumberFormat('zh-CN').format(data.storyLength)
+      t('wizard.review.storyLength'),
+      t('wizard.review.words', {
+        count: new Intl.NumberFormat('zh-CN').format(data.storyLength)
       })
-    ]
+    ],
+    [t('wizard.review.chapterCount'), t('wizard.review.chapters', { count: data.chapterCount })]
   ];
 
   return (
@@ -126,9 +134,18 @@ export function NewNovelPage() {
   const [activeStage, setActiveStage] = useState(0);
   const [data, setData] = useState<WizardData>(initialWizardData);
   const [storyBible, setStoryBible] = useState(storyBibleReviewFixture);
+  const stageHeading = useRef<HTMLHeadingElement>(null);
+  const previousStage = useRef(activeStage);
   const currentStage = stages[activeStage];
   const isReview = currentStage.id === 'review';
   const isStoryBible = currentStage.id === 'story-bible';
+
+  useEffect(() => {
+    if (previousStage.current !== activeStage) {
+      stageHeading.current?.focus();
+      previousStage.current = activeStage;
+    }
+  }, [activeStage]);
 
   function updateText(field: TextField, value: string) {
     setData((current) => ({ ...current, [field]: value }));
@@ -287,10 +304,10 @@ export function NewNovelPage() {
             />
           </div>
           <TextAreaField
-            field="desiredFeeling"
+            field="volumePacing"
             labelKey="wizard.plan.paceLabel"
             onChange={updateText}
-            value={data.desiredFeeling}
+            value={data.volumePacing}
           />
         </div>
       );
@@ -355,7 +372,9 @@ export function NewNovelPage() {
 
         <form className="nl-wizard-form" onSubmit={handleSubmit}>
           <header className="nl-wizard-form__header">
-            <h2>{isStoryBible ? t('wizard.storyBible.heading') : t(currentStage.labelKey)}</h2>
+            <h2 ref={stageHeading} tabIndex={-1}>
+              {isStoryBible ? t('wizard.storyBible.heading') : t(currentStage.labelKey)}
+            </h2>
           </header>
 
           <div className="nl-wizard-form__fields">

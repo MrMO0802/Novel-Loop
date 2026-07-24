@@ -7,15 +7,23 @@ import type { ProjectSummary } from '../fixtures/types';
 import { t } from '../i18n/t';
 import '../styles/onboarding.css';
 
+const projectDestinations: Partial<Record<string, string>> = {
+  'rain-radio': '/project/rain-radio'
+};
+
 function formatWords(wordCount: number) {
   return t('library.words', { count: new Intl.NumberFormat('zh-CN').format(wordCount) });
 }
 
 function ProjectRow({ project }: { project: ProjectSummary }) {
+  const destination = projectDestinations[project.id];
+
   return (
     <li className="nl-project-row">
       <div className="nl-project-row__identity">
-        <Link to={`/project/${project.id}`}>{project.title}</Link>
+        {destination
+          ? <Link to={destination}>{project.title}</Link>
+          : <span className="nl-project-row__title">{project.title}</span>}
         <span>{t('library.chapter', {
           chapter: project.currentChapter,
           title: project.currentChapterTitle

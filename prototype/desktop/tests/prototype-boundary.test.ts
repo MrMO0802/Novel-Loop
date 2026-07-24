@@ -41,8 +41,16 @@ const forbiddenPatterns: ForbiddenPattern[] = [
     pattern: /\b(?:BrowserWindow|contextBridge|ipcMain|ipcRenderer|nativeImage|session|webContents)\b|\bshell\s*(?:\.\s*(?!css(?:['"]|$))[A-Za-z_$]|\[)/
   },
   {
-    name: 'Codex invocation',
-    pattern: /\bcodex\b/i
+    name: 'Codex executable invocation',
+    pattern: /\b(?:exec|execFile|execSync|fork|spawn|spawnSync)\s*\(\s*['"]codex['"]/i
+  },
+  {
+    name: 'Codex CLI command',
+    pattern: /['"`]\s*codex\s+(?:exec|login|logout|--[\w-]+)/i
+  },
+  {
+    name: 'Codex integration API',
+    pattern: /\b(?:codexClient|CodexClient|invokeCodex|runCodex|executeCodex)\b|\bwindow\s*\.\s*codex\b/
   }
 ];
 
@@ -68,7 +76,9 @@ describe('prototype boundary', () => {
     ['a filesystem API', "fs.readFileSync('project.json', 'utf8');", 'filesystem API'],
     ['an Electron API binding', "window.ipcRenderer.send('open-project');", 'Electron API'],
     ['an Electron shell API binding', "shell.openPath('draft.txt');", 'Electron API'],
-    ['a Codex process invocation', "spawn('codex', ['exec', '--json']);", 'Codex invocation']
+    ['a Codex executable invocation', "spawn('codex', ['exec', '--json']);", 'Codex executable invocation'],
+    ['a Codex CLI command string', "const command = 'codex exec --json';", 'Codex CLI command'],
+    ['a Codex integration API', 'codexClient.run(request);', 'Codex integration API']
   ])('rejects %s', (_description, source, expectedName) => {
     expect(findForbiddenPatterns(source).map(({ name }) => name)).toContain(expectedName);
   });
@@ -78,7 +88,13 @@ describe('prototype boundary', () => {
     expect(findForbiddenPatterns("import './styles/shell.css';")).toEqual([]);
   });
 
-  test('does not import production engine, Node, Electron, or Codex modules', () => {
+  test('allows author-facing Codex copy and message keys', () => {
+    const copy = "const ready = 'Codex 已准备好'; const key = 'setup.codex.ready';";
+
+    expect(findForbiddenPatterns(copy)).toEqual([]);
+  });
+
+  test('does not import production engine, Node, Electron, or provider integration APIs', () => {
     for (const file of sourceFiles(path.resolve('src'))) {
       const content = readFileSync(file, 'utf8');
       expect(findForbiddenPatterns(content), file).toEqual([]);

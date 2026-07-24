@@ -1,39 +1,60 @@
 import { CheckCircle, HardDrive, ShieldCheck } from '@phosphor-icons/react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Button } from '../components/Button';
 import { InlineNotice } from '../components/InlineNotice';
-import { t, type MessageKey } from '../i18n/t';
+import { t, type PlainMessageKey } from '../i18n/t';
 import '../styles/onboarding.css';
 
 type ReadinessState = 'ready' | 'missing' | 'login' | 'warning';
+type GuidanceState = Exclude<ReadinessState, 'ready'>;
+type RecheckState = 'idle' | 'checking' | 'complete';
 
-const pageTitleKeys: Record<ReadinessState, MessageKey> = {
+const pageTitleKeys = {
   ready: 'setup.page.ready',
   missing: 'setup.page.missing',
   login: 'setup.page.login',
   warning: 'setup.page.warning'
-};
+} as const satisfies Record<ReadinessState, PlainMessageKey>;
 
-const readinessTitleKeys: Record<ReadinessState, MessageKey> = {
-  ready: 'setup.\u0063odex.ready',
-  missing: 'setup.\u0063odex.missing',
+const readinessTitleKeys = {
+  ready: 'setup.codex.ready',
+  missing: 'setup.codex.missing',
   login: 'setup.readiness.login',
   warning: 'setup.readiness.warning'
-};
+} as const satisfies Record<ReadinessState, PlainMessageKey>;
 
-const readinessBodyKeys: Record<ReadinessState, MessageKey> = {
+const readinessBodyKeys = {
   ready: 'setup.readiness.readyBody',
   missing: 'setup.readiness.missingBody',
   login: 'setup.readiness.loginBody',
   warning: 'setup.readiness.warningBody'
-};
+} as const satisfies Record<ReadinessState, PlainMessageKey>;
 
-const checkKeys: MessageKey[] = [
+const checkKeys = [
   'setup.check.installed',
   'setup.check.signedIn',
   'setup.check.writing',
   'setup.check.structured'
-];
+] as const satisfies readonly PlainMessageKey[];
+
+const guidanceTitleKeys = {
+  missing: 'setup.guidance.install.title',
+  login: 'setup.guidance.login.title',
+  warning: 'setup.guidance.warning.title'
+} as const satisfies Record<GuidanceState, PlainMessageKey>;
+
+const guidanceBodyKeys = {
+  missing: 'setup.guidance.install.body',
+  login: 'setup.guidance.login.body',
+  warning: 'setup.guidance.warning.body'
+} as const satisfies Record<GuidanceState, PlainMessageKey>;
+
+const recheckResultKeys = {
+  missing: 'setup.recheck.missingResult',
+  login: 'setup.recheck.loginResult',
+  warning: 'setup.recheck.warningResult'
+} as const satisfies Record<GuidanceState, PlainMessageKey>;
 
 function ReadyChecklist() {
   return (
@@ -54,6 +75,9 @@ function ReadyChecklist() {
 export function FirstLaunchPage() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
+  const [guidance, setGuidance] = useState<GuidanceState | null>(null);
+  const [recheckState, setRecheckState] = useState<RecheckState>('idle');
+  const recheckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const requestedState = searchParams.get('state');
   const state: ReadinessState = requestedState === 'missing'
     || requestedState === 'login'
@@ -61,6 +85,20 @@ export function FirstLaunchPage() {
     ? requestedState
     : 'ready';
   const canContinue = state === 'ready' || state === 'warning';
+
+  useEffect(() => () => {
+    if (recheckTimer.current) clearTimeout(recheckTimer.current);
+  }, []);
+
+  function handleRecheck() {
+    if (state === 'ready') return;
+    if (recheckTimer.current) clearTimeout(recheckTimer.current);
+    setRecheckState('checking');
+    recheckTimer.current = setTimeout(() => {
+      setRecheckState('complete');
+      recheckTimer.current = null;
+    }, 120);
+  }
 
   return (
     <div className="nl-page nl-page--setup">
@@ -100,23 +138,57 @@ export function FirstLaunchPage() {
         <div className="nl-setup-section__actions">
           {state === 'missing' && (
             <>
-              <Button variant="secondary">{t('setup.action.openGuide')}</Button>
-              <Button>{t('setup.action.checkAgain')}</Button>
+              <Button onClick={() => setGuidance('missing')} variant="secondary">
+                {t('setup.action.openGuide')}
+              </Button>
+              <Button disabled={recheckState === 'checking'} onClick={handleRecheck}>
+                {t('setup.action.checkAgain')}
+              </Button>
             </>
           )}
           {state === 'login' && (
             <>
-              <Button variant="secondary">{t('setup.action.loginGuide')}</Button>
-              <Button>{t('setup.action.checkAgain')}</Button>
+              <Button onClick={() => setGuidance('login')} variant="secondary">
+                {t('setup.action.loginGuide')}
+              </Button>
+              <Button disabled={recheckState === 'checking'} onClick={handleRecheck}>
+                {t('setup.action.checkAgain')}
+              </Button>
             </>
           )}
           {state === 'warning' && (
             <>
-              <Button variant="secondary">{t('setup.action.viewGuidance')}</Button>
-              <Button variant="quiet">{t('setup.action.checkAgain')}</Button>
+              <Button onClick={() => setGuidance('warning')} variant="secondary">
+                {t('setup.action.viewGuidance')}
+              </Button>
+              <Button
+                disabled={recheckState === 'checking'}
+                onClick={handleRecheck}
+                variant="quiet"
+              >
+                {t('setup.action.checkAgain')}
+              </Button>
             </>
           )}
         </div>
+
+        {guidance && (
+          <section
+            aria-labelledby={`setup-guidance-${guidance}`}
+            className="nl-setup-guidance"
+          >
+            <h3 id={`setup-guidance-${guidance}`}>{t(guidanceTitleKeys[guidance])}</h3>
+            <p>{t(guidanceBodyKeys[guidance])}</p>
+          </section>
+        )}
+
+        {recheckState !== 'idle' && state !== 'ready' && (
+          <p aria-atomic="true" aria-live="polite" className="nl-recheck-status" role="status">
+            {recheckState === 'checking'
+              ? t('setup.recheck.checking')
+              : t(recheckResultKeys[state])}
+          </p>
+        )}
       </section>
 
       <section className="nl-setup-section" aria-labelledby="storage-title">

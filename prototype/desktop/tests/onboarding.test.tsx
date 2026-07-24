@@ -14,11 +14,17 @@ function renderRoute(path: string) {
 }
 
 describe('first launch readiness', () => {
-  test('ready state enables Continue', () => {
+  test('ready state enables Continue and opens the library', async () => {
+    const user = userEvent.setup();
     renderRoute('/setup?state=ready');
 
     expect(screen.getByText('Codex 已准备好')).toBeVisible();
-    expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
+    const continueButton = screen.getByRole('button', { name: '继续' });
+    expect(continueButton).toBeEnabled();
+
+    await user.click(continueButton);
+
+    expect(screen.getByRole('heading', { name: '作品库' })).toBeVisible();
   });
 
   test('missing state offers the guide and another check', () => {
@@ -45,6 +51,36 @@ describe('first launch readiness', () => {
     expect(screen.getByRole('button', { name: '继续' })).toBeEnabled();
     expect(screen.getByRole('button', { name: '重新检查' })).toBeVisible();
   });
+
+  test.each([
+    ['/setup?state=missing', '打开指南', '安装指南', '完成安装后回到这里重新检查。'],
+    ['/setup?state=login', '查看登录说明', '登录说明', '按页面提示完成登录。'],
+    ['/setup?state=warning', '查看处理建议', '处理建议', '你可以继续写作。']
+  ])('shows controlled guidance for %s', async (route, action, title, copy) => {
+    const user = userEvent.setup();
+    renderRoute(route);
+
+    await user.click(screen.getByRole('button', { name: action }));
+
+    const guidance = screen.getByRole('region', { name: title });
+    expect(guidance).toHaveTextContent(copy);
+    expect(guidance).not.toHaveTextContent(/token|auth\.json|\.codex|--json|--full-auto|终端|命令行/i);
+  });
+
+  test.each([
+    ['/setup?state=missing', '检查完成，仍未找到 Codex。'],
+    ['/setup?state=login', '检查完成，仍需要登录。'],
+    ['/setup?state=warning', '检查完成，写作功能仍可使用。']
+  ])('announces fixture recheck progress and result for %s', async (route, result) => {
+    const user = userEvent.setup();
+    renderRoute(route);
+
+    await user.click(screen.getByRole('button', { name: '重新检查' }));
+
+    expect(screen.getByRole('status')).toHaveTextContent('正在重新检查');
+    expect(await screen.findByText(result)).toBeVisible();
+    expect(screen.getByRole('status')).toHaveTextContent(result);
+  });
 });
 
 describe('project library', () => {
@@ -65,6 +101,27 @@ describe('project library', () => {
     expect(within(projectList).getByText('42,680 字')).toBeVisible();
     expect(within(projectList).getByText('1 项待审阅')).toBeVisible();
     expect(screen.getByText('已归档作品（1）')).toBeVisible();
+  });
+
+  test('links only projects with implemented prototype destinations', async () => {
+    const user = userEvent.setup();
+    renderRoute('/library');
+
+    const projectList = screen.getByRole('list', { name: '我的作品' });
+    const supportedLink = within(projectList).getByRole('link', { name: '雨夜电台' });
+    expect(supportedLink).toHaveAttribute('href', '/project/rain-radio');
+    expect(within(projectList).queryByRole('link', { name: '长安残梦' })).toBeNull();
+    expect(within(projectList).queryByRole('link', { name: '零号航班' })).toBeNull();
+
+    await user.click(screen.getByText('已归档作品（1）'));
+
+    const archivedList = screen.getByRole('list', { name: '已归档作品（1）' });
+    expect(within(archivedList).getByText('纸月亮')).toBeVisible();
+    expect(within(archivedList).queryByRole('link', { name: '纸月亮' })).toBeNull();
+
+    await user.click(supportedLink);
+
+    expect(screen.getByRole('heading', { name: '雨夜电台' })).toBeVisible();
   });
 
   test('reveals archived projects only after opening the disclosure', async () => {
@@ -116,6 +173,73 @@ describe('new novel wizard', () => {
     }
   });
 
+  test('keeps reader feeling and first-volume pacing independent', async () => {
+    const user = userEvent.setup();
+    renderRoute('/new');
+
+    const feeling = screen.getByLabelText('前三章结束时，希望读者感受到什么？');
+    await user.clear(feeling);
+    await user.type(feeling, '读者情绪保持好奇和轻微不安');
+
+    await user.click(screen.getByRole('button', { name: '篇幅与章节计划' }));
+    const pacing = screen.getByLabelText('第一卷的推进节奏');
+    await user.clear(pacing);
+    await user.type(pacing, '前十章缓慢收紧，卷末连续揭示');
+
+    await user.click(screen.getByRole('button', { name: '核心创意' }));
+    expect(screen.getByLabelText('前三章结束时，希望读者感受到什么？')).toHaveValue(
+      '读者情绪保持好奇和轻微不安'
+    );
+
+    await user.click(screen.getByRole('button', { name: '篇幅与章节计划' }));
+    expect(screen.getByLabelText('第一卷的推进节奏')).toHaveValue(
+      '前十章缓慢收紧，卷末连续揭示'
+    );
+  });
+
+  test('review displays every collected creative decision', async () => {
+    const user = userEvent.setup();
+    renderRoute('/new');
+
+    await user.click(screen.getByRole('button', { name: '确认创作简报' }));
+
+    for (const decision of [
+      '雨夜电台',
+      '一名送餐员收到一台没有电源的收音机发来的求救。',
+      '好奇、不安，并开始怀疑求救者的真实身份',
+      '都市悬疑',
+      '喜欢现实质感、慢热悬疑与人物关系的成年读者',
+      '林澈',
+      '查清失踪姐姐最后一晚送出的那份外卖去了哪里',
+      '承认姐姐的失踪与自己当年的逃避有关',
+      '一座沿江而建、老城区正在拆迁的南方城市',
+      '收音机只在雨夜播出，并且每次求救都指向一处即将消失的地址',
+      '克制、清晰，保留悬念',
+      '雨夜的城市细节要具体，异常始终从日常缝隙里出现',
+      '前十章建立异常规律，中段加快地址追踪，卷末揭示姐姐留下的线索',
+      '240,000 字',
+      '30 章'
+    ]) {
+      expect(screen.getByText(decision)).toBeVisible();
+    }
+  });
+
+  test('moves focus to the new stage heading without focusing on initial render', async () => {
+    const user = userEvent.setup();
+    renderRoute('/new');
+
+    expect(document.body).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: '下一项' }));
+    expect(screen.getByRole('heading', { name: '类型与读者' })).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: '返回' }));
+    expect(screen.getByRole('heading', { name: '核心创意' })).toHaveFocus();
+
+    await user.click(screen.getByRole('button', { name: '世界观' }));
+    expect(screen.getByRole('heading', { name: '世界观' })).toHaveFocus();
+  });
+
   test('offers an editable fixture Story Bible review', async () => {
     const user = userEvent.setup();
     renderRoute('/new');
@@ -123,7 +247,21 @@ describe('new novel wizard', () => {
     await user.click(screen.getByRole('button', { name: '故事圣经' }));
 
     expect(screen.getByRole('heading', { name: '审阅故事圣经' })).toBeVisible();
-    expect(screen.getByLabelText<HTMLTextAreaElement>('故事圣经草稿').value).toContain('林澈');
+    const editor = screen.getByLabelText<HTMLTextAreaElement>('故事圣经草稿');
+    expect(editor.value).toContain('林澈');
+
+    await user.clear(editor);
+    await user.type(editor, '# 改写后的故事圣经\n\n林澈决定追查最后一个地址。');
+
+    expect(editor).toHaveValue('# 改写后的故事圣经\n\n林澈决定追查最后一个地址。');
     expect(screen.getByText('草稿，创建作品前仍可修改')).toBeVisible();
+  });
+
+  test('renders the wizard form as an unframed workflow', () => {
+    const wizardRule = onboardingStyles.match(/\.nl-wizard-form\s*\{([^}]*)\}/)?.[1] ?? '';
+
+    expect(wizardRule).not.toMatch(/(?:^|\s)background\s*:/);
+    expect(wizardRule).not.toMatch(/(?:^|\s)border\s*:/);
+    expect(wizardRule).not.toMatch(/border-radius\s*:/);
   });
 });

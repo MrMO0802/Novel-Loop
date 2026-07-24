@@ -90,6 +90,15 @@ describe('project library', () => {
     );
   });
 
+  test('keeps non-linked project titles out of secondary subtitle styling', () => {
+    expect(onboardingStyles).toMatch(
+      /\.nl-project-row__identity span:not\(\.nl-project-row__title\),\s*\.nl-project-row__metric/
+    );
+    expect(onboardingStyles).toMatch(
+      /\.nl-project-row__identity span:not\(\.nl-project-row__title\)\s*\{/
+    );
+  });
+
   test('presents the current work and projects as a readable list', () => {
     renderRoute('/library');
 

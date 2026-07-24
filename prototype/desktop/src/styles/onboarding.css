@@ -308,14 +308,14 @@
   color: var(--nl-accent);
 }
 
-.nl-project-row__identity span,
+.nl-project-row__identity span:not(.nl-project-row__title),
 .nl-project-row__metric,
 .nl-project-row__updated {
   color: var(--nl-text-secondary);
   font-size: 13px;
 }
 
-.nl-project-row__identity span {
+.nl-project-row__identity span:not(.nl-project-row__title) {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;

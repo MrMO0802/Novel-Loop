@@ -13,6 +13,22 @@ function isProjectFreeRoute(pathname: string) {
   return pathname === '/library' || pathname === '/new' || pathname.startsWith('/setup');
 }
 
+function isExactCtrlShortcut(event: KeyboardEvent, key: string) {
+  return event.ctrlKey
+    && !event.shiftKey
+    && !event.altKey
+    && !event.metaKey
+    && event.key.toLowerCase() === key;
+}
+
+function isExactFocusModeShortcut(event: KeyboardEvent) {
+  return event.ctrlKey
+    && event.shiftKey
+    && !event.altKey
+    && !event.metaKey
+    && event.key === 'Enter';
+}
+
 export function ApplicationShell() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -25,28 +41,30 @@ export function ApplicationShell() {
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.isComposing || event.altKey || event.metaKey || !event.ctrlKey) return;
-      if (isCommandPaletteOpen) return;
+      if (event.defaultPrevented || event.isComposing) return;
 
-      if (event.key.toLowerCase() === 'k') {
+      const opensCommandPalette = isExactCtrlShortcut(event, 'k');
+      const opensCurrentChapter = isExactCtrlShortcut(event, 'p');
+      const togglesFocusMode = isExactFocusModeShortcut(event);
+
+      if (isCommandPaletteOpen) {
+        if (opensCommandPalette || opensCurrentChapter || togglesFocusMode) event.preventDefault();
+        return;
+      }
+
+      if (opensCommandPalette) {
         event.preventDefault();
         setCommandPaletteOpen(true);
         return;
       }
 
-      if (event.shiftKey && event.key.toLowerCase() === 'p') {
-        event.preventDefault();
-        navigate('/library');
-        return;
-      }
-
-      if (!event.shiftKey && event.key.toLowerCase() === 'p' && state.activeProjectId) {
+      if (opensCurrentChapter && state.activeProjectId) {
         event.preventDefault();
         navigate(`/project/${state.activeProjectId}/chapter/2`);
         return;
       }
 
-      if (event.shiftKey && event.key === 'Enter') {
+      if (togglesFocusMode) {
         event.preventDefault();
         toggleFocusMode();
       }

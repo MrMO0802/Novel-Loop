@@ -1,9 +1,12 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, test } from 'vitest';
+import { readFileSync } from 'node:fs';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { App } from '../src/app/App';
 
 afterEach(cleanup);
+
+const shellStyles = readFileSync('src/styles/shell.css', 'utf8');
 
 function renderRoute(path: string) {
   window.history.pushState({}, '', path);
@@ -116,5 +119,73 @@ describe('command palette and shortcuts', () => {
     await user.keyboard('{Escape}');
 
     expect(screen.getByRole('heading', { name: '雨夜电台' })).toBeVisible();
+  });
+
+  test('does not reserve Ctrl+Shift+P', () => {
+    renderRoute('/project/rain-radio');
+
+    const dispatched = fireEvent.keyDown(document, { ctrlKey: true, key: 'p', shiftKey: true });
+
+    expect(dispatched).toBe(true);
+    expect(screen.getByRole('heading', { name: '雨夜电台' })).toBeVisible();
+  });
+
+  test.each([
+    ['Ctrl+Shift+K', { ctrlKey: true, key: 'k', shiftKey: true }],
+    ['Ctrl+Alt+K', { altKey: true, ctrlKey: true, key: 'k' }],
+    ['Ctrl+Meta+K', { ctrlKey: true, key: 'k', metaKey: true }],
+    ['Ctrl+Alt+P', { altKey: true, ctrlKey: true, key: 'p' }],
+    ['Ctrl+Meta+P', { ctrlKey: true, key: 'p', metaKey: true }]
+  ])('does not accept %s as a Ctrl+K or Ctrl+P shortcut', (_shortcut, eventInit) => {
+    renderRoute('/project/rain-radio');
+
+    const dispatched = fireEvent.keyDown(document, eventInit);
+
+    expect(dispatched).toBe(true);
+    expect(screen.queryByRole('dialog', { name: '快速操作' })).toBeNull();
+    expect(screen.getByRole('heading', { name: '雨夜电台' })).toBeVisible();
+  });
+
+  test.each([
+    ['Ctrl+Shift+Alt+Enter', { altKey: true, ctrlKey: true, key: 'Enter', shiftKey: true }],
+    ['Ctrl+Shift+Meta+Enter', { ctrlKey: true, key: 'Enter', metaKey: true, shiftKey: true }]
+  ])('does not accept %s as the focus-mode shortcut', (_shortcut, eventInit) => {
+    renderRoute('/project/rain-radio');
+
+    const dispatched = fireEvent.keyDown(document, eventInit);
+
+    expect(dispatched).toBe(true);
+    expect(screen.getByLabelText('应用框架')).not.toHaveClass('nl-application-shell--focus-mode');
+  });
+
+  test('suppresses Ctrl+P browser behavior while the command palette owns focus', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio');
+
+    await user.click(screen.getByRole('button', { name: '打开命令面板' }));
+    const dispatched = fireEvent.keyDown(document, { ctrlKey: true, key: 'p' });
+
+    expect(dispatched).toBe(false);
+    expect(screen.getByRole('dialog', { name: '快速操作' })).toBeVisible();
+
+    await user.keyboard('{Escape}');
+    expect(screen.getByRole('heading', { name: '雨夜电台' })).toBeVisible();
+  });
+
+  test('removes the global keydown listener when the shell unmounts', () => {
+    const removeEventListener = vi.spyOn(document, 'removeEventListener');
+    const { unmount } = renderRoute('/project/rain-radio');
+
+    unmount();
+
+    expect(removeEventListener).toHaveBeenCalledWith('keydown', expect.any(Function));
+    removeEventListener.mockRestore();
+  });
+});
+
+describe('project navigation breakpoint source', () => {
+  test('defines the drawer switch at 1024px without relying on computed CSS', () => {
+    expect(shellStyles).toMatch(/@media \(max-width: 1024px\) \{[\s\S]*?\.nl-project-navigation--desktop \{\s*display: none;/);
+    expect(shellStyles).toMatch(/@media \(max-width: 1024px\) \{[\s\S]*?\.nl-project-navigation__drawer-trigger \{\s*display: inline-flex;/);
   });
 });

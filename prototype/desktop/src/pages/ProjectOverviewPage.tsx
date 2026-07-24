@@ -28,22 +28,24 @@ export function ProjectOverviewPage() {
               <h2 id="volume-progress-title">{rainRadio.volume.name}</h2>
               <p>{rainRadio.volume.direction}</p>
             </div>
-            <ol className="nl-chapter-sequence" aria-label="当前章节进度">
+            <ol className="nl-chapter-sequence" aria-label={t('overview.chapterProgress')}>
               <li className="is-committed">
-                <span>第一章</span>
-                <strong>已正式提交</strong>
+                <span>{t('overview.chapter.one')}</span>
+                <strong>{t('overview.chapter.committed')}</strong>
               </li>
               <li className="is-current">
-                <span>第二章</span>
-                <strong>等待审阅变更</strong>
+                <span>{t('overview.chapter.two')}</span>
+                <strong>{t('overview.chapter.reviewChanges')}</strong>
               </li>
               <li>
-                <span>第三章</span>
-                <strong>已规划</strong>
+                <span>{t('overview.chapter.three')}</span>
+                <strong>{t('overview.chapter.planned')}</strong>
               </li>
               <li>
-                <span>其余 27 章</span>
-                <strong>按卷纲推进</strong>
+                <span>{t('overview.chapter.remaining', {
+                  count: rainRadio.volume.plannedChapters - 3
+                })}</span>
+                <strong>{t('overview.chapter.followOutline')}</strong>
               </li>
             </ol>
           </section>
@@ -54,7 +56,7 @@ export function ProjectOverviewPage() {
               <span>{rainRadio.latestChapter.status}</span>
             </div>
             <h3>{t('overview.chapterTitle', {
-              chapter: '二',
+              chapter: t('overview.chapterNumber.two'),
               title: rainRadio.latestChapter.title
             })}</h3>
             <p className="nl-overview-section__summary">{rainRadio.latestChapter.summary}</p>
@@ -120,7 +122,7 @@ export function ProjectOverviewPage() {
           <p>{t('overview.recommended')}</p>
           <h2>{t('overview.recommendedTitle')}</h2>
           <span>{t('overview.recommendedBody')}</span>
-          <Button onClick={() => navigate('/project/rain-radio/story-record')}>
+          <Button onClick={() => navigate('/project/rain-radio/story-record?view=pending')}>
             {t('overview.recommendedAction')}
           </Button>
         </aside>

@@ -10,7 +10,7 @@ import type {
 } from '../../fixtures/rainRadio';
 import { t, type PlainMessageKey } from '../../i18n/t';
 
-type StoryRecordTab =
+export type StoryRecordTab =
   | 'characters'
   | 'timeline'
   | 'reader'
@@ -18,7 +18,8 @@ type StoryRecordTab =
   | 'foreshadowing'
   | 'relationships'
   | 'world-rules'
-  | 'canon-facts';
+  | 'canon-facts'
+  | 'pending';
 
 const tabs = [
   { value: 'characters', labelKey: 'record.tab.characters' },
@@ -28,7 +29,8 @@ const tabs = [
   { value: 'foreshadowing', labelKey: 'record.tab.foreshadowing' },
   { value: 'relationships', labelKey: 'record.tab.relationships' },
   { value: 'world-rules', labelKey: 'record.tab.worldRules' },
-  { value: 'canon-facts', labelKey: 'record.tab.canonFacts' }
+  { value: 'canon-facts', labelKey: 'record.tab.canonFacts' },
+  { value: 'pending', labelKey: 'record.tab.pending' }
 ] as const satisfies readonly { value: StoryRecordTab; labelKey: PlainMessageKey }[];
 
 const readerLabels: Record<ReaderKnowledgeKind, PlainMessageKey> = {
@@ -167,7 +169,10 @@ function TimelineView({
       {visibleEvents.length === 0 ? <EmptySearchState /> : (
         <ol className="nl-timeline">
           {visibleEvents.map((event) => (
-            <li aria-label={`时间线事件：${event.title}`} key={event.key}>
+            <li
+              aria-label={t('record.timeline.eventLabel', { title: event.title })}
+              key={event.key}
+            >
               <time>{event.when}</time>
               <div>
                 <h3>{event.title}</h3>
@@ -197,7 +202,7 @@ function ReaderKnowledgeView({
   return (
     <>
       <RecordViewHeader
-        description="把读者已经掌握的信息与仍在形成的猜测分开，避免正文提前确认答案。"
+        description={t('record.reader.description')}
         title={t('record.tab.readerKnowledge')}
       />
       {visibleGroups.length === 0 ? <EmptySearchState /> : (
@@ -249,7 +254,7 @@ function MysteryView({
         description={t('record.mysteries.description')}
         title={t('record.tab.mysteries')}
       />
-      <div className="nl-record-filters" aria-label="筛选待兑现悬念">
+      <div className="nl-record-filters" aria-label={t('record.filter.mysteriesLabel')}>
         {filters.map(([value, labelKey]) => (
           <button
             aria-pressed={filter === value}
@@ -264,7 +269,10 @@ function MysteryView({
       {visibleMysteries.length === 0 ? <EmptySearchState /> : (
         <div className="nl-record-entries">
           {visibleMysteries.map((mystery) => (
-            <article aria-label={`悬念：${mystery.question}`} key={mystery.key}>
+            <article
+              aria-label={t('record.mystery.entryLabel', { question: mystery.question })}
+              key={mystery.key}
+            >
               <header>
                 <h3>{mystery.question}</h3>
                 <span className={`nl-record-status nl-record-status--${mystery.status}`}>
@@ -323,7 +331,7 @@ function ForeshadowingView({
         description={t('record.foreshadowing.description')}
         title={t('record.tab.foreshadowing')}
       />
-      <div className="nl-record-filters" aria-label="筛选伏笔">
+      <div className="nl-record-filters" aria-label={t('record.filter.foreshadowingLabel')}>
         {filters.map(([value, labelKey]) => (
           <button
             aria-pressed={filter === value}
@@ -345,7 +353,10 @@ function ForeshadowingView({
       ) : (
         <div className="nl-record-entries">
           {visibleThreads.map((thread) => (
-            <article aria-label={`伏笔：${thread.clue}`} key={thread.key}>
+            <article
+              aria-label={t('record.foreshadowing.entryLabel', { clue: thread.clue })}
+              key={thread.key}
+            >
               <header>
                 <h3>{thread.clue}</h3>
                 <span className="nl-record-status">{t('record.foreshadowing.planted')}</span>
@@ -413,13 +424,11 @@ function StoryFactList({
   description,
   facts,
   query,
-  suppressEmpty = false,
   title
 }: {
   description: string;
   facts: RainRadioProject['canonFacts'];
   query: string;
-  suppressEmpty?: boolean;
   title: string;
 }) {
   const visibleFacts = facts.filter((fact) => includesQuery(
@@ -432,7 +441,7 @@ function StoryFactList({
     <>
       <RecordViewHeader description={description} title={title} />
       {visibleFacts.length === 0 ? (
-        suppressEmpty ? null : <EmptySearchState />
+        <EmptySearchState />
       ) : (
         <ul className="nl-fact-list">
           {visibleFacts.map((fact) => (
@@ -454,56 +463,170 @@ function CanonFactsView({
   project: RainRadioProject;
   query: string;
 }) {
-  const visibleChanges = project.pendingChanges.changes.filter((change) => includesQuery(
+  return (
+    <StoryFactList
+      description={t('record.canon.description')}
+      facts={project.canonFacts}
+      query={query}
+      title={t('record.tab.canonFacts')}
+    />
+  );
+}
+
+function PendingChangesView({
+  pending,
+  query
+}: {
+  pending: RainRadioProject['pendingChanges'];
+  query: string;
+}) {
+  const characters = pending.characters.filter((character) => includesQuery(
+    query,
+    character.name,
+    character.role,
+    character.currentGoal,
+    character.currentState,
+    character.pressure,
+    character.lastSeen
+  ));
+  const timeline = pending.timeline.filter((event) => includesQuery(
+    query,
+    event.when,
+    event.title,
+    event.summary,
+    event.source
+  ));
+  const foreshadowing = pending.foreshadowing.filter((thread) => includesQuery(
+    query,
+    thread.clue,
+    thread.placement,
+    thread.intendedPayoff,
+    thread.evidence
+  ));
+  const relationships = pending.relationships.filter((relationship) => includesQuery(
+    query,
+    relationship.people,
+    relationship.relation,
+    relationship.currentState
+  ));
+  const changes = pending.changes.filter((change) => includesQuery(
     query,
     change.category,
     change.change,
     change.evidence
   ));
+  const hasResults = characters.length
+    + timeline.length
+    + foreshadowing.length
+    + relationships.length
+    + changes.length > 0;
 
   return (
-    <>
-      <StoryFactList
-        description={t('record.canon.description')}
-        facts={project.canonFacts}
-        query={query}
-        suppressEmpty={visibleChanges.length > 0}
-        title={t('record.tab.canonFacts')}
-      />
-      {(query.trim().length === 0 || visibleChanges.length > 0) && (
-        <section className="nl-pending-changes" aria-labelledby="pending-record-title">
-          <header>
-            <div>
-              <h3 id="pending-record-title">{t('record.pending.title')}</h3>
-              <p>{project.pendingChanges.note}</p>
-            </div>
-            <span>{project.pendingChanges.status}</span>
-          </header>
-          <h4>{t('record.pending.changes')}</h4>
-          <ul>
-            {visibleChanges.map((change) => (
-              <li key={`${change.category}-${change.change}`}>
-                <strong>{change.category}</strong>
-                <p>{change.change}</p>
-                <span>{change.evidence}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+    <section className="nl-pending-changes" aria-labelledby="pending-record-title">
+      <header>
+        <div>
+          <h2 id="pending-record-title">{t('record.pending.title')}</h2>
+          <p>{t('record.pending.description')}</p>
+          <p>{pending.note}</p>
+        </div>
+        <span>{pending.status}</span>
+      </header>
+
+      {!hasResults ? <EmptySearchState /> : (
+        <div className="nl-pending-changes__groups">
+          {characters.length > 0 && (
+            <section>
+              <h3>{t('record.pending.characters')}</h3>
+              <ul>
+                {characters.map((character) => (
+                  <li key={character.key}>
+                    <strong>{character.name}</strong>
+                    <p>{character.currentState}</p>
+                    <span>{character.lastSeen}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {timeline.length > 0 && (
+            <section>
+              <h3>{t('record.pending.timeline')}</h3>
+              <ul>
+                {timeline.map((event) => (
+                  <li key={event.key}>
+                    <strong>{event.title}</strong>
+                    <p>{event.summary}</p>
+                    <span>{event.when}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {foreshadowing.length > 0 && (
+            <section>
+              <h3>{t('record.pending.foreshadowing')}</h3>
+              <ul>
+                {foreshadowing.map((thread) => (
+                  <li key={thread.key}>
+                    <strong>{thread.clue}</strong>
+                    <p>{thread.intendedPayoff}</p>
+                    <span>{thread.placement}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {relationships.length > 0 && (
+            <section>
+              <h3>{t('record.pending.relationships')}</h3>
+              <ul>
+                {relationships.map((relationship) => (
+                  <li key={relationship.key}>
+                    <strong>{relationship.people}</strong>
+                    <p>{relationship.currentState}</p>
+                    <span>{relationship.relation}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+          {changes.length > 0 && (
+            <section>
+              <h3>{t('record.pending.changes')}</h3>
+              <ul>
+                {changes.map((change) => (
+                  <li key={`${change.category}-${change.change}`}>
+                    <strong>{change.category}</strong>
+                    <p>{change.change}</p>
+                    <span>{change.evidence}</span>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
+        </div>
       )}
-    </>
+    </section>
   );
 }
 
-export function StoryRecordViews({ project }: { project: RainRadioProject }) {
+export function StoryRecordViews({
+  initialTab = 'characters',
+  project
+}: {
+  initialTab?: StoryRecordTab;
+  project: RainRadioProject;
+}) {
   const [query, setQuery] = useState('');
   const searchDescription = useMemo(
-    () => query.trim() ? `当前搜索：${query.trim()}` : t('record.search'),
+    () => query.trim()
+      ? t('record.search.current', { query: query.trim() })
+      : t('record.search'),
     [query]
   );
 
   return (
-    <Tabs.Root className="nl-story-record" defaultValue="characters" orientation="horizontal">
+    <Tabs.Root className="nl-story-record" defaultValue={initialTab} orientation="horizontal">
       <div className="nl-story-record__controls">
         <Tabs.List aria-label={t('record.title')} className="nl-story-record__tabs">
           {tabs.map((tab) => (
@@ -527,6 +650,9 @@ export function StoryRecordViews({ project }: { project: RainRadioProject }) {
             value={query}
           />
         </label>
+        <span aria-live="polite" className="nl-visually-hidden" role="status">
+          {searchDescription}
+        </span>
       </div>
 
       <div className="nl-story-record__view">
@@ -558,6 +684,9 @@ export function StoryRecordViews({ project }: { project: RainRadioProject }) {
         </Tabs.Content>
         <Tabs.Content value="canon-facts">
           <CanonFactsView project={project} query={query} />
+        </Tabs.Content>
+        <Tabs.Content value="pending">
+          <PendingChangesView pending={project.pendingChanges} query={query} />
         </Tabs.Content>
       </div>
     </Tabs.Root>

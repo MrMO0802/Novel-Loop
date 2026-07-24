@@ -1,3 +1,13 @@
+.nl-visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
 .nl-project-overview,
 .nl-story-record-page {
   max-width: 1180px;
@@ -695,8 +705,12 @@
   justify-content: space-between;
 }
 
-.nl-pending-changes h3,
-.nl-pending-changes h4 {
+.nl-pending-changes h2 {
+  font-size: 18px;
+  margin: 0;
+}
+
+.nl-pending-changes h3 {
   font-size: 14px;
   margin: 0;
 }
@@ -713,9 +727,14 @@
   font-weight: 600;
 }
 
-.nl-pending-changes h4 {
-  border-top: 1px solid rgb(138 100 43 / 25%);
-  margin-top: 18px;
+.nl-pending-changes__groups {
+  display: grid;
+  gap: 18px;
+  margin-top: 20px;
+}
+
+.nl-pending-changes__groups > section {
+  border-top: 1px solid rgb(118 82 31 / 25%);
   padding-top: 16px;
 }
 

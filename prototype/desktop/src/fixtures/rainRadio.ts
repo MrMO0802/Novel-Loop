@@ -88,6 +88,10 @@ export interface RainRadioProject {
     chapter: string;
     status: string;
     note: string;
+    characters: readonly StoryCharacter[];
+    timeline: readonly TimelineEvent[];
+    foreshadowing: readonly ForeshadowingThread[];
+    relationships: readonly Relationship[];
     changes: readonly PendingStoryRecordChange[];
   };
   recentActivity: readonly {
@@ -118,9 +122,9 @@ export const rainRadio: RainRadioProject = {
       name: '林澈',
       role: '主角 · 外卖员',
       currentGoal: '调查广播信号，同时避免引起不必要的注意。',
-      currentState: '确认无电收音机知道姐姐林遥的名字后，不再把广播当成偶然干扰。',
+      currentState: '确认无电收音机知道姐姐林遥的名字后，决定追查广播给出的地址。',
       pressure: '既想追查姐姐最后一单外卖，又害怕答案证明自己曾有机会阻止她失踪。',
-      lastSeen: '第二章 · 临江里三栋门厅'
+      lastSeen: '第一章 · 沿江站点后巷'
     },
     {
       key: 'lin-yao',
@@ -130,15 +134,6 @@ export const rainRadio: RainRadioProject = {
       currentState: '只通过旧配送记录、林澈的回忆和广播中的称呼出现。',
       pressure: '她失踪当晚的路线与正在拆迁的临江里重合。',
       lastSeen: '第一章回忆 · 三年前的雨夜'
-    },
-    {
-      key: 'xu-wen',
-      name: '许雯',
-      role: '站点调度员',
-      currentGoal: '帮林澈查清异常订单，同时不让站点经理发现。',
-      currentState: '调出一张已经从系统撤回的旧订单截图。',
-      pressure: '她认出了收件号码，却没有说明自己为什么记得。',
-      lastSeen: '第二章 · 站点后门'
     }
   ],
   timeline: [
@@ -178,11 +173,11 @@ export const rainRadio: RainRadioProject = {
       source: '第一章'
     },
     {
-      key: 'building-arrival',
-      when: '现在 · 第二章 00:26',
-      title: '林澈抵达临江里三栋',
-      summary: '楼层按钮停在十六层，门厅值班表却有一笔写给“十七层”的夜间巡查。',
-      source: '第二章 · 待正式提交'
+      key: 'address-match-found',
+      when: '现在 · 第一章 23:18',
+      title: '广播地址与林遥最后一单吻合',
+      summary: '林澈翻出旧截图，确认广播说出的临江里三栋十七层正是姐姐失踪前的配送地址。',
+      source: '第一章'
     }
   ],
   readerKnowledge: [
@@ -212,7 +207,7 @@ export const rainRadio: RainRadioProject = {
       kind: 'expected',
       items: [
         '林澈会进入临江里三栋继续寻找十七层。',
-        '许雯隐瞒的收件号码来源会再次影响调查。'
+        '下一次广播会给出新的地址或与林遥有关的线索。'
       ]
     }
   ],
@@ -229,14 +224,14 @@ export const rainRadio: RainRadioProject = {
       key: 'floor-seventeen',
       question: '临江里三栋不存在的十七层在哪里？',
       status: 'advancing',
-      evidence: '电梯只到十六层，值班表却记录了十七层夜间巡查。',
-      source: '第一章已埋下地址，第二章正在推进',
-      writingQuestion: '进入下一场景前，决定林澈先查楼梯还是值班人员。'
+      evidence: '广播地址与林遥最后一单的旧截图都写着“临江里三栋十七层”。',
+      source: '证据来自第一章',
+      writingQuestion: '抵达临江里前不要确认楼层是否存在，只保留地址重复带来的压力。'
     },
     {
       key: 'withdrawn-order',
       question: '谁撤回了林遥最后一单外卖记录？',
-      status: 'open',
+      status: 'attention',
       evidence: '林澈只留有截图，站点系统中已经查不到原订单。',
       source: '证据来自第一章',
       writingQuestion: '暂时保留操作权限的范围，不要把嫌疑集中到单一人物。'
@@ -258,14 +253,6 @@ export const rainRadio: RainRadioProject = {
       placement: '第一章 · 林澈拆开电池盖时',
       intendedPayoff: '把收音机与不存在的十七层、姐姐最后一单连接起来。',
       evidence: '数字被刻在通常不会被看到的位置，像是特意留给拆机者。'
-    },
-    {
-      key: 'xu-wen-number',
-      clue: '许雯看见收件号码时停顿了两秒',
-      status: 'planted',
-      placement: '第二章 · 站点后门',
-      intendedPayoff: '揭示许雯曾处理过同一号码发出的异常订单。',
-      evidence: '她先说“不认识”，随后准确说出了号码归属的旧城区号段。'
     }
   ],
   relationships: [
@@ -274,18 +261,6 @@ export const rainRadio: RainRadioProject = {
       people: '林澈 ↔ 林遥',
       relation: '姐弟 · 失踪前关系疏远',
       currentState: '林澈用追查最后一单的方式弥补当年没有接听姐姐电话的愧疚。'
-    },
-    {
-      key: 'lin-che-xu-wen',
-      people: '林澈 ↔ 许雯',
-      relation: '同事 · 有限互信',
-      currentState: '许雯愿意协助查订单，但隐瞒了自己对收件号码的了解。'
-    },
-    {
-      key: 'lin-yao-xu-wen',
-      people: '林遥 ↔ 许雯',
-      relation: '旧同事 · 关系尚未证实',
-      currentState: '两人都接触过临江里订单，目前只有站点排班记录能把她们联系起来。'
     }
   ],
   worldRules: [
@@ -331,6 +306,50 @@ export const rainRadio: RainRadioProject = {
     chapter: '第二章：收件地址',
     status: '待审阅，尚未写入故事档案',
     note: '以下内容来自第二章的提交预览。正式提交前，已确认事实不会改变。',
+    characters: [
+      {
+        key: 'xu-wen',
+        name: '许雯',
+        role: '站点调度员',
+        currentGoal: '帮林澈查清异常订单，同时不让站点经理发现。',
+        currentState: '调出一张已经从系统撤回的旧订单截图。',
+        pressure: '她认出了收件号码，却没有说明自己为什么记得。',
+        lastSeen: '第二章 · 站点后门'
+      }
+    ],
+    timeline: [
+      {
+        key: 'building-arrival',
+        when: '现在 · 第二章 00:26',
+        title: '林澈抵达临江里三栋',
+        summary: '楼层按钮停在十六层，门厅值班表却有一笔写给“十七层”的夜间巡查。',
+        source: '第二章提交预览'
+      }
+    ],
+    foreshadowing: [
+      {
+        key: 'xu-wen-number',
+        clue: '许雯看见收件号码时停顿了两秒',
+        status: 'planted',
+        placement: '第二章 · 站点后门',
+        intendedPayoff: '揭示许雯曾处理过同一号码发出的异常订单。',
+        evidence: '她先说“不认识”，随后准确说出了号码归属的旧城区号段。'
+      }
+    ],
+    relationships: [
+      {
+        key: 'lin-che-xu-wen',
+        people: '林澈 ↔ 许雯',
+        relation: '同事 · 有限互信',
+        currentState: '许雯愿意协助查订单，但隐瞒了自己对收件号码的了解。'
+      },
+      {
+        key: 'lin-yao-xu-wen',
+        people: '林遥 ↔ 许雯',
+        relation: '旧同事 · 关系尚未证实',
+        currentState: '两人都接触过临江里订单，目前只有站点排班记录能把她们联系起来。'
+      }
+    ],
     changes: [
       {
         category: '时间线',

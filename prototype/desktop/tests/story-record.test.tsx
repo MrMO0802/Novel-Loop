@@ -1,13 +1,31 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, test } from 'vitest';
 import { App } from '../src/app/App';
 
 afterEach(cleanup);
 
+const tokenStyles = readFileSync('src/styles/tokens.css', 'utf8');
+
 function renderRoute(path: string) {
   window.history.pushState({}, '', path);
   return render(<App />);
+}
+
+function contrastRatio(first: string, second: string) {
+  function luminance(hex: string) {
+    const channels = hex.match(/[a-f\d]{2}/gi)?.map((channel) => {
+      const value = Number.parseInt(channel, 16) / 255;
+      return value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4;
+    });
+    if (!channels || channels.length !== 3) throw new Error(`Invalid color: ${hex}`);
+    return (0.2126 * channels[0]) + (0.7152 * channels[1]) + (0.0722 * channels[2]);
+  }
+
+  const lighter = Math.max(luminance(first), luminance(second));
+  const darker = Math.min(luminance(first), luminance(second));
+  return (lighter + 0.05) / (darker + 0.05);
 }
 
 describe('project overview', () => {
@@ -25,7 +43,21 @@ describe('project overview', () => {
     const recommendation = screen.getByRole('complementary', { name: '建议下一步' });
     expect(within(recommendation).getAllByRole('button')).toHaveLength(1);
     expect(within(recommendation).getByRole('button', { name: '审阅故事档案变更' })).toBeVisible();
+    expect(screen.getByText('4 个尚未兑现，其中 2 个需要在本卷留意。')).toBeVisible();
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
+  });
+
+  test('recommended action opens the pending Story Record preview directly', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio');
+
+    await user.click(screen.getByRole('button', { name: '审阅故事档案变更' }));
+
+    expect(window.location.pathname).toBe('/project/rain-radio/story-record');
+    expect(window.location.search).toBe('?view=pending');
+    expect(screen.getByRole('tab', { name: '待确认变更' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: '第二章待确认变更' })).toBeVisible();
+    expect(screen.getByText('待审阅，尚未写入故事档案')).toBeVisible();
   });
 });
 
@@ -42,7 +74,8 @@ describe('Story Record', () => {
       '伏笔',
       '人物关系',
       '世界规则',
-      '已确认事实'
+      '已确认事实',
+      '待确认变更'
     ]) {
       expect(screen.getByText(label, { selector: 'h1, [role="tab"]' })).toBeVisible();
     }
@@ -76,9 +109,9 @@ describe('Story Record', () => {
 
     expect(screen.getByRole('heading', { name: '待兑现悬念' })).toBeVisible();
     expect(screen.getAllByRole('article', { name: /悬念：/ })).toHaveLength(4);
-    expect(screen.getByText('需要留意')).toBeVisible();
+    expect(screen.getAllByText('需要留意')).toHaveLength(2);
     expect(screen.getByText('正在推进')).toBeVisible();
-    expect(screen.getAllByText('证据来自第一章')).toHaveLength(3);
+    expect(screen.getAllByText('证据来自第一章')).toHaveLength(4);
     expect(screen.getByText('广播里的求救者为什么知道林澈姐姐的名字？')).toBeVisible();
   });
 
@@ -87,7 +120,7 @@ describe('Story Record', () => {
     renderRoute('/project/rain-radio/story-record');
 
     await user.click(screen.getByRole('tab', { name: '伏笔' }));
-    expect(screen.getAllByRole('article', { name: /伏笔：/ })).toHaveLength(2);
+    expect(screen.getAllByRole('article', { name: /伏笔：/ })).toHaveLength(1);
 
     await user.click(screen.getByRole('button', { name: '已回收' }));
 
@@ -102,20 +135,61 @@ describe('Story Record', () => {
     await user.click(screen.getByRole('tab', { name: '人物关系' }));
 
     const relationships = screen.getByRole('list', { name: '人物关系' });
-    expect(within(relationships).getAllByRole('listitem')).toHaveLength(3);
+    expect(within(relationships).getAllByRole('listitem')).toHaveLength(1);
     expect(within(relationships).getByText('姐弟 · 失踪前关系疏远')).toBeVisible();
     expect(document.querySelector('canvas')).toBeNull();
     expect(document.querySelector('svg[aria-label*="关系"]')).toBeNull();
+  });
+
+  test('canonical views exclude uncommitted Chapter 2 records', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/story-record');
+
+    expect(screen.queryByText('许雯')).toBeNull();
+
+    await user.click(screen.getByRole('tab', { name: '时间线' }));
+    expect(screen.getAllByRole('listitem', { name: /时间线事件/ })).toHaveLength(6);
+    expect(screen.queryByText('林澈抵达临江里三栋')).toBeNull();
+    expect(screen.queryByText(/待正式提交/)).toBeNull();
+
+    await user.click(screen.getByRole('tab', { name: '伏笔' }));
+    expect(screen.queryByText('许雯看见收件号码时停顿了两秒')).toBeNull();
+
+    await user.click(screen.getByRole('tab', { name: '人物关系' }));
+    expect(screen.queryByText(/许雯/)).toBeNull();
+
+    await user.click(screen.getByRole('tab', { name: '待确认变更' }));
+    expect(screen.getByText('林澈抵达临江里三栋')).toBeVisible();
+    expect(screen.getByText('许雯看见收件号码时停顿了两秒')).toBeVisible();
+    expect(screen.getByText('林澈 ↔ 许雯')).toBeVisible();
   });
 
   test('searching a pending Chapter 2 change does not show a contradictory empty state', async () => {
     const user = userEvent.setup();
     renderRoute('/project/rain-radio/story-record');
 
-    await user.click(screen.getByRole('tab', { name: '已确认事实' }));
+    await user.click(screen.getByRole('tab', { name: '待确认变更' }));
     await user.type(screen.getByRole('searchbox', { name: '搜索当前视图' }), '值班表');
 
     expect(screen.getByText('值班表新增了十七层夜间巡查的书面记录。')).toBeVisible();
     expect(screen.queryByText('没有找到匹配内容。')).toBeNull();
+  });
+
+  test('announces the current Story Record search in author language', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/story-record');
+
+    await user.type(screen.getByRole('searchbox', { name: '搜索当前视图' }), '林澈');
+
+    expect(screen.getByRole('status')).toHaveTextContent('当前搜索：林澈');
+  });
+
+  test('warning text token passes WCAG AA contrast on its soft surface', () => {
+    const warning = tokenStyles.match(/--nl-warning:\s*(#[\da-f]{6})/i)?.[1];
+    const warningSoft = tokenStyles.match(/--nl-warning-soft:\s*(#[\da-f]{6})/i)?.[1];
+
+    expect(warning).toBeDefined();
+    expect(warningSoft).toBeDefined();
+    expect(contrastRatio(warning!, warningSoft!)).toBeGreaterThanOrEqual(4.5);
   });
 });

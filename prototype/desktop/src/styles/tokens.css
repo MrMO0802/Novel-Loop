@@ -1,4 +1,22 @@
 :root {
   color-scheme: light;
-  font-family: system-ui, sans-serif;
+  --nl-canvas: #f3f5f3;
+  --nl-surface: #fcfdfc;
+  --nl-surface-subtle: #e9edea;
+  --nl-text: #202521;
+  --nl-text-secondary: #626c65;
+  --nl-border: #d5dbd6;
+  --nl-accent: #3f6d56;
+  --nl-accent-hover: #345b48;
+  --nl-accent-soft: #dfeae3;
+  --nl-warning: #8a642b;
+  --nl-warning-soft: #f4ead8;
+  --nl-danger: #9c443e;
+  --nl-danger-soft: #f4dfdc;
+  --nl-radius-control: 6px;
+  --nl-radius-card: 8px;
+  --nl-font-ui: "Source Han Sans SC", "Noto Sans CJK SC", system-ui, sans-serif;
+  --nl-font-manuscript: "Source Han Serif SC", "Noto Serif CJK SC", serif;
+  --nl-shadow-overlay: 0 16px 48px rgb(32 37 33 / 14%);
+  --nl-focus: 0 0 0 3px rgb(63 109 86 / 28%);
 }

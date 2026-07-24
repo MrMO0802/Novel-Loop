@@ -30,7 +30,8 @@ textarea:focus-visible,
 select:focus-visible,
 [tabindex]:focus-visible {
   box-shadow: var(--nl-focus);
-  outline: none;
+  outline: 2px solid var(--nl-accent);
+  outline-offset: 2px;
 }
 
 .nl-button,

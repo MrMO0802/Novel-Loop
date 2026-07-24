@@ -1,11 +1,24 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import { Gear } from '@phosphor-icons/react';
+import { readFileSync } from 'node:fs';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { IconButton } from '../src/components/IconButton';
 import { getStatusMessageKey, StatusLabel } from '../src/components/StatusLabel';
 
 afterEach(cleanup);
+
+const baseStyles = readFileSync('src/styles/base.css', 'utf8');
+
+describe('global focus styles', () => {
+  test('keeps the semantic shadow and adds a solid accent outline', () => {
+    const focusVisibleRule = baseStyles.match(/button:focus-visible,[\s\S]*?\n\}/)?.[0];
+
+    expect(focusVisibleRule).toContain('box-shadow: var(--nl-focus);');
+    expect(focusVisibleRule).toContain('outline: 2px solid var(--nl-accent);');
+    expect(focusVisibleRule).toContain('outline-offset: 2px;');
+  });
+});
 
 describe('StatusLabel', () => {
   test.each([

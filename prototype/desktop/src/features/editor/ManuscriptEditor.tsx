@@ -88,7 +88,14 @@ export function ManuscriptEditor({
     <section className="nl-manuscript-editor" aria-labelledby="chapter-editor-title">
       <header className="nl-manuscript-editor__header">
         <div className="nl-manuscript-editor__title">
-          <p className={`nl-manuscript-editor__version nl-manuscript-editor__version--${versionDefinition.tone}`}>
+          <p
+            aria-atomic="true"
+            aria-label={t('chapter.version.statusLabel', { status: versionDefinition.status })}
+            aria-live="polite"
+            className={`nl-manuscript-editor__version nl-manuscript-editor__version--${versionDefinition.tone}`}
+            id="chapter-version-status"
+            role="status"
+          >
             <VersionIcon aria-hidden="true" size={16} weight="regular" />
             <span>{versionDefinition.status}</span>
           </p>
@@ -102,6 +109,7 @@ export function ManuscriptEditor({
           <label className="nl-manuscript-editor__selector">
             <span>{t('chapter.version.label')}</span>
             <select
+              aria-describedby="chapter-version-status"
               aria-label={t('chapter.version.label')}
               onChange={(event) => onVersionChange(event.currentTarget.value as ChapterWorkspaceVersion)}
               value={version}

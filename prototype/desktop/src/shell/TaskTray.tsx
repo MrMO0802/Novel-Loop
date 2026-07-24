@@ -22,6 +22,12 @@ export function TaskTray({ initialState }: TaskTrayProps) {
   const [expanded, setExpanded] = useState(initialState === 'timeout');
   const isRunning = state === 'writing' || state === 'collecting';
   const isTimeout = state === 'timeout';
+  const elapsed =
+    state === 'writing'
+      ? { dateTime: 'PT3M', label: t('chapter.task.writingElapsed') }
+      : state === 'collecting'
+        ? { dateTime: 'PT1M', label: t('chapter.task.collectingElapsed') }
+        : null;
 
   function cancelTask() {
     setState('cancelling');
@@ -48,6 +54,11 @@ export function TaskTray({ initialState }: TaskTrayProps) {
           <CircleNotch aria-hidden="true" size={18} weight="regular" />
         )}
         <span>{isTimeout ? t('chapter.task.timeoutTitle') : stateLabels[state]}</span>
+        {elapsed ? (
+          <time className="nl-task-tray__elapsed" dateTime={elapsed.dateTime}>
+            {elapsed.label}
+          </time>
+        ) : null}
         <div className="nl-task-tray__actions">
           {isRunning && <Button onClick={cancelTask} variant="quiet">{t('chapter.task.cancel')}</Button>}
           {isTimeout && (

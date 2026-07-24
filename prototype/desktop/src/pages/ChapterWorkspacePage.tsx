@@ -1,6 +1,6 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { SidebarSimple, X } from '@phosphor-icons/react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { usePrototypeContext } from '../app/PrototypeContext';
 import { Button } from '../components/Button';
@@ -88,11 +88,42 @@ export function ChapterWorkspacePage() {
   const workspace = rainRadio.chapterWorkspace;
   const [draft, setDraft] = useState(workspace.versions.draft);
   const [version, setVersion] = useState<ChapterWorkspaceVersion>('draft');
+  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const values = { ...workspace.versions, draft };
+
+  useEffect(
+    () => () => {
+      if (autosaveTimerRef.current !== null) {
+        clearTimeout(autosaveTimerRef.current);
+      }
+    },
+    [],
+  );
 
   function updateDraft(value: string) {
     setDraft(value);
     setAutosave('saving');
+
+    if (autosaveTimerRef.current !== null) {
+      clearTimeout(autosaveTimerRef.current);
+    }
+
+    autosaveTimerRef.current = setTimeout(() => {
+      setAutosave('saved');
+      autosaveTimerRef.current = null;
+    }, 800);
+  }
+
+  function changeVersion(nextVersion: ChapterWorkspaceVersion) {
+    setVersion(nextVersion);
+
+    if (nextVersion !== 'draft') {
+      if (autosaveTimerRef.current !== null) {
+        clearTimeout(autosaveTimerRef.current);
+        autosaveTimerRef.current = null;
+      }
+      setAutosave('saved');
+    }
   }
 
   return (
@@ -103,7 +134,7 @@ export function ChapterWorkspacePage() {
           autosave={state.autosave}
           chapter={workspace.chapter}
           onChange={updateDraft}
-          onVersionChange={setVersion}
+          onVersionChange={changeVersion}
           title={workspace.title}
           value={values[version]}
           version={version}

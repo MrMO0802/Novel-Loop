@@ -904,6 +904,11 @@
   }
 }
 
+.nl-application-shell__main:has(.nl-chapter-workspace) {
+  position: relative;
+  container: chapter-workspace / inline-size;
+}
+
 .nl-chapter-workspace {
   background: var(--nl-canvas);
   display: grid;
@@ -914,7 +919,7 @@
 
 .nl-chapter-workspace__body {
   display: grid;
-  grid-template-columns: 220px minmax(0, 1fr) 312px;
+  grid-template-columns: 220px minmax(680px, 1fr) 312px;
   min-height: 0;
 }
 
@@ -1199,7 +1204,7 @@
   border-color: var(--nl-border);
   display: none;
   position: absolute;
-  top: 64px;
+  top: 16px;
   z-index: 2;
 }
 
@@ -1251,6 +1256,12 @@
   min-width: 0;
 }
 
+.nl-task-tray__elapsed {
+  color: var(--nl-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
 .nl-task-tray__actions {
   align-items: center;
   display: flex;
@@ -1288,7 +1299,7 @@
 }
 
 .nl-chapter-workspace--focus-mode .nl-chapter-workspace__body {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(680px, 1fr);
 }
 
 .nl-chapter-workspace--focus-mode .nl-manuscript-editor__header {
@@ -1299,9 +1310,9 @@
   max-width: 760px;
 }
 
-@media (max-width: 1180px) {
+@container chapter-workspace (max-width: 1211px) {
   .nl-chapter-workspace__body {
-    grid-template-columns: 220px minmax(0, 1fr);
+    grid-template-columns: 220px minmax(680px, 1fr);
   }
 
   .nl-chapter-assistant--desktop {
@@ -1310,6 +1321,28 @@
 
   .nl-chapter-workspace__drawer-trigger--assistant {
     display: inline-flex;
+  }
+
+  .nl-manuscript-editor__header {
+    padding-right: 68px;
+  }
+}
+
+@container chapter-workspace (max-width: 899px) {
+  .nl-chapter-workspace__body {
+    grid-template-columns: minmax(680px, 1fr);
+  }
+
+  .nl-chapter-navigator--desktop {
+    display: none;
+  }
+
+  .nl-chapter-workspace__drawer-trigger--chapters {
+    display: inline-flex;
+  }
+
+  .nl-manuscript-editor__header {
+    padding-left: 68px;
   }
 }
 
@@ -1326,7 +1359,7 @@
   }
 
   .nl-chapter-workspace__body {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: minmax(680px, 1fr);
   }
 
   .nl-chapter-navigator--desktop,
@@ -1359,4 +1392,8 @@
   .nl-chapter-workspace--focus-mode .nl-manuscript-editor__header {
     padding-inline: max(24px, calc((100% - 760px) / 2));
   }
+}
+
+.nl-chapter-workspace--focus-mode .nl-chapter-workspace__body {
+  grid-template-columns: minmax(680px, 1fr);
 }

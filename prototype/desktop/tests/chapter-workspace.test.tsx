@@ -1,12 +1,16 @@
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { App } from '../src/app/App';
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 const pageStyles = readFileSync('src/styles/pages.css', 'utf8');
+const shellStyles = readFileSync('src/styles/shell.css', 'utf8');
 
 function renderRoute(query = '') {
   window.history.pushState({}, '', `/project/rain-radio/chapter/2${query}`);
@@ -71,7 +75,7 @@ describe('chapter workspace', () => {
     expect(editor).toHaveAttribute('readonly');
 
     await user.selectOptions(versionSelector, 'commit_preview');
-    expect(screen.getByText('故事档案变更预览（尚未提交）')).toBeVisible();
+    expect(screen.getByText('故事档案变更预览（只读，尚未提交）')).toBeVisible();
     expect(editor).toHaveAttribute('readonly');
 
     await user.selectOptions(versionSelector, 'committed');
@@ -81,6 +85,63 @@ describe('chapter workspace', () => {
     await user.selectOptions(versionSelector, 'draft');
     expect(screen.getByText('草稿（可编辑）')).toBeVisible();
     expect(editor).not.toHaveAttribute('readonly');
+  });
+
+  test('returns autosave from saving to saved after the deterministic edit delay', () => {
+    vi.useFakeTimers();
+    renderRoute();
+
+    const editor = screen.getByRole('textbox', { name: '章节正文' });
+    fireEvent.change(editor, { target: { value: `${(editor as HTMLTextAreaElement).value}雨声更近了。` } });
+
+    expect(screen.getByText('正在保存')).toBeVisible();
+
+    act(() => vi.advanceTimersByTime(799));
+    expect(screen.getByText('正在保存')).toBeVisible();
+
+    act(() => vi.advanceTimersByTime(1));
+    expect(screen.getByText('已自动保存')).toBeVisible();
+  });
+
+  test('clears a pending saving state when a read-only version is selected', () => {
+    vi.useFakeTimers();
+    renderRoute();
+
+    const editor = screen.getByRole('textbox', { name: '章节正文' });
+    const versionSelector = screen.getByRole('combobox', { name: '查看章节版本' });
+    fireEvent.change(editor, { target: { value: `${(editor as HTMLTextAreaElement).value}雨声更近了。` } });
+    expect(screen.getByText('正在保存')).toBeVisible();
+
+    fireEvent.change(versionSelector, { target: { value: 'committed' } });
+
+    expect(screen.getByText('已自动保存')).toBeVisible();
+    expect(editor).toHaveAttribute('readonly');
+
+    act(() => vi.advanceTimersByTime(800));
+    expect(screen.getByText('已自动保存')).toBeVisible();
+  });
+
+  test('associates the version selector with a live safety announcement', () => {
+    renderRoute();
+
+    const versionSelector = screen.getByRole('combobox', { name: '查看章节版本' });
+    const versionStatus = screen.getByRole('status', { name: '当前版本状态：草稿（可编辑）' });
+    expect(versionSelector).toHaveAttribute('aria-describedby', versionStatus.id);
+    expect(versionSelector).toHaveAccessibleDescription('草稿（可编辑）');
+    expect(versionStatus).toHaveAttribute('aria-live', 'polite');
+    expect(versionStatus).toHaveTextContent('草稿（可编辑）');
+
+    fireEvent.change(versionSelector, { target: { value: 'revision_candidate' } });
+    expect(versionSelector).toHaveAccessibleDescription('修订候选（只读）');
+    expect(versionStatus).toHaveTextContent('修订候选（只读）');
+
+    fireEvent.change(versionSelector, { target: { value: 'commit_preview' } });
+    expect(versionSelector).toHaveAccessibleDescription('故事档案变更预览（只读，尚未提交）');
+    expect(versionStatus).toHaveTextContent('故事档案变更预览（只读，尚未提交）');
+
+    fireEvent.change(versionSelector, { target: { value: 'committed' } });
+    expect(versionSelector).toHaveAccessibleDescription('已正式提交（只读）');
+    expect(versionStatus).toHaveTextContent('已正式提交（只读）');
   });
 
   test('Focus Mode removes both page side panels but preserves all editing context and task status', async () => {
@@ -155,6 +216,17 @@ describe('chapter task tray fixtures', () => {
     expect(tray).not.toHaveTextContent(/进度\s*\d+/);
   });
 
+  test.each([
+    ['?task=writing', '已进行 3 分钟'],
+    ['?task=collecting', '已进行 1 分钟']
+  ])('shows elapsed time for the running fixture %s', (query, elapsed) => {
+    renderRoute(query);
+
+    const tray = screen.getByRole('status', { name: '当前任务' });
+    expect(within(tray).getByText(elapsed)).toBeVisible();
+    expect(tray).not.toHaveTextContent(/\d+\s*%/);
+  });
+
   test('moves a running task into cancelling and removes the repeat cancel action', async () => {
     const user = userEvent.setup();
     renderRoute('?task=collecting');
@@ -178,7 +250,49 @@ describe('chapter task tray fixtures', () => {
   });
 });
 
-describe('1024px drawer contract and prototype boundaries', () => {
+describe('responsive drawer contract and prototype boundaries', () => {
+  test('keeps at least 680px for the editor from 1024 through 1440', () => {
+    expect(shellStyles).toMatch(/grid-template-columns: 224px minmax\(0, 1fr\)/);
+    expect(pageStyles).toMatch(/container: chapter-workspace \/ inline-size/);
+    expect(pageStyles).toMatch(/grid-template-columns: 220px minmax\(680px, 1fr\) 312px/);
+    expect(pageStyles).toMatch(
+      /@container chapter-workspace \(max-width: 1211px\) \{[\s\S]*?\.nl-chapter-assistant--desktop \{\s*display: none;/
+    );
+    expect(pageStyles).toMatch(
+      /@container chapter-workspace \(max-width: 899px\) \{[\s\S]*?\.nl-chapter-navigator--desktop \{\s*display: none;/
+    );
+
+    function calculateEditorWidth(viewport: number) {
+      const projectNavigation = viewport > 1024 ? 224 : 0;
+      const workspace = viewport - projectNavigation;
+      const chapterNavigation = viewport > 1024 && workspace > 899 ? 220 : 0;
+      const assistant = workspace > 1211 ? 312 : 0;
+      return workspace - chapterNavigation - assistant;
+    }
+
+    expect([
+      1024,
+      1025,
+      1123,
+      1124,
+      1180,
+      1181,
+      1435,
+      1436,
+      1440
+    ].map((viewport) => [viewport, calculateEditorWidth(viewport)])).toEqual([
+      [1024, 1024],
+      [1025, 801],
+      [1123, 899],
+      [1124, 680],
+      [1180, 736],
+      [1181, 737],
+      [1435, 991],
+      [1436, 680],
+      [1440, 684]
+    ]);
+  });
+
   test('keeps accessible chapter and assistant drawer triggers without removing the editor', async () => {
     const user = userEvent.setup();
     renderRoute();

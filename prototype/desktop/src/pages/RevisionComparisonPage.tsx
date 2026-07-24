@@ -16,6 +16,7 @@ import { chapterTwoRevision } from '../fixtures/revisions';
 import { t } from '../i18n/t';
 
 const chapterPath = '/project/rain-radio/chapter/2';
+const commitPreviewPath = `${chapterPath}/commit-preview`;
 const reviewPath = `${chapterPath}/review`;
 const revisionPath = `${chapterPath}/revision`;
 
@@ -240,6 +241,11 @@ export function RevisionComparisonPage() {
         >
           {t('revision.action.accept')}
         </Button>
+        {decision === 'accepted' && (
+          <Button onClick={() => navigate(commitPreviewPath)}>
+            {t('revision.action.reviewRecordChanges')}
+          </Button>
+        )}
       </footer>
     </div>
   );

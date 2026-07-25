@@ -3,7 +3,7 @@
 ## Status
 
 Complete. Independent final re-review passed with no Critical or Important findings.
-Gate 4 now awaits human approval.
+Gate 4 received human approval on 2026-07-25.
 
 The changes remain inside the fixture-driven browser prototype. They do not add Electron,
 engine, Codex, filesystem, browser storage, provider, queue, snapshot, or Story State

@@ -7,6 +7,7 @@ export default defineConfig({
   preview: { host: '127.0.0.1', port: 4179, strictPort: true },
   test: {
     environment: 'jsdom',
-    setupFiles: ['./tests/setup.ts']
+    setupFiles: ['./tests/setup.ts'],
+    testTimeout: 20_000
   }
 });

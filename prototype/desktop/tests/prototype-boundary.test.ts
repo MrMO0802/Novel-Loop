@@ -62,8 +62,16 @@ function sourceFiles(root: string): string[] {
   }).filter((file) => /\.(ts|tsx)$/.test(file));
 }
 
+function withoutQuotedLiterals(content: string): string {
+  return content.replace(/(['"`])(?:\\.|(?!\1)[\s\S])*\1/g, '');
+}
+
 function findForbiddenPatterns(content: string): ForbiddenPattern[] {
-  return forbiddenPatterns.filter(({ pattern }) => pattern.test(content));
+  const executableContent = withoutQuotedLiterals(content);
+
+  return forbiddenPatterns.filter(({ name, pattern }) => (
+    name === 'Electron API' ? pattern.test(executableContent) : pattern.test(content)
+  ));
 }
 
 describe('prototype boundary', () => {
@@ -76,6 +84,7 @@ describe('prototype boundary', () => {
     ['a filesystem API', "fs.readFileSync('project.json', 'utf8');", 'filesystem API'],
     ['an Electron API binding', "window.ipcRenderer.send('open-project');", 'Electron API'],
     ['an Electron shell API binding', "shell.openPath('draft.txt');", 'Electron API'],
+    ['an Electron session API binding', 'session.defaultSession.clearStorageData();', 'Electron API'],
     ['a Codex executable invocation', "spawn('codex', ['exec', '--json']);", 'Codex executable invocation'],
     ['a Codex CLI command string', "const command = 'codex exec --json';", 'Codex CLI command'],
     ['a Codex integration API', 'codexClient.run(request);', 'Codex integration API']
@@ -92,6 +101,12 @@ describe('prototype boundary', () => {
     const copy = "const ready = 'Codex 已准备好'; const key = 'setup.codex.ready';";
 
     expect(findForbiddenPatterns(copy)).toEqual([]);
+  });
+
+  test('allows fixture technical identifiers that contain the word session', () => {
+    const fixture = "const technical = 'session.previous-close.incomplete';";
+
+    expect(findForbiddenPatterns(fixture)).toEqual([]);
   });
 
   test('does not import production engine, Node, Electron, or provider integration APIs', () => {

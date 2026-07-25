@@ -255,6 +255,26 @@ describe('recovery guidance', () => {
   });
 
   test.each([
+    ['crash', '上次关闭前有工作尚未结束'],
+    ['incomplete-journal', '上一次正式提交没有完整结束']
+  ])('shows a dated safe restore point inside the %s recovery summary', async (key, title) => {
+    const user = userEvent.setup();
+    renderRoute(`/tasks?recovery=${key}`);
+
+    const dialog = screen.getByRole('dialog', { name: title });
+    await user.click(within(dialog).getByRole('button', { name: '查看恢复摘要' }));
+
+    expect(dialog).toBeVisible();
+    expect(within(dialog).getByRole('heading', { name: '恢复摘要' })).toBeVisible();
+    expect(within(dialog).getByText('安全还原点')).toBeVisible();
+    expect(within(dialog).getByText(/2026 年 7 月 24 日 \d{2}:\d{2}/)).toBeVisible();
+    expect(
+      within(dialog).getAllByText(/第二章提交前|第二章自动保存草稿/).length
+    ).toBeGreaterThan(0);
+    expect(screen.queryByRole('status', { name: '恢复操作结果' })).toBeNull();
+  });
+
+  test.each([
     ['project-damage', '从安全还原点恢复', '确认使用安全还原点恢复？', '恢复并保留当前诊断副本'],
     ['crash', '放弃未完成任务', '确认放弃未完成任务？', '放弃任务并保留草稿']
   ])(

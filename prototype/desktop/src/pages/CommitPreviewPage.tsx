@@ -2,6 +2,7 @@ import * as Dialog from '@radix-ui/react-dialog';
 import { CheckCircle, WarningCircle, XCircle } from '@phosphor-icons/react';
 import { useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { usePrototypeContext } from '../app/PrototypeContext';
 import { Button } from '../components/Button';
 import { InlineNotice } from '../components/InlineNotice';
 import { StatusLabel } from '../components/StatusLabel';
@@ -9,6 +10,7 @@ import { StoryRecordChangeGroup } from '../features/commit/StoryRecordChangeGrou
 import {
   chapterTwoCommitPreview,
   staleChapterTwoCommitPreview,
+  type CommitReadinessFixture,
   type HighRiskDecision
 } from '../fixtures/commitPreview';
 import { t } from '../i18n/t';
@@ -48,17 +50,38 @@ function CommitTechnicalDetails({
 }
 
 export function CommitPreviewPage() {
+  const { chapterRevisions } = usePrototypeContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const stale = searchParams.get('state') === 'stale';
-  const preview = stale ? staleChapterTwoCommitPreview : chapterTwoCommitPreview;
+  const revision = chapterRevisions.get('rain-radio:chapter:2');
+  const acceptedRevision = revision?.disposition === 'accepted' ? revision : null;
+  const storyRecordStale = searchParams.get('state') === 'stale';
+  const acceptedDraftStale = acceptedRevision !== null && (
+    acceptedRevision.acceptedDraftRevision !== acceptedRevision.previewSourceRevision
+    || acceptedRevision.acceptedDraft !== acceptedRevision.previewSourceDraft
+  );
+  const stale = storyRecordStale || acceptedDraftStale;
+  const preview = storyRecordStale
+    ? staleChapterTwoCommitPreview
+    : chapterTwoCommitPreview;
+  const readiness: readonly CommitReadinessFixture[] = acceptedRevision === null
+    ? [{ label: t('commit.readiness.noAccepted'), status: 'fail' }]
+    : acceptedDraftStale
+      ? [
+          { label: '第二章关键一致性检查已通过', status: 'pass' },
+          { label: t('commit.readiness.draftStale'), status: 'fail' },
+          { label: '当前故事档案是生成预览时的版本', status: 'pass' }
+        ]
+      : preview.readiness;
   const [decision, setDecision] = useState<HighRiskDecision | null>(null);
   const [confirmationOpen, setConfirmationOpen] = useState(false);
   const [simulated, setSimulated] = useState(false);
-  const commitAvailable = !stale && decision === 'approve';
-  const decisionState = stale
-    ? t('commit.state.stale')
-    : decision === 'approve'
+  const commitAvailable = acceptedRevision !== null && !stale && decision === 'approve';
+  const decisionState = acceptedRevision === null
+    ? t('commit.state.noAccepted')
+    : stale
+      ? t('commit.state.stale')
+      : decision === 'approve'
       ? t('commit.state.ready')
       : decision === 'revise'
         ? t('commit.state.reviseRequired')
@@ -80,7 +103,7 @@ export function CommitPreviewPage() {
           <StatusLabel status="commit_preview" />
           <p>{preview.sourceChapter}</p>
           <h1>{t('commit.page.title')}</h1>
-          <span>{preview.acceptedDraftLabel}</span>
+          {acceptedRevision && <span>{preview.acceptedDraftLabel}</span>}
         </div>
         <Button onClick={() => navigate(chapterPath)} variant="secondary">
           {t('commit.action.back')}
@@ -91,7 +114,13 @@ export function CommitPreviewPage() {
         <p>{t('commit.unchanged.body')}</p>
       </InlineNotice>
 
-      {stale && (
+      {acceptedRevision === null && (
+        <InlineNotice title={t('commit.noAccepted.title')} tone="danger">
+          <p>{t('commit.noAccepted.body')}</p>
+        </InlineNotice>
+      )}
+
+      {storyRecordStale && (
         <InlineNotice title={t('commit.stale.title')} tone="warning">
           <p>{t('commit.stale.body')}</p>
           <div className="nl-commit-preview__stale-actions">
@@ -108,6 +137,17 @@ export function CommitPreviewPage() {
         </InlineNotice>
       )}
 
+      {acceptedDraftStale && (
+        <InlineNotice title={t('commit.draftStale.title')} tone="warning">
+          <p>{t('commit.draftStale.body')}</p>
+          <div className="nl-commit-preview__stale-actions">
+            <Button onClick={() => navigate(chapterPath)} variant="secondary">
+              {t('commit.action.returnToEdit')}
+            </Button>
+          </div>
+        </InlineNotice>
+      )}
+
       <section
         aria-labelledby="commit-readiness-title"
         className="nl-commit-readiness"
@@ -117,7 +157,7 @@ export function CommitPreviewPage() {
           <p>{t('commit.readiness.body')}</p>
         </div>
         <ul>
-          {preview.readiness.map((item) => {
+          {readiness.map((item) => {
             const ReadinessIcon = item.status === 'pass'
               ? CheckCircle
               : item.status === 'warning'
@@ -138,76 +178,80 @@ export function CommitPreviewPage() {
         </ul>
       </section>
 
-      <div className="nl-commit-change-list">
-        {preview.groups.map((group) => (
-          <StoryRecordChangeGroup group={group} key={group.kind} />
-        ))}
-      </div>
-
-      <section
-        aria-labelledby="commit-high-risk-title"
-        className="nl-commit-high-risk"
-      >
-        <header>
-          <WarningCircle aria-hidden="true" size={21} weight="regular" />
-          <div>
-            <p>{t('commit.highRisk.eyebrow')}</p>
-            <h2 id="commit-high-risk-title">{t('commit.highRisk.title')}</h2>
+      {acceptedRevision && (
+        <>
+          <div className="nl-commit-change-list">
+            {preview.groups.map((group) => (
+              <StoryRecordChangeGroup group={group} key={group.kind} />
+            ))}
           </div>
-        </header>
-        <div className="nl-commit-high-risk__change">
-          <strong>{preview.highRisk.question}</strong>
-          <span>{preview.highRisk.transition}</span>
-          <p>{preview.highRisk.evidence}</p>
-        </div>
-        <fieldset>
-          <legend>{t('commit.highRisk.decision')}</legend>
-          <label>
-            <input
-              aria-label={t('commit.highRisk.approve')}
-              checked={decision === 'approve'}
-              name="high-risk-decision"
-              onChange={() => setDecision('approve')}
-              type="radio"
-            />
-            <span>
-              <strong>{t('commit.highRisk.approve')}</strong>
-              <small>{t('commit.highRisk.approveBody')}</small>
-            </span>
-          </label>
-          <label>
-            <input
-              aria-label={t('commit.highRisk.revise')}
-              checked={decision === 'revise'}
-              name="high-risk-decision"
-              onChange={() => setDecision('revise')}
-              type="radio"
-            />
-            <span>
-              <strong>{t('commit.highRisk.revise')}</strong>
-              <small>{t('commit.highRisk.reviseBody')}</small>
-            </span>
-          </label>
-          <label>
-            <input
-              aria-label={t('commit.highRisk.reject')}
-              checked={decision === 'reject'}
-              name="high-risk-decision"
-              onChange={() => setDecision('reject')}
-              type="radio"
-            />
-            <span>
-              <strong>{t('commit.highRisk.reject')}</strong>
-              <small>{t('commit.highRisk.rejectBody')}</small>
-            </span>
-          </label>
-        </fieldset>
-      </section>
 
-      <CommitTechnicalDetails
-        basis={preview.technical.basis}
-        reviewReference={preview.technical.reviewReference}
-      />
+          <section
+            aria-labelledby="commit-high-risk-title"
+            className="nl-commit-high-risk"
+          >
+            <header>
+              <WarningCircle aria-hidden="true" size={21} weight="regular" />
+              <div>
+                <p>{t('commit.highRisk.eyebrow')}</p>
+                <h2 id="commit-high-risk-title">{t('commit.highRisk.title')}</h2>
+              </div>
+            </header>
+            <div className="nl-commit-high-risk__change">
+              <strong>{preview.highRisk.question}</strong>
+              <span>{preview.highRisk.transition}</span>
+              <p>{preview.highRisk.evidence}</p>
+            </div>
+            <fieldset>
+              <legend>{t('commit.highRisk.decision')}</legend>
+              <label>
+                <input
+                  aria-label={t('commit.highRisk.approve')}
+                  checked={decision === 'approve'}
+                  name="high-risk-decision"
+                  onChange={() => setDecision('approve')}
+                  type="radio"
+                />
+                <span>
+                  <strong>{t('commit.highRisk.approve')}</strong>
+                  <small>{t('commit.highRisk.approveBody')}</small>
+                </span>
+              </label>
+              <label>
+                <input
+                  aria-label={t('commit.highRisk.revise')}
+                  checked={decision === 'revise'}
+                  name="high-risk-decision"
+                  onChange={() => setDecision('revise')}
+                  type="radio"
+                />
+                <span>
+                  <strong>{t('commit.highRisk.revise')}</strong>
+                  <small>{t('commit.highRisk.reviseBody')}</small>
+                </span>
+              </label>
+              <label>
+                <input
+                  aria-label={t('commit.highRisk.reject')}
+                  checked={decision === 'reject'}
+                  name="high-risk-decision"
+                  onChange={() => setDecision('reject')}
+                  type="radio"
+                />
+                <span>
+                  <strong>{t('commit.highRisk.reject')}</strong>
+                  <small>{t('commit.highRisk.rejectBody')}</small>
+                </span>
+              </label>
+            </fieldset>
+          </section>
+
+          <CommitTechnicalDetails
+            basis={preview.technical.basis}
+            reviewReference={preview.technical.reviewReference}
+          />
+        </>
+      )}
 
       {simulated && (
         <InlineNotice title={t('commit.simulation.title')}>

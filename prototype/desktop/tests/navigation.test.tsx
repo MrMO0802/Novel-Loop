@@ -49,6 +49,36 @@ describe('prototype routes', () => {
     expect(screen.queryByRole('dialog', { name: '雨夜电台' })).toBeNull();
     expect(screen.getByRole('heading', { name: '第二章：收件地址' })).toBeVisible();
   });
+
+  test('marks unsupported chapter destinations unavailable instead of navigating to a fallback', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/chapter/2');
+
+    const chapterNavigation = screen.getByRole('navigation', { name: '章节导航' });
+    expect(within(chapterNavigation).queryByRole('link', { name: /第一章/ })).toBeNull();
+    expect(within(chapterNavigation).queryByRole('link', { name: /第三章/ })).toBeNull();
+    expect(within(chapterNavigation).getByText(/第一章 ·/)).toHaveAttribute('aria-disabled', 'true');
+    expect(within(chapterNavigation).getByText(/第三章 ·/)).toHaveAttribute('aria-disabled', 'true');
+
+    await user.click(within(chapterNavigation).getByText(/第三章 ·/));
+    expect(window.location.pathname).toBe('/project/rain-radio/chapter/2');
+  });
+
+  test.each([
+    ['时间线', '故事时间线'],
+    ['待兑现悬念', '广播里的求救者为什么知道林澈姐姐的名字？']
+  ])('opens the requested Story Record view from %s', async (linkName, expectedHeading) => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/chapter/2');
+
+    await user.click(
+      within(screen.getByRole('navigation', { name: '章节导航' }))
+        .getByRole('link', { name: linkName })
+    );
+
+    expect(window.location.pathname).toBe('/project/rain-radio/story-record');
+    expect(screen.getByRole('heading', { name: expectedHeading })).toBeVisible();
+  });
 });
 
 describe('command palette and shortcuts', () => {
@@ -85,18 +115,38 @@ describe('command palette and shortcuts', () => {
     expect(screen.getByRole('heading', { name: heading })).toBeVisible();
   });
 
-  test('toggles focus mode from the command palette and Ctrl+Shift+Enter', async () => {
+  test('offers Focus Mode only inside Chapter Workspace', async () => {
     const user = userEvent.setup();
     renderRoute('/project/rain-radio');
 
     await user.click(screen.getByRole('button', { name: '打开命令面板' }));
-    await user.click(screen.getByRole('button', { name: '切换专注模式' }));
+    expect(screen.queryByRole('button', { name: '切换专注模式' })).toBeNull();
+    await user.keyboard('{Escape}');
+    const dispatched = fireEvent.keyDown(document, {
+      ctrlKey: true,
+      key: 'Enter',
+      shiftKey: true
+    });
+    expect(dispatched).toBe(true);
+    expect(screen.getByLabelText('应用框架')).not.toHaveClass('nl-application-shell--focus-mode');
+    expect(screen.queryByRole('button', { name: /专注模式/ })).toBeNull();
+  });
 
+  test('clears Focus Mode on route exit and restores compact project navigation', async () => {
+    const user = userEvent.setup();
+    renderRoute('/project/rain-radio/chapter/2');
+
+    await user.click(screen.getByRole('button', { name: '进入专注模式' }));
     expect(screen.getByLabelText('应用框架')).toHaveClass('nl-application-shell--focus-mode');
 
-    await user.keyboard('{Control>}{Shift>}{Enter}{/Shift}{/Control}');
+    await user.click(screen.getByRole('button', { name: 'Novel Loop' }));
 
+    expect(screen.getByRole('heading', { name: '作品库' })).toBeVisible();
     expect(screen.getByLabelText('应用框架')).not.toHaveClass('nl-application-shell--focus-mode');
+
+    await user.click(screen.getByRole('button', { name: '打开命令面板' }));
+    await user.click(screen.getByRole('button', { name: '打开项目概览' }));
+    expect(screen.getByRole('button', { name: '打开作品导航' })).toBeVisible();
   });
 
   test('opens the current project chapter with Ctrl+P', async () => {

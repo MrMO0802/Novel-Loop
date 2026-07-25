@@ -4,6 +4,7 @@ type RouteFixture = {
   compactPrimaryControl?: string;
   focusControl?: string;
   heading: string;
+  prepare?: 'accepted-candidate';
   primaryControl: string;
   primaryRole?: 'button' | 'tab';
   route: string;
@@ -26,6 +27,7 @@ const routeFixtures: readonly RouteFixture[] = [
   {
     route: '/project/rain-radio/chapter/2/commit-preview',
     heading: '审阅第二章的故事档案变更',
+    prepare: 'accepted-candidate',
     primaryControl: '正式提交本章',
     focusControl: '返回本章'
   },
@@ -80,24 +82,124 @@ async function expectVisibleKeyboardFocus(page: Page, control: Locator) {
   expect(focusState).toEqual({ focusVisible: true, outlineStyle: 'solid', outlineWidth: 2 });
 }
 
+async function acceptChapterTwoCandidate(page: Page) {
+  await page.goto('/project/rain-radio/chapter/2/revision');
+  await page.getByRole('button', { name: '接受候选' }).click();
+  await page.getByRole('button', { name: '审阅故事档案变更' }).click();
+}
+
+async function expectInteractiveLayoutHealth(scope: Locator) {
+  const health = await scope.evaluate((root) => {
+    const selector = [
+      'a[href]',
+      'button',
+      'input:not([type="hidden"])',
+      'select',
+      'summary',
+      'textarea',
+      '[role="tab"]'
+    ].join(',');
+    const controls = Array.from(root.querySelectorAll<HTMLElement>(selector))
+      .filter((element) => {
+        const style = getComputedStyle(element);
+        const box = element.getBoundingClientRect();
+        return style.display !== 'none'
+          && style.visibility !== 'hidden'
+          && box.width > 0
+          && box.height > 0;
+      })
+      .map((element, index) => {
+        const box = element.getBoundingClientRect();
+        const label = element.getAttribute('aria-label')
+          || element.innerText.trim()
+          || element.getAttribute('name')
+          || `${element.tagName.toLowerCase()}-${index}`;
+        const checksSingleLine = element.matches(
+          '.nl-button, .nl-chapter-navigator__link, [role="tab"], summary'
+        );
+        const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
+        const textRects: DOMRect[] = [];
+        let textNode = walker.nextNode();
+
+        while (textNode) {
+          if (textNode.textContent?.trim()) {
+            const range = document.createRange();
+            range.selectNodeContents(textNode);
+            textRects.push(...Array.from(range.getClientRects()));
+          }
+          textNode = walker.nextNode();
+        }
+
+        const textRows = checksSingleLine
+          ? new Set(
+              textRects
+                .filter((rect) => rect.width > 1 && rect.height > 1)
+                .map((rect) => Math.round(rect.top))
+            ).size
+          : 1;
+
+        return {
+          bottom: box.bottom,
+          clipped: element.scrollWidth > element.clientWidth + 1
+            || (
+              !element.matches('textarea')
+              && element.scrollHeight > element.clientHeight + 1
+            ),
+          label,
+          left: box.left,
+          right: box.right,
+          textRows,
+          top: box.top
+        };
+      });
+    const overlaps: string[] = [];
+
+    for (let first = 0; first < controls.length; first += 1) {
+      for (let second = first + 1; second < controls.length; second += 1) {
+        const left = controls[first];
+        const right = controls[second];
+        const overlapWidth = Math.min(left.right, right.right) - Math.max(left.left, right.left);
+        const overlapHeight = Math.min(left.bottom, right.bottom) - Math.max(left.top, right.top);
+
+        if (overlapWidth > 1 && overlapHeight > 1) {
+          overlaps.push(`${left.label} <> ${right.label}`);
+        }
+      }
+    }
+
+    return {
+      clipped: controls.filter((control) => control.clipped).map((control) => control.label),
+      overlaps,
+      wrapped: controls.filter((control) => control.textRows > 1).map((control) => control.label)
+    };
+  });
+
+  expect(health.overlaps, 'interactive controls must not overlap').toEqual([]);
+  expect(health.clipped, 'interactive labels and controls must not clip').toEqual([]);
+  expect(health.wrapped, 'compact command labels must remain on one line').toEqual([]);
+}
+
 async function expectLayoutHealth(
   page: Page,
   primaryControl: string,
   primaryRole: 'button' | 'tab' = 'button',
   focusControl = primaryControl
 ) {
-  const heading = page.getByRole('heading').first();
-  const primary = page.getByRole(primaryRole, { name: primaryControl, exact: true });
+  const dialogs = page.locator('[role="dialog"]:visible');
+  const scope = await dialogs.count() > 0 ? dialogs.last() : page.locator('body');
+  const heading = scope.getByRole('heading').first();
+  const primary = scope.getByRole(primaryRole, { name: primaryControl, exact: true });
   const focusTarget = focusControl === primaryControl
     ? primary
-    : page.getByRole('button', { name: focusControl, exact: true });
+    : scope.getByRole('button', { name: focusControl, exact: true });
 
   await expect(heading).toBeVisible();
   await expectVisibleAndUnwrapped(primary);
   await expectVisibleKeyboardFocus(page, focusTarget);
   await expectNoHorizontalOverflow(page);
+  await expectInteractiveLayoutHealth(scope);
 
-  const visibleButtons = page.locator('button.nl-button:visible');
+  const visibleButtons = scope.locator('button.nl-button:visible');
   const count = await visibleButtons.count();
   for (let index = 0; index < count; index += 1) {
     await expectVisibleAndUnwrapped(visibleButtons.nth(index), true);
@@ -116,7 +218,11 @@ async function expectLayoutHealth(
 test.describe('approved prototype routes remain usable at supported desktop sizes', () => {
   for (const fixture of routeFixtures) {
     test(`${fixture.route} keeps its author-facing controls readable`, async ({ page }) => {
-      await page.goto(fixture.route);
+      if (fixture.prepare === 'accepted-candidate') {
+        await acceptChapterTwoCandidate(page);
+      } else {
+        await page.goto(fixture.route);
+      }
       await expect(page.getByRole('heading', { name: fixture.heading, exact: true })).toBeVisible();
       const primaryControl = page.viewportSize()?.width === 1024 && fixture.compactPrimaryControl
         ? fixture.compactPrimaryControl
@@ -151,7 +257,7 @@ test('revision comparison stacks changed passages at 1024 width', async ({ page 
 });
 
 test('commit confirmation receives focus and returns it to its invoker', async ({ page }) => {
-  await page.goto('/project/rain-radio/chapter/2/commit-preview');
+  await acceptChapterTwoCandidate(page);
   await page.getByRole('radio').first().check();
   const trigger = page.getByRole('button', { name: '正式提交本章' });
   await trigger.click();

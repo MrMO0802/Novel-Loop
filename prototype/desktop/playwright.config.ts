@@ -6,11 +6,11 @@ export default defineConfig({
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   timeout: 60_000,
-  outputDir: '/tmp/novel-loop-desktop-playwright',
+  outputDir: 'test-results',
   reporter: process.env.CI ? [['list'], ['html', { outputFolder: '/tmp/novel-loop-desktop-playwright-report' }]] : 'list',
   use: {
     baseURL: 'http://127.0.0.1:4178',
-    screenshot: 'only-on-failure',
+    screenshot: 'on',
     trace: 'retain-on-failure',
     video: 'off'
   },

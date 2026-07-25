@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, test } from 'vitest';
 import { IconButton } from '../src/components/IconButton';
+import { InlineNotice } from '../src/components/InlineNotice';
 import { getStatusMessageKey, StatusLabel } from '../src/components/StatusLabel';
 
 afterEach(cleanup);
@@ -49,6 +50,20 @@ describe('StatusLabel', () => {
     expect(container.querySelector('svg')).toBeVisible();
     expect(getStatusMessageKey(status)).toBe(messageKey);
     expect(screen.queryByText(/mutation|artifact|queue|runId/i)).toBeNull();
+  });
+});
+
+describe('InlineNotice announcements', () => {
+  test('uses polite status for non-blocking warnings and alert only for blocking danger', () => {
+    const { rerender } = render(
+      <InlineNotice title="配置提醒" tone="warning">仍可继续写作</InlineNotice>
+    );
+
+    expect(screen.getByRole('status')).toHaveAttribute('aria-live', 'polite');
+    expect(screen.queryByRole('alert')).toBeNull();
+
+    rerender(<InlineNotice title="提交被阻止" tone="danger">请先处理冲突</InlineNotice>);
+    expect(screen.getByRole('alert')).toHaveAttribute('aria-live', 'assertive');
   });
 });
 

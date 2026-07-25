@@ -32,12 +32,18 @@ function isExactFocusModeShortcut(event: KeyboardEvent) {
 export function ApplicationShell() {
   const location = useLocation();
   const navigate = useNavigate();
-  const { state, toggleFocusMode } = usePrototypeContext();
+  const { setFocusMode, state, toggleFocusMode } = usePrototypeContext();
   const [isCommandPaletteOpen, setCommandPaletteOpen] = useState(false);
   const activeProject = projects.find((project) => project.id === state.activeProjectId);
   const taskStatus = getPrototypeTaskStatus(state.activeTaskId);
   const showProjectContext = !isProjectFreeRoute(location.pathname);
   const showTaskButton = taskStatus === 'running' || taskStatus === 'recoverable';
+  const focusModeAvailable = location.pathname === '/project/rain-radio/chapter/2';
+  const focusModeActive = focusModeAvailable && state.focusMode;
+
+  useEffect(() => {
+    if (!focusModeAvailable && state.focusMode) setFocusMode(false);
+  }, [focusModeAvailable, setFocusMode, state.focusMode]);
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -64,7 +70,7 @@ export function ApplicationShell() {
         return;
       }
 
-      if (togglesFocusMode) {
+      if (togglesFocusMode && focusModeAvailable) {
         event.preventDefault();
         toggleFocusMode();
       }
@@ -72,12 +78,18 @@ export function ApplicationShell() {
 
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [isCommandPaletteOpen, navigate, state.activeProjectId, toggleFocusMode]);
+  }, [
+    focusModeAvailable,
+    isCommandPaletteOpen,
+    navigate,
+    state.activeProjectId,
+    toggleFocusMode
+  ]);
 
   return (
     <div
       aria-label="应用框架"
-      className={`nl-application-shell${state.focusMode ? ' nl-application-shell--focus-mode' : ''}`}
+      className={`nl-application-shell${focusModeActive ? ' nl-application-shell--focus-mode' : ''}`}
     >
       <header className="nl-application-shell__header">
         <button className="nl-application-shell__brand" onClick={() => navigate('/library')} type="button">
@@ -93,15 +105,18 @@ export function ApplicationShell() {
             <Button onClick={() => navigate('/tasks')} variant="secondary">查看进行中的任务</Button>
           )}
           <CommandPalette
+            focusModeAvailable={focusModeAvailable}
             onOpenChange={setCommandPaletteOpen}
             open={isCommandPaletteOpen}
             trigger={<Button variant="quiet">打开命令面板</Button>}
           />
-          <IconButton
-            icon={CornersIn}
-            label={state.focusMode ? '退出专注模式' : '进入专注模式'}
-            onClick={toggleFocusMode}
-          />
+          {focusModeAvailable && (
+            <IconButton
+              icon={CornersIn}
+              label={focusModeActive ? '退出专注模式' : '进入专注模式'}
+              onClick={toggleFocusMode}
+            />
+          )}
           <IconButton icon={Gear} label="打开设置" onClick={() => navigate('/settings')} />
         </div>
       </header>

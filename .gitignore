@@ -4,6 +4,7 @@ dist/
 coverage/
 .nyc_output/
 *.tsbuildinfo
+prototype/desktop/test-results/
 
 # Local environment and secrets
 .env

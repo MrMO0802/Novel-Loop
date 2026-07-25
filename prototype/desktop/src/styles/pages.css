@@ -998,6 +998,16 @@
   font-weight: 600;
 }
 
+.nl-chapter-navigator__link--unavailable {
+  color: var(--nl-text-muted);
+  cursor: not-allowed;
+}
+
+.nl-chapter-navigator__link--unavailable:hover {
+  background: transparent;
+  color: var(--nl-text-muted);
+}
+
 .nl-chapter-navigator__record-links .nl-chapter-navigator__link {
   padding-block: 5px;
 }
@@ -1832,6 +1842,59 @@
   display: flex;
   flex-direction: column;
   gap: 6px;
+}
+
+.nl-recovery-dialog__inspection {
+  border-top: 1px solid var(--nl-border);
+  margin-top: 18px;
+  padding-top: 15px;
+}
+
+.nl-recovery-dialog__inspection h2 {
+  font-size: 16px;
+  letter-spacing: 0;
+  line-height: 24px;
+  margin: 0;
+}
+
+.nl-recovery-dialog__inspection > p {
+  color: var(--nl-text-secondary);
+  margin: 5px 0 12px;
+}
+
+.nl-recovery-dialog__inspection dl {
+  display: grid;
+  gap: 9px;
+  margin: 0;
+}
+
+.nl-recovery-dialog__inspection dl > div {
+  background: var(--nl-surface-subtle);
+  border-left: 3px solid var(--nl-accent);
+  padding: 9px 11px;
+}
+
+.nl-recovery-dialog__inspection dt {
+  color: var(--nl-text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.nl-recovery-dialog__inspection dd {
+  display: grid;
+  gap: 2px;
+  margin: 3px 0 0;
+}
+
+.nl-recovery-dialog__inspection time,
+.nl-recovery-dialog__inspection dd > span {
+  color: var(--nl-text-secondary);
+  font-size: 12px;
+}
+
+.nl-recovery-dialog__inspection ul {
+  margin: 0;
+  padding-left: 18px;
 }
 
 .nl-recovery-dialog__technical {

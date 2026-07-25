@@ -35,6 +35,17 @@ function NavigationLink({
   return closeOnNavigate ? <Dialog.Close asChild>{link}</Dialog.Close> : link;
 }
 
+function UnavailableChapter({ children }: { children: string }) {
+  return (
+    <span
+      aria-disabled="true"
+      className="nl-chapter-navigator__link nl-chapter-navigator__link--unavailable"
+    >
+      {children}
+    </span>
+  );
+}
+
 function ChapterNavigationContent({ closeOnNavigate = false }: ChapterNavigationContentProps) {
   return (
     <div className="nl-chapter-navigator__content">
@@ -44,9 +55,9 @@ function ChapterNavigationContent({ closeOnNavigate = false }: ChapterNavigation
         </h2>
         <ol className="nl-chapter-navigator__chapters">
           <li>
-            <NavigationLink closeOnNavigate={closeOnNavigate} to="/project/rain-radio/chapter/1">
+            <UnavailableChapter>
               {t('chapter.navigation.one')}
-            </NavigationLink>
+            </UnavailableChapter>
             <span>{t('chapter.navigation.committed')}</span>
           </li>
           <li>
@@ -56,9 +67,9 @@ function ChapterNavigationContent({ closeOnNavigate = false }: ChapterNavigation
             <span className="is-current">{t('chapter.navigation.current')}</span>
           </li>
           <li>
-            <NavigationLink closeOnNavigate={closeOnNavigate} to="/project/rain-radio/chapter/3">
+            <UnavailableChapter>
               {t('chapter.navigation.three')}
-            </NavigationLink>
+            </UnavailableChapter>
             <span>{t('chapter.navigation.planned')}</span>
           </li>
         </ol>

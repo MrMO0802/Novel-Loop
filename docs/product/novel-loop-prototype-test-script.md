@@ -31,7 +31,7 @@ Use: "What are you looking at now?", "What would you expect to happen next?", "P
 7. **Review what will change in the Story Record.** Start at `/project/rain-radio/chapter/2/commit-preview`; ask them to review the high-risk change. Acceptance signal: they can identify the proposed change, make or withhold the explicit decision, and understand the final confirmation is simulated.
 8. **Recover from a simulated Codex timeout.** Start at `/tasks?recovery=timeout`; ask for the safest next step. Acceptance signal: they can resume or choose a safe alternative and explain that draft work is protected.
 9. **Find an open mystery and its planned relevance.** Start at `/project/rain-radio/story-record`; ask them to find an unresolved question that needs attention. Acceptance signal: they find a 待兑现悬念 and describe why it matters for later writing.
-10. **Locate a previous safe restore point.** Start at `/tasks?recovery=crash`; ask where they would inspect recovery options. Acceptance signal: they find the recovery summary or autosave option and do not expect automatic continuation or formal commit.
+10. **Locate a previous safe restore point.** Start at `/tasks?recovery=crash`; ask where they would inspect recovery options. Acceptance signal: they identify a dated safe restore point in the recovery summary and do not expect automatic continuation or formal commit.
 
 ## Per-Participant Record
 

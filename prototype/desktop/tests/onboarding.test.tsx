@@ -79,11 +79,12 @@ describe('first launch readiness', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
 
-    expect(screen.getByRole('status')).toHaveTextContent('正在重新检查');
+    const recheckStatus = screen.getByText('正在重新检查').closest('[role="status"]');
+    expect(recheckStatus).toHaveTextContent('正在重新检查');
     act(() => vi.advanceTimersByTime(120));
 
     expect(screen.getByText(result)).toBeVisible();
-    expect(screen.getByRole('status')).toHaveTextContent(result);
+    expect(recheckStatus).toHaveTextContent(result);
   });
 });
 

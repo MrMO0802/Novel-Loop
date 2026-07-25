@@ -17,10 +17,14 @@ export interface InlineNoticeProps {
 
 export function InlineNotice({ children, title, tone = 'info' }: InlineNoticeProps) {
   const Icon = noticeIcons[tone];
-  const role = tone === 'info' ? 'status' : 'alert';
+  const role = tone === 'danger' ? 'alert' : 'status';
 
   return (
-    <div className={`nl-inline-notice nl-inline-notice--${tone}`} role={role}>
+    <div
+      aria-live={tone === 'danger' ? 'assertive' : 'polite'}
+      className={`nl-inline-notice nl-inline-notice--${tone}`}
+      role={role}
+    >
       <Icon aria-hidden="true" size={18} weight="regular" />
       <div className="nl-inline-notice__content">
         {title && <strong className="nl-inline-notice__title">{title}</strong>}

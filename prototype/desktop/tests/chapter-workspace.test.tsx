@@ -26,9 +26,9 @@ describe('chapter workspace', () => {
     const assistant = screen.getByRole('complementary', { name: '本章写作提示' });
 
     expect(within(chapterNavigation).getByText('第一卷')).toBeVisible();
-    expect(within(chapterNavigation).getByRole('link', { name: /第一章/ })).toBeVisible();
+    expect(within(chapterNavigation).getByText(/第一章 ·/)).toHaveAttribute('aria-disabled', 'true');
     expect(within(chapterNavigation).getByRole('link', { name: /第二章/ })).toHaveAttribute('aria-current', 'page');
-    expect(within(chapterNavigation).getByRole('link', { name: /第三章/ })).toBeVisible();
+    expect(within(chapterNavigation).getByText(/第三章 ·/)).toHaveAttribute('aria-disabled', 'true');
     expect(within(chapterNavigation).getByRole('link', { name: '人物' })).toBeVisible();
     expect(within(chapterNavigation).getByRole('link', { name: '时间线' })).toBeVisible();
     expect(within(chapterNavigation).getByRole('link', { name: '待兑现悬念' })).toBeVisible();
@@ -60,7 +60,7 @@ describe('chapter workspace', () => {
     expect(screen.getByText('正在保存')).toBeVisible();
   });
 
-  test('uses distinct labels and editability for draft, candidate, Story Record preview, and committed versions', async () => {
+  test('uses distinct labels and editability without implying Chapter 2 has a committed version', async () => {
     const user = userEvent.setup();
     renderRoute();
 
@@ -78,9 +78,8 @@ describe('chapter workspace', () => {
     expect(screen.getByText('故事档案变更预览（只读，尚未提交）')).toBeVisible();
     expect(editor).toHaveAttribute('readonly');
 
-    await user.selectOptions(versionSelector, 'committed');
-    expect(screen.getByText('已正式提交（只读）')).toBeVisible();
-    expect(editor).toHaveAttribute('readonly');
+    expect(within(versionSelector).queryByRole('option', { name: /正式提交/ })).toBeNull();
+    expect(within(versionSelector).queryByRole('option', { name: /上次正式提交/ })).toBeNull();
 
     await user.selectOptions(versionSelector, 'draft');
     expect(screen.getByText('草稿（可编辑）')).toBeVisible();
@@ -134,7 +133,7 @@ describe('chapter workspace', () => {
     fireEvent.change(editor, { target: { value: `${(editor as HTMLTextAreaElement).value}雨声更近了。` } });
     expect(screen.getByText('正在保存')).toBeVisible();
 
-    fireEvent.change(versionSelector, { target: { value: 'committed' } });
+    fireEvent.change(versionSelector, { target: { value: 'revision_candidate' } });
 
     expect(screen.getByText('已自动保存')).toBeVisible();
     expect(editor).toHaveAttribute('readonly');
@@ -161,9 +160,21 @@ describe('chapter workspace', () => {
     expect(versionSelector).toHaveAccessibleDescription('故事档案变更预览（只读，尚未提交）');
     expect(versionStatus).toHaveTextContent('故事档案变更预览（只读，尚未提交）');
 
-    fireEvent.change(versionSelector, { target: { value: 'committed' } });
-    expect(versionSelector).toHaveAccessibleDescription('已正式提交（只读）');
-    expect(versionStatus).toHaveTextContent('已正式提交（只读）');
+    expect(within(versionSelector).queryByRole('option', { name: /正式提交/ })).toBeNull();
+  });
+
+  test('announces autosave changes through a polite live status', () => {
+    renderRoute();
+
+    const autosave = screen.getByRole('status', { name: '自动保存状态：已自动保存' });
+    expect(autosave).toHaveAttribute('aria-live', 'polite');
+    expect(autosave).toHaveAttribute('aria-atomic', 'true');
+
+    fireEvent.change(screen.getByRole('textbox', { name: '章节正文' }), {
+      target: { value: '雨声更近了。' }
+    });
+
+    expect(screen.getByRole('status', { name: '自动保存状态：正在保存' })).toBeVisible();
   });
 
   test('Focus Mode removes both page side panels but preserves all editing context and task status', async () => {

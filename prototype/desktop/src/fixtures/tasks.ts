@@ -50,8 +50,20 @@ export interface RecoveryAction {
     titleKey: PlainMessageKey;
   };
   destructive?: boolean;
+  inspection?: RecoveryInspection;
   labelKey: PlainMessageKey;
   variant: 'primary' | 'secondary' | 'quiet' | 'danger';
+}
+
+export interface RecoveryInspection {
+  description: string;
+  preserved: readonly string[];
+  restorePoint: {
+    createdAt: string;
+    detail: string;
+    label: string;
+  };
+  title: string;
 }
 
 export interface RecoveryFixture {
@@ -113,7 +125,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     actions: [
       { labelKey: 'recovery.action.resumeSafeStage', variant: 'primary' },
       { labelKey: 'recovery.action.retry', variant: 'secondary' },
-      { labelKey: 'recovery.action.taskDetails', variant: 'quiet' }
+      {
+        labelKey: 'recovery.action.taskDetails',
+        variant: 'quiet',
+        inspection: {
+          title: '恢复摘要',
+          description: '任务停在第二个场景开始前，可以从已经完成的场景一继续。',
+          preserved: ['第三章当前草稿', '场景一生成结果'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:48',
+            detail: '场景一完成后、场景二开始前创建。',
+            label: '第三章场景一草稿'
+          }
+        }
+      }
     ],
     technical: 'task.chapter-3.timeout'
   },
@@ -179,7 +204,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     blocking: true,
     actions: [
       { labelKey: 'recovery.action.refreshPreview', variant: 'primary' },
-      { labelKey: 'recovery.action.viewRecordChanges', variant: 'secondary' }
+      {
+        labelKey: 'recovery.action.viewRecordChanges',
+        variant: 'secondary',
+        inspection: {
+          title: '恢复摘要',
+          description: '故事档案在预览之后变化，旧预览仍保留供比较。',
+          preserved: ['第二章已接受草稿', '旧提交预览'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:44',
+            detail: '第一章正式内容与第二章草稿均保持不变。',
+            label: '故事档案变更前'
+          }
+        }
+      }
     ],
     technical: 'commit-preview.chapter-2.story-record-changed'
   },
@@ -187,7 +225,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     key: 'project-damage',
     blocking: true,
     actions: [
-      { labelKey: 'recovery.action.inspectProject', variant: 'primary' },
+      {
+        labelKey: 'recovery.action.inspectProject',
+        variant: 'primary',
+        inspection: {
+          title: '恢复摘要',
+          description: '作品已在保护模式中打开，可以先核对最近一次完整结构。',
+          preserved: ['当前诊断摘要', '受保护的正式内容'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:31',
+            detail: '作品结构检查通过后创建的最近安全副本。',
+            label: '雨夜电台完整结构'
+          }
+        }
+      },
       {
         labelKey: 'recovery.action.restorePoint',
         variant: 'secondary',
@@ -206,7 +257,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     key: 'incomplete-journal',
     blocking: true,
     actions: [
-      { labelKey: 'recovery.action.recoverySummary', variant: 'primary' },
+      {
+        labelKey: 'recovery.action.recoverySummary',
+        variant: 'primary',
+        inspection: {
+          title: '恢复摘要',
+          description: '上次正式提交停在写入完成前，新的正式提交仍被阻止。',
+          preserved: ['第二章已接受草稿', '未完成提交记录', '提交前故事档案'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:56',
+            detail: '正式提交开始前创建，可用于撤销未完整结束的结果。',
+            label: '第二章提交前'
+          }
+        }
+      },
       {
         labelKey: 'recovery.action.restoreBeforeCommit',
         variant: 'secondary',
@@ -235,7 +299,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     key: 'crash',
     blocking: false,
     actions: [
-      { labelKey: 'recovery.action.recoverySummary', variant: 'primary' },
+      {
+        labelKey: 'recovery.action.recoverySummary',
+        variant: 'primary',
+        inspection: {
+          title: '恢复摘要',
+          description: '上次关闭前，第二章草稿已自动保存，写作任务没有自动继续。',
+          preserved: ['第二章自动保存草稿', '第三章场景一安全阶段'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:58',
+            detail: '比上次正常关闭更新，内容尚未正式提交。',
+            label: '第二章自动保存草稿'
+          }
+        }
+      },
       { labelKey: 'recovery.action.restoreAutosave', variant: 'secondary' },
       {
         labelKey: 'recovery.action.discardTask',

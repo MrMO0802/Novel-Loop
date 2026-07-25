@@ -2,7 +2,6 @@ import {
   ArrowsClockwise,
   CheckCircle,
   Eye,
-  LockKey,
   PencilSimple,
   WarningCircle,
   type Icon
@@ -42,12 +41,6 @@ const versionDefinitions: Record<ChapterWorkspaceVersion, VersionDefinition> = {
     option: t('chapter.version.previewOption'),
     status: t('chapter.version.preview'),
     tone: 'preview'
-  },
-  committed: {
-    icon: LockKey,
-    option: t('chapter.version.committedOption'),
-    status: t('chapter.version.committed'),
-    tone: 'committed'
   }
 };
 
@@ -130,7 +123,11 @@ export function ManuscriptEditor({
             </select>
           </label>
           <span
+            aria-atomic="true"
+            aria-label={`自动保存状态：${autosaveDefinition.label}`}
+            aria-live="polite"
             className={`nl-manuscript-editor__autosave nl-manuscript-editor__autosave--${autosaveDefinition.tone}`}
+            role="status"
           >
             <AutosaveIcon aria-hidden="true" size={16} weight="regular" />
             {autosaveDefinition.label}

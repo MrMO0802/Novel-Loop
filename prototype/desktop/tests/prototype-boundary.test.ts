@@ -118,3 +118,24 @@ describe('prototype boundary', () => {
     }
   });
 });
+
+describe('visual evidence configuration', () => {
+  test('retains screenshots from passing Playwright runs in an ignored workspace directory', () => {
+    const config = readFileSync('playwright.config.ts', 'utf8');
+    const rootIgnore = readFileSync(path.resolve('../..', '.gitignore'), 'utf8');
+
+    expect(config).toMatch(/outputDir:\s*['"]test-results['"]/);
+    expect(config).toMatch(/screenshot:\s*['"]on['"]/);
+    expect(rootIgnore).toMatch(/^prototype\/desktop\/test-results\/$/m);
+  });
+
+  test('keeps the original dated restore-point usability task', () => {
+    const script = readFileSync(
+      path.resolve('../..', 'docs/product/novel-loop-prototype-test-script.md'),
+      'utf8'
+    );
+
+    expect(script).toContain('10. **Locate a previous safe restore point.**');
+    expect(script).toContain('they identify a dated safe restore point in the recovery summary');
+  });
+});

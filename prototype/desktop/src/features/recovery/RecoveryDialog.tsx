@@ -1,12 +1,13 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { ShieldCheck, X } from '@phosphor-icons/react';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button } from '../../components/Button';
 import { IconButton } from '../../components/IconButton';
 import {
   getRecoveryCopyKey,
   type RecoveryAction,
-  type RecoveryFixture
+  type RecoveryFixture,
+  type RecoveryInspection
 } from '../../fixtures/tasks';
 import { t } from '../../i18n/t';
 
@@ -89,10 +90,20 @@ export function RecoveryDialog({
   triggerLabel
 }: RecoveryDialogProps) {
   const [destructiveAction, setDestructiveAction] = useState<RecoveryAction | null>(null);
+  const [inspection, setInspection] = useState<RecoveryInspection | null>(null);
   const triggerId = `recovery-trigger-${recovery.key}`;
 
+  useEffect(() => {
+    if (inspection) {
+      document.getElementById(`${triggerId}-inspection-title`)?.focus();
+    }
+  }, [inspection, triggerId]);
+
   function handleOpenChange(nextOpen: boolean) {
-    if (!nextOpen) setDestructiveAction(null);
+    if (!nextOpen) {
+      setDestructiveAction(null);
+      setInspection(null);
+    }
     onOpenChange(nextOpen);
   }
 
@@ -172,6 +183,10 @@ export function RecoveryDialog({
                       setDestructiveAction(action);
                       return;
                     }
+                    if (action.inspection) {
+                      setInspection(action.inspection);
+                      return;
+                    }
                     completeAction(action, false);
                   }}
                   variant={action.variant}
@@ -181,6 +196,36 @@ export function RecoveryDialog({
               ))}
             </div>
           </section>
+
+          {inspection && (
+            <section
+              aria-labelledby={`${triggerId}-inspection-title`}
+              className="nl-recovery-dialog__inspection"
+            >
+              <h2 id={`${triggerId}-inspection-title`} tabIndex={-1}>
+                {inspection.title}
+              </h2>
+              <p>{inspection.description}</p>
+              <dl>
+                <div>
+                  <dt>安全还原点</dt>
+                  <dd>
+                    <strong>{inspection.restorePoint.label}</strong>
+                    <time>{inspection.restorePoint.createdAt}</time>
+                    <span>{inspection.restorePoint.detail}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>已经保留</dt>
+                  <dd>
+                    <ul>
+                      {inspection.preserved.map((item) => <li key={item}>{item}</li>)}
+                    </ul>
+                  </dd>
+                </div>
+              </dl>
+            </section>
+          )}
 
           <TechnicalDetails recovery={recovery} />
         </Dialog.Content>

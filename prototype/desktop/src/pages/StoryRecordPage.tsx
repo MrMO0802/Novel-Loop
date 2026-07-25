@@ -9,8 +9,11 @@ import { t } from '../i18n/t';
 
 export function StoryRecordPage() {
   const [searchParams] = useSearchParams();
-  const requestedTab: StoryRecordTab = searchParams.get('view') === 'pending'
-    ? 'pending'
+  const requestedView = searchParams.get('view');
+  const requestedTab: StoryRecordTab = requestedView === 'timeline'
+    || requestedView === 'mysteries'
+    || requestedView === 'pending'
+    ? requestedView
     : 'characters';
   const [activeTab, setActiveTab] = useState<StoryRecordTab>(requestedTab);
 

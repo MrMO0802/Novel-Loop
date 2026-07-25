@@ -65,6 +65,16 @@ describe('project overview', () => {
 });
 
 describe('Story Record', () => {
+  test.each([
+    ['timeline', '时间线', '故事时间线'],
+    ['mysteries', '待兑现悬念', '广播里的求救者为什么知道林澈姐姐的名字？']
+  ])('honors the %s query as the selected view', (view, tabName, expectedHeading) => {
+    renderRoute(`/project/rain-radio/story-record?view=${view}`);
+
+    expect(screen.getByRole('tab', { name: tabName })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByRole('heading', { name: expectedHeading })).toBeVisible();
+  });
+
   test('uses every approved author-facing concept label without leaking implementation details', () => {
     renderRoute('/project/rain-radio/story-record');
 
@@ -178,7 +188,7 @@ describe('Story Record', () => {
 
     await user.click(screen.getByRole('tab', { name: '待确认变更' }));
     expect(screen.getByText('林澈抵达临江里三栋')).toBeVisible();
-    expect(screen.getByText('许雯看见收件号码时停顿了两秒')).toBeVisible();
+    expect(screen.getByText('挡住十七层按钮的磨花不锈钢板')).toBeVisible();
     expect(screen.getByText('林澈 ↔ 许雯')).toBeVisible();
   });
 
@@ -187,9 +197,9 @@ describe('Story Record', () => {
     renderRoute('/project/rain-radio/story-record');
 
     await user.click(screen.getByRole('tab', { name: '待确认变更' }));
-    await user.type(screen.getByRole('searchbox', { name: '搜索当前视图' }), '值班表');
+    await user.type(screen.getByRole('searchbox', { name: '搜索当前视图' }), '登记表');
 
-    expect(screen.getByText('值班表新增了十七层夜间巡查的书面记录。')).toBeVisible();
+    expect(screen.getByText(/登记表在 00:50 记录同一份送达/)).toBeVisible();
     expect(screen.queryByText('没有找到匹配内容。')).toBeNull();
   });
 

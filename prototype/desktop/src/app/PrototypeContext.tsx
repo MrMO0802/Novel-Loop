@@ -7,9 +7,12 @@ export type ChapterRevisionDisposition = 'accepted' | 'alternate' | 'rejected';
 
 export interface SessionChapterRevision {
   acceptedDraft: string;
+  acceptedDraftRevision: number;
   candidateDraft: string;
   disposition: ChapterRevisionDisposition;
   originalDraft: string;
+  previewSourceDraft: string;
+  previewSourceRevision: number;
 }
 
 type SessionChapterRevisions = ReadonlyMap<string, SessionChapterRevision>;
@@ -27,6 +30,7 @@ type PrototypeContextValue = {
   updateAcceptedChapterDraft: (chapterKey: string, draft: string) => void;
   setChapterDraft: (chapterKey: string, draft: string) => void;
   setActiveProjectId: (projectId: string | null) => void;
+  setFocusMode: (focusMode: boolean) => void;
   toggleFocusMode: () => void;
   setAssistantPanel: (assistantPanel: PrototypeState['assistantPanel']) => void;
   setActiveTaskId: (taskId: string | null) => void;
@@ -56,9 +60,12 @@ export function PrototypeContextProvider({ children, initialState }: PrototypeCo
         const next = new Map(current);
         next.set(chapterKey, {
           acceptedDraft: candidateDraft,
+          acceptedDraftRevision: disposition === 'accepted' ? 1 : 0,
           candidateDraft,
           disposition,
-          originalDraft
+          originalDraft,
+          previewSourceDraft: disposition === 'accepted' ? candidateDraft : '',
+          previewSourceRevision: disposition === 'accepted' ? 1 : 0
         });
         return next;
       });
@@ -70,7 +77,13 @@ export function PrototypeContextProvider({ children, initialState }: PrototypeCo
         if (!revision) return current;
 
         const next = new Map(current);
-        next.set(chapterKey, { ...revision, acceptedDraft: draft });
+        if (revision.acceptedDraft === draft) return current;
+
+        next.set(chapterKey, {
+          ...revision,
+          acceptedDraft: draft,
+          acceptedDraftRevision: revision.acceptedDraftRevision + 1
+        });
         return next;
       });
     },
@@ -78,6 +91,7 @@ export function PrototypeContextProvider({ children, initialState }: PrototypeCo
       chapterDraftsRef.current.set(chapterKey, draft);
     },
     setActiveProjectId: (activeProjectId) => setState((current) => ({ ...current, activeProjectId })),
+    setFocusMode: (focusMode) => setState((current) => ({ ...current, focusMode })),
     toggleFocusMode: () => setState((current) => ({ ...current, focusMode: !current.focusMode })),
     setAssistantPanel: (assistantPanel) => setState((current) => ({ ...current, assistantPanel })),
     setActiveTaskId: (activeTaskId) => setState((current) => ({ ...current, activeTaskId })),

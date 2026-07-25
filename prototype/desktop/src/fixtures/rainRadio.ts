@@ -66,8 +66,7 @@ export type ChapterWorkspaceVersion =
   | 'draft'
   | 'accepted_draft'
   | 'revision_candidate'
-  | 'commit_preview'
-  | 'committed';
+  | 'commit_preview';
 
 export interface ChapterWorkspaceFixture {
   chapter: number;
@@ -259,6 +258,182 @@ const chapterTwoRevisionCandidate = `雨是从沿江路拐进来的。
 
 林澈抬头看向那块挡住十七层按钮的位置，电梯门在他面前再次合拢。`;
 
+export const chapterTwoAcceptedNarrative = {
+  draft: chapterTwoRevisionCandidate,
+  pendingChanges: {
+    chapter: '第二章：收件地址',
+    status: '待审阅，尚未写入故事档案',
+    note: '以下内容来自已接受的第二章雨夜草稿。正式提交前，已确认事实不会改变。',
+    characters: [
+      {
+        key: 'xu-wen',
+        name: '许雯',
+        role: '站点调度员',
+        currentGoal: '确认林澈是否已经抵达临江里，并提醒他不要贸然上楼。',
+        currentState: '通过语音说明订单留在站点，交接只发生在零点四十分后的雨夜。',
+        pressure: '她知道三栋最高只有十六层，却没有解释自己为何立即要求林澈返回。',
+        lastSeen: '第二章 · 雨夜语音'
+      }
+    ],
+    timeline: [
+      {
+        key: 'delivery-received',
+        when: '现在 · 第二章 00:40 后',
+        title: '林澈在雨夜接到临江里送达',
+        summary: '许雯把订单留在站点，林澈只在零点四十分后接到这一次交接。',
+        source: '第二章已接受草稿'
+      },
+      {
+        key: 'building-arrival',
+        when: '现在 · 第二章 00:50',
+        title: '林澈抵达临江里三栋',
+        summary: '楼层按钮停在十六层，门厅登记表却把同一份送达记给“十七层 1704”。',
+        source: '第二章已接受草稿'
+      }
+    ],
+    foreshadowing: [
+      {
+        key: 'blocked-seventeen-button',
+        clue: '挡住十七层按钮的磨花不锈钢板',
+        status: 'planted',
+        placement: '第二章 · 临江里三栋门厅',
+        intendedPayoff: '把不存在的楼层从地址疑点推进为楼内被人为遮住的入口。',
+        evidence: '按钮只到十六层，但挡板位置与登记表上的“十七层消防门”互相呼应。'
+      }
+    ],
+    relationships: [
+      {
+        key: 'lin-che-xu-wen',
+        people: '林澈 ↔ 许雯',
+        relation: '同事 · 谨慎互信',
+        currentState: '许雯确认林澈的位置并提醒他返回，但没有制造第二次交接或另一个时间点。'
+      }
+    ],
+    changes: [
+      {
+        category: '时间线',
+        change: '确认订单交接与抵达门厅都发生在零点四十分后的同一条雨夜行动线上。',
+        evidence: '登记表在 00:50 记录同一份送达，正文没有第二个交接时间。'
+      },
+      {
+        category: '人物',
+        change: '许雯知道三栋最高十六层，并在林澈抵达后要求他先回来。',
+        evidence: '她的语音没有给出第二个交接时间，也没有改变林澈已经接单的事实。'
+      },
+      {
+        category: '待兑现悬念',
+        change: '不存在的十七层从重复地址推进为门厅里的实体矛盾。',
+        evidence: '登记表写有“十七层消防门”，电梯按钮上方却只有一块磨花挡板。'
+      },
+      {
+        category: '读者认知',
+        change: '读者确认电梯小票上的骑手姓名仍是失踪的林遥。',
+        evidence: '湿透小票同时写着“十七层 1704”和“林遥”。'
+      }
+    ]
+  },
+  commitGroups: [
+    {
+      kind: 'facts',
+      items: [
+        {
+          title: '林澈在零点四十分后接到临江里送达',
+          detail: '许雯把订单留在站点，正文只保留这一次雨夜交接。'
+        },
+        {
+          title: '门厅登记表在零点五十分记录同一份送达',
+          detail: '收件地址仍是临江里三栋十七层 1704。'
+        },
+        {
+          title: '三栋的楼层按钮只到十六层',
+          detail: '十六层上方是一块磨花的不锈钢挡板，登记表却写有十七层消防门。'
+        },
+        {
+          title: '无电收音机再次发出警告',
+          detail: '女人说“别坐电梯”，手机录音仍然只留下雨声。'
+        },
+        {
+          title: '电梯小票写着林遥的姓名',
+          detail: '小票地址是十七层 1704，骑手姓名仍可辨认为林遥。'
+        }
+      ]
+    },
+    {
+      kind: 'character',
+      items: [
+        {
+          title: '林澈继续追查姐姐最后一单',
+          detail: '他把登记表、十七层挡板和写有林遥姓名的小票视为同一条行动线索。'
+        }
+      ]
+    },
+    {
+      kind: 'timeline',
+      items: [
+        {
+          title: '00:40 后，林澈接到送达',
+          detail: '许雯把订单留在站点，没有出现第二个交接时间。'
+        },
+        {
+          title: '约 00:50，林澈抵达临江里三栋',
+          detail: '登记表把同一份送达记给十七层 1704。'
+        },
+        {
+          title: '抵达后，电梯从楼上下降',
+          detail: '数字从十二向下跳，收音机警告林澈不要乘电梯。'
+        },
+        {
+          title: '电梯到达一层后，小票出现',
+          detail: '湿透的小票写着十七层 1704，骑手姓名是林遥。'
+        }
+      ]
+    },
+    {
+      kind: 'mystery',
+      items: [
+        {
+          title: '临江里三栋不存在的十七层在哪里？',
+          detail: '登记表、挡板和小票让这个地址从旧线索推进为眼前的实体矛盾。'
+        }
+      ]
+    },
+    {
+      kind: 'foreshadowing',
+      items: [
+        {
+          title: '挡住十七层按钮的不锈钢板',
+          detail: '它与登记表上的“十七层消防门”互相呼应。'
+        },
+        {
+          title: '写有林遥姓名的湿透小票',
+          detail: '它把姐姐最后一单与当前雨夜再次连接。'
+        }
+      ]
+    },
+    {
+      kind: 'reader',
+      items: [
+        {
+          title: '读者已经知道：交接只发生在零点四十分后的雨夜',
+          detail: '许雯没有给出第二个日间交接。'
+        },
+        {
+          title: '读者已经知道：登记表记录十七层消防门',
+          detail: '记录时间是零点五十分，与林澈的抵达顺序一致。'
+        },
+        {
+          title: '读者已经知道：小票上的骑手是林遥',
+          detail: '地址与姐姐失踪前的最后一单再次重合。'
+        },
+        {
+          title: '读者正在期待：林澈找到挡板后的十七层入口',
+          detail: '本章只推进矛盾，没有解释十七层如何存在。'
+        }
+      ]
+    }
+  ]
+} as const;
+
 export const rainRadio: RainRadioProject = {
   title: '雨夜电台',
   volume: {
@@ -284,43 +459,14 @@ export const rainRadio: RainRadioProject = {
     ],
     review: {
       result: '修订候选已解决时间顺序问题',
-      detail: '候选稿已经接顺抵达门厅与站点后门的时间；当前显示的原稿尚未采用这项修改，仍需你决定。'
+      detail: '候选稿已经接顺雨夜接单与抵达门厅的时间；当前显示的原稿尚未采用这项修改，仍需你决定。'
     },
     nextAction: '比较修订',
     versions: {
       draft: chapterTwoDraft,
-      accepted_draft: chapterTwoRevisionCandidate,
-      revision_candidate: chapterTwoRevisionCandidate,
-      commit_preview: `雨顺着沿江路灌进临江里。
-
-林澈把电动车停在三栋雨棚下，没有立刻进去。保温箱里的收音机已经安静了七分钟，手机录音却一直开着，红点在屏幕上平稳地走。耳机里只有雨，没有刚才叫出他名字的女人。
-
-门厅的楼层图从一排到十六。林澈把姐姐最后一单的截图举到旁边：临江里三栋，十七层，1704。
-
-地址没变，是这栋楼不肯承认它。
-
-值班室空着，热水杯还冒着气。巡查登记摊在台灯下面，最末两行墨迹未干。十六层水表之后，清楚写着十七层消防门。
-
-楼上的电梯突然启动。数字从十二向下跳，每降一层，门厅的灯就暗一次。保温箱里随即响起短促的电流杂音。
-
-女人的声音从雨声背后挤出来：“别坐电梯。”
-
-手机上的录音波形没有变化。
-
-电梯停在一层，门缓慢打开。空轿厢的后壁贴着一张湿透的外卖小票，收件地址是十七层1704。
-
-骑手姓名：林遥。`,
-      committed: `雨顺着沿江路灌进临江里。
-
-林澈把电动车停在三栋雨棚下。门厅的楼层图从一排到十六，姐姐最后一单的截图却写着临江里三栋十七层1704。
-
-值班室空着，巡查登记摊在台灯下面。零点四十分是十六层水表，下一行却写着零点五十分巡查十七层消防门。
-
-电梯从十二层向下降。保温箱里的收音机响起电流杂音，女人的声音从雨声背后传来：“别坐电梯。”
-
-手机录音里仍然只有雨。
-
-电梯停在一层。空轿厢后壁贴着一张湿透的外卖小票，收件地址是十七层1704，骑手姓名是林遥。`
+      accepted_draft: chapterTwoAcceptedNarrative.draft,
+      revision_candidate: chapterTwoAcceptedNarrative.draft,
+      commit_preview: chapterTwoAcceptedNarrative.draft
     }
   },
   characters: [
@@ -509,72 +655,7 @@ export const rainRadio: RainRadioProject = {
       source: '第一章'
     }
   ],
-  pendingChanges: {
-    chapter: '第二章：收件地址',
-    status: '待审阅，尚未写入故事档案',
-    note: '以下内容来自第二章的提交预览。正式提交前，已确认事实不会改变。',
-    characters: [
-      {
-        key: 'xu-wen',
-        name: '许雯',
-        role: '站点调度员',
-        currentGoal: '帮林澈查清异常订单，同时不让站点经理发现。',
-        currentState: '调出一张已经从系统撤回的旧订单截图。',
-        pressure: '她认出了收件号码，却没有说明自己为什么记得。',
-        lastSeen: '第二章 · 站点后门'
-      }
-    ],
-    timeline: [
-      {
-        key: 'building-arrival',
-        when: '现在 · 第二章 00:26',
-        title: '林澈抵达临江里三栋',
-        summary: '楼层按钮停在十六层，门厅值班表却有一笔写给“十七层”的夜间巡查。',
-        source: '第二章提交预览'
-      }
-    ],
-    foreshadowing: [
-      {
-        key: 'xu-wen-number',
-        clue: '许雯看见收件号码时停顿了两秒',
-        status: 'planted',
-        placement: '第二章 · 站点后门',
-        intendedPayoff: '揭示许雯曾处理过同一号码发出的异常订单。',
-        evidence: '她先说“不认识”，随后准确说出了号码归属的旧城区号段。'
-      }
-    ],
-    relationships: [
-      {
-        key: 'lin-che-xu-wen',
-        people: '林澈 ↔ 许雯',
-        relation: '同事 · 有限互信',
-        currentState: '许雯愿意协助查订单，但隐瞒了自己对收件号码的了解。'
-      },
-      {
-        key: 'lin-yao-xu-wen',
-        people: '林遥 ↔ 许雯',
-        relation: '旧同事 · 关系尚未证实',
-        currentState: '两人都接触过临江里订单，目前只有站点排班记录能把她们联系起来。'
-      }
-    ],
-    changes: [
-      {
-        category: '时间线',
-        change: '增加林澈抵达临江里三栋的事件。',
-        evidence: '林澈在 00:26 进入门厅并核对楼层按钮。'
-      },
-      {
-        category: '人物',
-        change: '许雯对异常收件号码表现出隐瞒。',
-        evidence: '她否认认识号码，却说出了号码所属的旧城区号段。'
-      },
-      {
-        category: '待兑现悬念',
-        change: '不存在的十七层从线索变为正在推进。',
-        evidence: '值班表新增了十七层夜间巡查的书面记录。'
-      }
-    ]
-  },
+  pendingChanges: chapterTwoAcceptedNarrative.pendingChanges,
   recentActivity: [
     {
       key: 'chapter-review',

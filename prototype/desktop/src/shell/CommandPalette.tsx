@@ -4,12 +4,18 @@ import { useNavigate } from 'react-router-dom';
 import { usePrototypeContext } from '../app/PrototypeContext';
 
 interface CommandPaletteProps {
+  focusModeAvailable: boolean;
   onOpenChange: (open: boolean) => void;
   open: boolean;
   trigger: ReactElement;
 }
 
-export function CommandPalette({ onOpenChange, open, trigger }: CommandPaletteProps) {
+export function CommandPalette({
+  focusModeAvailable,
+  onOpenChange,
+  open,
+  trigger
+}: CommandPaletteProps) {
   const navigate = useNavigate();
   const { setActiveProjectId, toggleFocusMode } = usePrototypeContext();
 
@@ -42,7 +48,9 @@ export function CommandPalette({ onOpenChange, open, trigger }: CommandPalettePr
       }
     },
     { label: '打开任务中心', action: () => navigate('/tasks') },
-    { label: '切换专注模式', action: toggleFocusMode },
+    ...(focusModeAvailable
+      ? [{ label: '切换专注模式', action: toggleFocusMode }]
+      : []),
     { label: '打开设置', action: () => navigate('/settings') }
   ];
 

@@ -148,7 +148,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     actions: [
       { labelKey: 'recovery.action.manualEdit', variant: 'primary' },
       { labelKey: 'recovery.action.tryLater', variant: 'secondary' },
-      { labelKey: 'recovery.action.viewProtected', variant: 'quiet' }
+      {
+        labelKey: 'recovery.action.viewProtected',
+        variant: 'quiet',
+        inspection: {
+          title: '当前草稿与安全阶段',
+          description: '额度不可用前完成的正文和任务阶段都已单独保留。',
+          preserved: ['第三章当前草稿', '场景一生成结果', '第二章正式故事档案'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:49',
+            detail: '最后一次 Codex 请求开始前创建，未包含任何未完成返回。',
+            label: '第三章场景一完成'
+          }
+        }
+      }
     ],
     technical: 'task.chapter-3.usage-unavailable'
   },
@@ -165,7 +178,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     key: 'diagnostics-hard-failure',
     blocking: true,
     actions: [
-      { labelKey: 'recovery.action.viewEvidence', variant: 'primary' },
+      {
+        labelKey: 'recovery.action.viewEvidence',
+        variant: 'primary',
+        inspection: {
+          title: '第二章检查依据',
+          description: '关键问题来自同一次订单交接出现两个时间点，原始段落仍完整保留。',
+          preserved: ['第二章原始草稿', '时间线冲突证据', '章节检查结果'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:42',
+            detail: '章节检查开始前保存，故事档案尚未写入第二章内容。',
+            label: '第二章检查前草稿'
+          }
+        }
+      },
       { labelKey: 'recovery.action.targetedRevision', variant: 'secondary' },
       { labelKey: 'recovery.action.returnManual', variant: 'quiet' }
     ],
@@ -195,7 +221,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     blocking: false,
     actions: [
       { labelKey: 'recovery.action.regenerateCandidate', variant: 'primary' },
-      { labelKey: 'recovery.action.compareBasis', variant: 'secondary' }
+      {
+        labelKey: 'recovery.action.compareBasis',
+        variant: 'secondary',
+        inspection: {
+          title: '候选生成时的依据',
+          description: '旧候选基于较早的第二章草稿，当前手动编辑不会被它覆盖。',
+          preserved: ['当前第二章草稿', '过期修订候选', '候选生成时的检查依据'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:39',
+            detail: '修订候选开始生成前保存，可用于核对草稿差异。',
+            label: '候选生成前草稿'
+          }
+        }
+      }
     ],
     technical: 'revision.chapter-2.source-changed'
   },
@@ -289,7 +328,20 @@ export const recoveryFixtures: Record<RecoveryKey, RecoveryFixture> = {
     key: 'cancellation',
     blocking: false,
     actions: [
-      { labelKey: 'recovery.action.viewProtected', variant: 'primary' },
+      {
+        labelKey: 'recovery.action.viewProtected',
+        variant: 'primary',
+        inspection: {
+          title: '已取消任务的保留内容',
+          description: '取消只停止后续生成，已经完成的场景和自动保存草稿仍可继续编辑。',
+          preserved: ['第三章当前草稿', '场景一生成结果', '取消前任务阶段'],
+          restorePoint: {
+            createdAt: '2026 年 7 月 24 日 23:50',
+            detail: '取消请求发出前创建，未继续执行后续场景。',
+            label: '第三章场景一草稿'
+          }
+        }
+      },
       { labelKey: 'recovery.action.resumeTask', variant: 'secondary' },
       { labelKey: 'recovery.action.restart', variant: 'quiet' }
     ],

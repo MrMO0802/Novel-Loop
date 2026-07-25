@@ -50,7 +50,7 @@ function CommitTechnicalDetails({
 }
 
 export function CommitPreviewPage() {
-  const { chapterRevisions } = usePrototypeContext();
+  const { chapterRevisions, refreshAcceptedChapterPreview } = usePrototypeContext();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const revision = chapterRevisions.get('rain-radio:chapter:2');
@@ -94,6 +94,13 @@ export function CommitPreviewPage() {
     setConfirmationOpen(false);
     setSimulated(false);
     setSearchParams({}, { replace: true });
+  }
+
+  function refreshDraftBoundPreview() {
+    refreshAcceptedChapterPreview('rain-radio:chapter:2');
+    setDecision(null);
+    setConfirmationOpen(false);
+    setSimulated(false);
   }
 
   return (
@@ -141,6 +148,9 @@ export function CommitPreviewPage() {
         <InlineNotice title={t('commit.draftStale.title')} tone="warning">
           <p>{t('commit.draftStale.body')}</p>
           <div className="nl-commit-preview__stale-actions">
+            <Button onClick={refreshDraftBoundPreview}>
+              {t('commit.action.refreshFromDraft')}
+            </Button>
             <Button onClick={() => navigate(chapterPath)} variant="secondary">
               {t('commit.action.returnToEdit')}
             </Button>

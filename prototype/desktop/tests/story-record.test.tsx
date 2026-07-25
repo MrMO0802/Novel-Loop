@@ -29,7 +29,7 @@ function contrastRatio(first: string, second: string) {
 }
 
 describe('project overview', () => {
-  test('reads as an editorial project briefing with one recommended next action', () => {
+  test('reads as an editorial project briefing with one coherent revision decision next action', () => {
     renderRoute('/project/rain-radio');
 
     expect(screen.getByRole('heading', { name: '雨夜电台' })).toBeVisible();
@@ -42,25 +42,23 @@ describe('project overview', () => {
 
     const recommendation = screen.getByRole('complementary', { name: '建议下一步' });
     expect(within(recommendation).getAllByRole('button')).toHaveLength(1);
-    expect(within(recommendation).getByRole('button', { name: '审阅故事档案变更' })).toBeVisible();
+    expect(within(recommendation).getByRole('button', { name: '比较第二章修订' })).toBeVisible();
+    expect(screen.queryByText('采纳第二章修订候选')).toBeNull();
     expect(screen.getByText('4 个尚未兑现，其中 2 个需要在本卷留意。')).toBeVisible();
     expect(screen.getByText('4 项事实与 6 个时间点已写入故事档案。')).toBeVisible();
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
   });
 
-  test('recommended action opens the pending Story Record preview directly', async () => {
+  test('recommended action opens the undecided revision before Story Record review', async () => {
     const user = userEvent.setup();
     renderRoute('/project/rain-radio');
 
-    await user.click(screen.getByRole('button', { name: '审阅故事档案变更' }));
+    await user.click(screen.getByRole('button', { name: '比较第二章修订' }));
 
-    expect(window.location.pathname).toBe('/project/rain-radio/story-record');
-    expect(window.location.search).toBe('?view=pending');
-    expect(screen.getByRole('tab', { name: '待确认变更' })).toHaveAttribute('aria-selected', 'true');
-    expect(screen.getByRole('heading', { name: '第二章待确认变更' })).toBeVisible();
-    expect(screen.getByText('待审阅，尚未写入故事档案')).toBeVisible();
-    expect(screen.getByText('审阅第二章尚未写入故事档案的变更，确认后再正式提交。')).toBeVisible();
-    expect(screen.queryByText('查看人物、时间线与仍需兑现的故事承诺。这里的内容来自已正式提交的章节。')).toBeNull();
+    expect(window.location.pathname).toBe('/project/rain-radio/chapter/2/revision');
+    expect(screen.getByRole('heading', { name: '比较第二章修订' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '接受候选' })).toBeEnabled();
+    expect(screen.queryByText('已接受草稿')).toBeNull();
   });
 });
 
@@ -187,6 +185,7 @@ describe('Story Record', () => {
     expect(screen.queryByText(/许雯/)).toBeNull();
 
     await user.click(screen.getByRole('tab', { name: '待确认变更' }));
+    expect(screen.getByText(/来自尚未接受的第二章修订候选/)).toBeVisible();
     expect(screen.getByText('林澈抵达临江里三栋')).toBeVisible();
     expect(screen.getByText('挡住十七层按钮的磨花不锈钢板')).toBeVisible();
     expect(screen.getByText('林澈 ↔ 许雯')).toBeVisible();

@@ -27,6 +27,7 @@ type PrototypeContextValue = {
     originalDraft: string,
     candidateDraft: string
   ) => void;
+  refreshAcceptedChapterPreview: (chapterKey: string) => void;
   updateAcceptedChapterDraft: (chapterKey: string, draft: string) => void;
   setChapterDraft: (chapterKey: string, draft: string) => void;
   setActiveProjectId: (projectId: string | null) => void;
@@ -66,6 +67,21 @@ export function PrototypeContextProvider({ children, initialState }: PrototypeCo
           originalDraft,
           previewSourceDraft: disposition === 'accepted' ? candidateDraft : '',
           previewSourceRevision: disposition === 'accepted' ? 1 : 0
+        });
+        return next;
+      });
+    },
+    refreshAcceptedChapterPreview: (chapterKey) => {
+      setChapterRevisions((current) => {
+        const revision = current.get(chapterKey);
+
+        if (!revision || revision.disposition !== 'accepted') return current;
+
+        const next = new Map(current);
+        next.set(chapterKey, {
+          ...revision,
+          previewSourceDraft: revision.acceptedDraft,
+          previewSourceRevision: revision.acceptedDraftRevision
         });
         return next;
       });

@@ -262,8 +262,8 @@ export const chapterTwoAcceptedNarrative = {
   draft: chapterTwoRevisionCandidate,
   pendingChanges: {
     chapter: '第二章：收件地址',
-    status: '待审阅，尚未写入故事档案',
-    note: '以下内容来自已接受的第二章雨夜草稿。正式提交前，已确认事实不会改变。',
+    status: '候选变更预览，尚未接受',
+    note: '以下内容来自尚未接受的第二章修订候选。接受候选后，才能生成与草稿绑定的正式提交预览。',
     characters: [
       {
         key: 'xu-wen',
@@ -281,14 +281,14 @@ export const chapterTwoAcceptedNarrative = {
         when: '现在 · 第二章 00:40 后',
         title: '林澈在雨夜接到临江里送达',
         summary: '许雯把订单留在站点，林澈只在零点四十分后接到这一次交接。',
-        source: '第二章已接受草稿'
+        source: '第二章修订候选'
       },
       {
         key: 'building-arrival',
         when: '现在 · 第二章 00:50',
         title: '林澈抵达临江里三栋',
         summary: '楼层按钮停在十六层，门厅登记表却把同一份送达记给“十七层 1704”。',
-        source: '第二章已接受草稿'
+        source: '第二章修订候选'
       }
     ],
     foreshadowing: [
@@ -445,7 +445,7 @@ export const rainRadio: RainRadioProject = {
   latestChapter: {
     number: 2,
     title: '收件地址',
-    status: '修订已通过章节检查，故事档案变更等待审阅',
+    status: '修订候选已通过章节检查，等待作者决定',
     summary: '林澈按广播里的地址来到临江里三栋，却发现整栋楼的门牌都没有十七层。'
   },
   chapterWorkspace: {
@@ -664,10 +664,10 @@ export const rainRadio: RainRadioProject = {
       detail: '时间顺序问题已解决，等待审阅故事档案变更。'
     },
     {
-      key: 'revision-accepted',
+      key: 'revision-ready',
       when: '18 分钟前',
-      title: '采纳第二章修订候选',
-      detail: '保留临江里门厅场景，移除重复的订单交接。'
+      title: '生成第二章修订候选',
+      detail: '候选保留临江里门厅场景，并移除重复的订单交接，等待作者决定。'
     },
     {
       key: 'chapter-one-commit',

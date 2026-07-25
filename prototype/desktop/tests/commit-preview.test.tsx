@@ -215,6 +215,26 @@ describe('controlled commit preview', () => {
     expect(screen.getByText('需要刷新：已接受草稿与预览来源不再一致。')).toBeVisible();
   });
 
+  test('regenerates the preview from the edited accepted draft before commit review can continue', async () => {
+    renderRoute(revisionPath);
+
+    fireEvent.click(screen.getByRole('button', { name: '接受候选' }));
+    const acceptedEditor = screen.getByRole('textbox', { name: '已接受的修订草稿' });
+    fireEvent.change(acceptedEditor, {
+      target: {
+        value: `${(acceptedEditor as HTMLTextAreaElement).value}\n\n林澈补记了新的雨声。`
+      }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '审阅故事档案变更' }));
+
+    fireEvent.click(screen.getByRole('button', { name: '根据当前草稿刷新预览' }));
+
+    expect(screen.queryByText('已接受草稿在预览生成后发生了变化')).toBeNull();
+    expect(screen.getByText('已接受草稿与本次预览来源一致')).toBeVisible();
+    expect(screen.getByRole('button', { name: '正式提交本章' })).toBeDisabled();
+    expect(screen.getByText('请先决定如何处理 1 项高风险变化。')).toBeVisible();
+  });
+
   test('uses the accepted post-midnight candidate as the only Chapter 2 narrative source', () => {
     const acceptedCandidate = rainRadio.chapterWorkspace.versions.revision_candidate;
     const pendingPreview = JSON.stringify(rainRadio.pendingChanges);

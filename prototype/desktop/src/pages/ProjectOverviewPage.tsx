@@ -122,7 +122,7 @@ export function ProjectOverviewPage() {
           <p>{t('overview.recommended')}</p>
           <h2>{t('overview.recommendedTitle')}</h2>
           <span>{t('overview.recommendedBody')}</span>
-          <Button onClick={() => navigate('/project/rain-radio/story-record?view=pending')}>
+          <Button onClick={() => navigate('/project/rain-radio/chapter/2/revision')}>
             {t('overview.recommendedAction')}
           </Button>
         </aside>

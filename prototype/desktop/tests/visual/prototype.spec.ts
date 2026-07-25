@@ -15,7 +15,7 @@ const routeFixtures: readonly RouteFixture[] = [
   { route: '/setup?state=missing', heading: '首次使用：需要安装', primaryControl: '重新检查' },
   { route: '/library', heading: '作品库', primaryControl: '审阅第二章' },
   { route: '/new', heading: '新建作品', primaryControl: '下一项' },
-  { route: '/project/rain-radio', heading: '雨夜电台', primaryControl: '审阅故事档案变更' },
+  { route: '/project/rain-radio', heading: '雨夜电台', primaryControl: '比较第二章修订' },
   {
     route: '/project/rain-radio/chapter/2',
     heading: '第二章：收件地址',

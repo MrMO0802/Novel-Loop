@@ -275,6 +275,27 @@ describe('recovery guidance', () => {
   });
 
   test.each([
+    ['usage-limit', '当前暂时无法继续使用 Codex', '查看已保留内容', '当前草稿与安全阶段'],
+    ['diagnostics-hard-failure', '第二章仍有关键一致性问题', '查看正文依据', '第二章检查依据'],
+    ['candidate-stale', '修订候选已经过期', '比较生成依据', '候选生成时的依据'],
+    ['cancellation', '任务已经取消', '查看已保留内容', '已取消任务的保留内容']
+  ])(
+    'keeps %s open and shows real fixture content for inspect-labelled actions',
+    async (key, title, action, inspectionTitle) => {
+      const user = userEvent.setup();
+      renderRoute(`/tasks?recovery=${key}`);
+
+      const dialog = screen.getByRole('dialog', { name: title });
+      await user.click(within(dialog).getByRole('button', { name: action }));
+
+      expect(dialog).toBeVisible();
+      expect(within(dialog).getByRole('heading', { name: inspectionTitle })).toBeVisible();
+      expect(within(dialog).getByText('安全还原点')).toBeVisible();
+      expect(screen.queryByRole('status', { name: '恢复操作结果' })).toBeNull();
+    }
+  );
+
+  test.each([
     ['project-damage', '从安全还原点恢复', '确认使用安全还原点恢复？', '恢复并保留当前诊断副本'],
     ['crash', '放弃未完成任务', '确认放弃未完成任务？', '放弃任务并保留草稿']
   ])(

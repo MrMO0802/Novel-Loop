@@ -2,7 +2,7 @@
 
 ## Status
 
-Complete pending independent final review and human Gate 4 approval.
+Complete pending independent final re-review and human Gate 4 approval.
 
 The changes remain inside the fixture-driven browser prototype. They do not add Electron,
 engine, Codex, filesystem, browser storage, provider, queue, snapshot, or Story State
@@ -45,6 +45,19 @@ integration.
   blocking errors.
 - The moderated usability script retains the recovery-inspection task.
 
+### Independent review follow-up
+
+- The default project now consistently presents Chapter 2's revision candidate as awaiting
+  the author's decision. Project Overview leads to comparison, recent activity no longer
+  claims the candidate was accepted, and pending Story Record copy identifies the proposal
+  as unaccepted.
+- The moderated tasks continue from an explicit candidate acceptance into Commit Preview;
+  a direct preview without acceptance remains safely blocked.
+- Editing an accepted draft invalidates the old preview, and the author can explicitly
+  regenerate the preview binding from the current accepted draft before resuming review.
+- Inspect-labelled usage-limit, diagnostics, stale-candidate, and cancellation actions now
+  reveal fixture-backed preserved-content summaries without closing the recovery dialog.
+
 ## Files Changed
 
 - `.gitignore`
@@ -59,6 +72,7 @@ integration.
 - `prototype/desktop/src/fixtures/tasks.ts`
 - `prototype/desktop/src/i18n/messages.zh-CN.ts`
 - `prototype/desktop/src/pages/CommitPreviewPage.tsx`
+- `prototype/desktop/src/pages/ProjectOverviewPage.tsx`
 - `prototype/desktop/src/pages/StoryRecordPage.tsx`
 - `prototype/desktop/src/shell/ApplicationShell.tsx`
 - `prototype/desktop/src/shell/ChapterNavigator.tsx`
@@ -78,10 +92,10 @@ integration.
 
 | Command | Result |
 | --- | --- |
-| `corepack pnpm --dir prototype/desktop test` | Passed: 10 files, 200/200 tests, captured exit code 0, 140.86s. |
-| `corepack pnpm --dir prototype/desktop test:visual` | Passed: 36 tests, 2 intentional viewport-specific skips, exit code 0, 2.4m. |
+| `corepack pnpm --dir prototype/desktop test` | Passed after final review follow-up: 10 files, 205/205 tests, captured exit code 0, 163.65s. |
+| `corepack pnpm --dir prototype/desktop test:visual` | Passed after final review follow-up: 36 tests, 2 intentional viewport-specific skips, exit code 0, 2.8m. |
 | `corepack pnpm --dir prototype/desktop check` | Passed: `tsc -b --pretty false`, captured exit code 0. |
-| `corepack pnpm --dir prototype/desktop build` | Passed: 4,680 modules transformed, production bundle built in 1m 27s. |
+| `corepack pnpm --dir prototype/desktop build` | Passed after final review follow-up: 4,680 modules transformed, production bundle built in 1m 30s. |
 | `git diff --check` | Passed. |
 
 The longer commands ran detached with captured logs because an unrelated host process was

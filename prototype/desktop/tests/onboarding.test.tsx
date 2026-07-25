@@ -17,18 +17,17 @@ function renderRoute(path: string) {
 }
 
 describe('first launch readiness', () => {
-  test('ready state enables Continue and opens the library', async () => {
-    const user = userEvent.setup();
+  test('ready state enables Continue and opens the library', () => {
     renderRoute('/setup?state=ready');
 
     expect(screen.getByText('Codex 已准备好')).toBeVisible();
     const continueButton = screen.getByRole('button', { name: '继续' });
     expect(continueButton).toBeEnabled();
 
-    await user.click(continueButton);
+    fireEvent.click(continueButton);
 
     expect(screen.getByRole('heading', { name: '作品库' })).toBeVisible();
-  }, 15_000);
+  });
 
   test('missing state offers the guide and another check', () => {
     renderRoute('/setup?state=missing');
@@ -158,25 +157,25 @@ describe('project library', () => {
 });
 
 describe('new novel wizard', () => {
-  test('retains core idea input while moving between named stages', async () => {
-    const user = userEvent.setup();
+  test('retains core idea input while moving between named stages', () => {
     renderRoute('/new');
 
     const centralSituation = screen.getByLabelText('故事的核心处境是什么？');
-    await user.clear(centralSituation);
-    await user.type(centralSituation, '一名送餐员收到一台没有电源的收音机发来的求救。');
-    await user.click(screen.getByRole('button', { name: '下一项' }));
+    fireEvent.change(centralSituation, {
+      target: { value: '一名送餐员收到一台没有电源的收音机发来的求救。' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '下一项' }));
 
     expect(screen.getByRole('heading', { name: '类型与读者' })).toBeVisible();
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
 
     expect(screen.getByRole('heading', { name: '核心创意' })).toBeVisible();
     expect(screen.getByLabelText('故事的核心处境是什么？')).toHaveValue(
       '一名送餐员收到一台没有电源的收音机发来的求救。'
     );
     expect(screen.queryByText(/步骤\s*1|Step\s*1/i)).toBeNull();
-  }, 15_000);
+  });
 
   test('keeps every creative stage named', () => {
     renderRoute('/new');
@@ -187,29 +186,26 @@ describe('new novel wizard', () => {
     }
   });
 
-  test('keeps reader feeling and first-volume pacing independent', async () => {
-    const user = userEvent.setup();
+  test('keeps reader feeling and first-volume pacing independent', () => {
     renderRoute('/new');
 
     const feeling = screen.getByLabelText('前三章结束时，希望读者感受到什么？');
-    await user.clear(feeling);
-    await user.type(feeling, '读者情绪保持好奇和轻微不安');
+    fireEvent.change(feeling, { target: { value: '读者情绪保持好奇和轻微不安' } });
 
-    await user.click(screen.getByRole('button', { name: '篇幅与章节计划' }));
+    fireEvent.click(screen.getByRole('button', { name: '篇幅与章节计划' }));
     const pacing = screen.getByLabelText('第一卷的推进节奏');
-    await user.clear(pacing);
-    await user.type(pacing, '前十章缓慢收紧，卷末连续揭示');
+    fireEvent.change(pacing, { target: { value: '前十章缓慢收紧，卷末连续揭示' } });
 
-    await user.click(screen.getByRole('button', { name: '核心创意' }));
+    fireEvent.click(screen.getByRole('button', { name: '核心创意' }));
     expect(screen.getByLabelText('前三章结束时，希望读者感受到什么？')).toHaveValue(
       '读者情绪保持好奇和轻微不安'
     );
 
-    await user.click(screen.getByRole('button', { name: '篇幅与章节计划' }));
+    fireEvent.click(screen.getByRole('button', { name: '篇幅与章节计划' }));
     expect(screen.getByLabelText('第一卷的推进节奏')).toHaveValue(
       '前十章缓慢收紧，卷末连续揭示'
     );
-  }, 15_000);
+  });
 
   test('review displays every collected creative decision', async () => {
     const user = userEvent.setup();
@@ -238,21 +234,20 @@ describe('new novel wizard', () => {
     }
   });
 
-  test('moves focus to the new stage heading without focusing on initial render', async () => {
-    const user = userEvent.setup();
+  test('moves focus to the new stage heading without focusing on initial render', () => {
     renderRoute('/new');
 
     expect(document.body).toHaveFocus();
 
-    await user.click(screen.getByRole('button', { name: '下一项' }));
+    fireEvent.click(screen.getByRole('button', { name: '下一项' }));
     expect(screen.getByRole('heading', { name: '类型与读者' })).toHaveFocus();
 
-    await user.click(screen.getByRole('button', { name: '返回' }));
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
     expect(screen.getByRole('heading', { name: '核心创意' })).toHaveFocus();
 
-    await user.click(screen.getByRole('button', { name: '世界观' }));
+    fireEvent.click(screen.getByRole('button', { name: '世界观' }));
     expect(screen.getByRole('heading', { name: '世界观' })).toHaveFocus();
-  }, 15_000);
+  });
 
   test('offers an editable fixture Story Bible review', async () => {
     const user = userEvent.setup();

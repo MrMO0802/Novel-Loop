@@ -71,8 +71,8 @@ been weakened and several visual assertions could false-pass. The fix round:
 - requires concrete heading/control geometry instead of treating missing elements as a pass;
 - restores the planned `prototype.spec.ts` filename;
 - reverts the first-launch timing change and removes the global 20-second Vitest timeout;
-- replaces slow-host workarounds with fake timers or narrowly scoped 15-second limits on
-  four interaction-heavy tests;
+- replaces slow-host timeout workarounds with fake timers and deterministic change/click
+  events for tests that verify state transitions rather than input-device fidelity;
 - caps Vitest at four workers to avoid memory spikes under the shared host load.
 
 Final fix-round evidence:
@@ -82,11 +82,8 @@ Final fix-round evidence:
 | `corepack pnpm --dir prototype/desktop check` | Passed. |
 | `corepack pnpm --dir prototype/desktop build` | Passed: 4,680 modules, 1m 20s. |
 | `corepack pnpm --dir prototype/desktop test:visual` | Passed: 36 tests, 2 intentional compact-layout skips, 2.7m. |
-| `corepack pnpm --dir prototype/desktop exec vitest run tests/onboarding.test.tsx --maxWorkers=1` | Passed: 23/23. |
-| Full `corepack pnpm --dir prototype/desktop test` coverage run | Reached 183/184; the only 5-second host-load timeout was subsequently fixed and the affected file passed 23/23. Later complete-command retries were externally terminated with exit 143 while an unrelated Java process consumed substantial host resources. |
+| `corepack pnpm --dir prototype/desktop test` | Passed: 10 files, 184/184 tests, 115.39s. The command ran in a detached shell because foreground commands were being externally terminated under unrelated host pressure; its captured exit code was 0. |
 | `git diff --check` | Passed. |
 
-Across the completed full run and the post-fix focused run, all 184 unit/interaction tests
-have passing evidence. A single uninterrupted final `pnpm test` remains deferred until the
-unrelated host resource pressure is removed; this limitation is not presented as a passing
-full-command result.
+No extended per-test timeout remains in the fix. Full unit, build, and visual verification
+all have passing final evidence.

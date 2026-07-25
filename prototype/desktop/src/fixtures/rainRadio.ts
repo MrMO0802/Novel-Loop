@@ -262,8 +262,8 @@ export const chapterTwoAcceptedNarrative = {
   draft: chapterTwoRevisionCandidate,
   pendingChanges: {
     chapter: '第二章：收件地址',
-    status: '候选变更预览，尚未接受',
-    note: '以下内容来自尚未接受的第二章修订候选。接受候选后，才能生成与草稿绑定的正式提交预览。',
+    status: '待审阅，尚未写入故事档案',
+    note: '以下内容来自已接受的第二章雨夜草稿。正式提交前，已确认事实不会改变。',
     characters: [
       {
         key: 'xu-wen',
@@ -281,14 +281,14 @@ export const chapterTwoAcceptedNarrative = {
         when: '现在 · 第二章 00:40 后',
         title: '林澈在雨夜接到临江里送达',
         summary: '许雯把订单留在站点，林澈只在零点四十分后接到这一次交接。',
-        source: '第二章修订候选'
+        source: '第二章已接受草稿'
       },
       {
         key: 'building-arrival',
         when: '现在 · 第二章 00:50',
         title: '林澈抵达临江里三栋',
         summary: '楼层按钮停在十六层，门厅登记表却把同一份送达记给“十七层 1704”。',
-        source: '第二章修订候选'
+        source: '第二章已接受草稿'
       }
     ],
     foreshadowing: [
@@ -433,6 +433,37 @@ export const chapterTwoAcceptedNarrative = {
     }
   ]
 } as const;
+
+export const chapterTwoCandidatePendingChanges: RainRadioProject['pendingChanges'] = {
+  ...chapterTwoAcceptedNarrative.pendingChanges,
+  status: '候选变更预览，尚未接受',
+  note: '以下内容来自尚未接受的第二章修订候选。接受候选后，才能生成与草稿绑定的正式提交预览。',
+  timeline: chapterTwoAcceptedNarrative.pendingChanges.timeline.map((event) => ({
+    ...event,
+    source: '第二章修订候选'
+  }))
+};
+
+export const chapterTwoAcceptedRecentActivity: RainRadioProject['recentActivity'] = [
+  {
+    key: 'chapter-review',
+    when: '刚刚',
+    title: '第二章修订通过章节检查',
+    detail: '时间顺序问题已解决，等待审阅故事档案变更。'
+  },
+  {
+    key: 'revision-accepted',
+    when: '刚刚',
+    title: '采纳第二章修订候选',
+    detail: '已接受草稿保留临江里门厅场景，并移除重复的订单交接。'
+  },
+  {
+    key: 'chapter-one-commit',
+    when: '昨天',
+    title: '第一章已正式提交',
+    detail: '4 项事实与 6 个时间点已写入故事档案。'
+  }
+];
 
 export const rainRadio: RainRadioProject = {
   title: '雨夜电台',
@@ -655,13 +686,13 @@ export const rainRadio: RainRadioProject = {
       source: '第一章'
     }
   ],
-  pendingChanges: chapterTwoAcceptedNarrative.pendingChanges,
+  pendingChanges: chapterTwoCandidatePendingChanges,
   recentActivity: [
     {
       key: 'chapter-review',
       when: '刚刚',
       title: '第二章修订通过章节检查',
-      detail: '时间顺序问题已解决，等待审阅故事档案变更。'
+      detail: '时间顺序问题已解决，等待作者决定是否采用候选。'
     },
     {
       key: 'revision-ready',

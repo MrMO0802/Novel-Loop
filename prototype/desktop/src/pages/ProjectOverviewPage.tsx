@@ -1,10 +1,16 @@
 import { useNavigate } from 'react-router-dom';
+import { usePrototypeContext } from '../app/PrototypeContext';
 import { Button } from '../components/Button';
-import { rainRadio } from '../fixtures/rainRadio';
+import { chapterTwoAcceptedRecentActivity, rainRadio } from '../fixtures/rainRadio';
 import { t } from '../i18n/t';
 
 export function ProjectOverviewPage() {
+  const { chapterRevisions } = usePrototypeContext();
   const navigate = useNavigate();
+  const acceptedRevision = chapterRevisions.get('rain-radio:chapter:2')?.disposition === 'accepted';
+  const recentActivity = acceptedRevision
+    ? chapterTwoAcceptedRecentActivity
+    : rainRadio.recentActivity;
   const attentionCount = rainRadio.mysteries.filter((mystery) => mystery.status === 'attention').length;
 
   return (
@@ -35,7 +41,11 @@ export function ProjectOverviewPage() {
               </li>
               <li className="is-current">
                 <span>{t('overview.chapter.two')}</span>
-                <strong>{t('overview.chapter.reviewChanges')}</strong>
+                <strong>
+                  {t(acceptedRevision
+                    ? 'overview.chapter.reviewChangesAccepted'
+                    : 'overview.chapter.reviewChanges')}
+                </strong>
               </li>
               <li>
                 <span>{t('overview.chapter.three')}</span>
@@ -53,7 +63,11 @@ export function ProjectOverviewPage() {
           <section className="nl-overview-section" aria-labelledby="latest-chapter-title">
             <div className="nl-overview-section__heading">
               <h2 id="latest-chapter-title">{t('overview.latestChapter')}</h2>
-              <span>{rainRadio.latestChapter.status}</span>
+              <span>
+                {acceptedRevision
+                  ? t('overview.latestStatus.accepted')
+                  : rainRadio.latestChapter.status}
+              </span>
             </div>
             <h3>{t('overview.chapterTitle', {
               chapter: t('overview.chapterNumber.two'),
@@ -105,7 +119,7 @@ export function ProjectOverviewPage() {
               <h2 id="recent-activity-title">{t('overview.recentActivity')}</h2>
             </div>
             <ol className="nl-activity-list">
-              {rainRadio.recentActivity.map((activity) => (
+              {recentActivity.map((activity) => (
                 <li key={activity.key}>
                   <time>{activity.when}</time>
                   <div>
@@ -120,10 +134,24 @@ export function ProjectOverviewPage() {
 
         <aside className="nl-recommended-action" aria-label={t('overview.recommended')}>
           <p>{t('overview.recommended')}</p>
-          <h2>{t('overview.recommendedTitle')}</h2>
-          <span>{t('overview.recommendedBody')}</span>
-          <Button onClick={() => navigate('/project/rain-radio/chapter/2/revision')}>
-            {t('overview.recommendedAction')}
+          <h2>
+            {t(acceptedRevision
+              ? 'overview.recommendedTitleAccepted'
+              : 'overview.recommendedTitle')}
+          </h2>
+          <span>
+            {t(acceptedRevision
+              ? 'overview.recommendedBodyAccepted'
+              : 'overview.recommendedBody')}
+          </span>
+          <Button
+            onClick={() => navigate(acceptedRevision
+              ? '/project/rain-radio/chapter/2/commit-preview'
+              : '/project/rain-radio/chapter/2/revision')}
+          >
+            {t(acceptedRevision
+              ? 'overview.recommendedActionAccepted'
+              : 'overview.recommendedAction')}
           </Button>
         </aside>
       </div>

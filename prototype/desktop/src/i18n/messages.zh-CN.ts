@@ -129,6 +129,10 @@ export const zhCN = {
   'overview.recommendedTitle': '比较第二章修订',
   'overview.recommendedBody': '候选稿已经通过章节检查。先决定是否接受，再审阅可能写入故事档案的变化。',
   'overview.recommendedAction': '比较第二章修订',
+  'overview.recommendedTitleAccepted': '审阅第二章的故事档案变更',
+  'overview.recommendedBodyAccepted': '修订草稿已经接受。确认人物、时间线与悬念变化后，再正式提交本章。',
+  'overview.recommendedActionAccepted': '审阅故事档案变更',
+  'overview.latestStatus.accepted': '已接受修订草稿，故事档案变更等待审阅',
   'overview.chapterProgress': '当前章节进度',
   'overview.chapter.one': '第一章',
   'overview.chapter.two': '第二章',
@@ -136,6 +140,7 @@ export const zhCN = {
   'overview.chapter.remaining': '其余 {count} 章',
   'overview.chapter.committed': '已正式提交',
   'overview.chapter.reviewChanges': '等待决定修订',
+  'overview.chapter.reviewChangesAccepted': '等待审阅变更',
   'overview.chapter.planned': '已规划',
   'overview.chapter.followOutline': '按卷纲推进',
 

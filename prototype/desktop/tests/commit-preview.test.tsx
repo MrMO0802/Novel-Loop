@@ -200,14 +200,17 @@ describe('controlled commit preview', () => {
     expect(screen.getByText('已接受草稿 · 尚未正式提交')).toBeVisible();
   });
 
-  test('invalidates the preview when the accepted draft buffer changes after acceptance', async () => {
-    const user = userEvent.setup();
+  test('invalidates the preview when the accepted draft buffer changes after acceptance', () => {
     renderRoute(revisionPath);
 
-    await user.click(screen.getByRole('button', { name: '接受候选' }));
+    fireEvent.click(screen.getByRole('button', { name: '接受候选' }));
     const acceptedEditor = screen.getByRole('textbox', { name: '已接受的修订草稿' });
-    await user.type(acceptedEditor, '\n\n林澈补记了新的雨声。');
-    await user.click(screen.getByRole('button', { name: '审阅故事档案变更' }));
+    fireEvent.change(acceptedEditor, {
+      target: {
+        value: `${(acceptedEditor as HTMLTextAreaElement).value}\n\n林澈补记了新的雨声。`
+      }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '审阅故事档案变更' }));
 
     expect(screen.getByText('已接受草稿在预览生成后发生了变化')).toBeVisible();
     expect(screen.getByRole('button', { name: '正式提交本章' })).toBeDisabled();

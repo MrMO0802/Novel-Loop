@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -44,6 +44,8 @@ describe('project overview', () => {
     expect(within(recommendation).getAllByRole('button')).toHaveLength(1);
     expect(within(recommendation).getByRole('button', { name: '比较第二章修订' })).toBeVisible();
     expect(screen.queryByText('采纳第二章修订候选')).toBeNull();
+    expect(screen.getByText('时间顺序问题已解决，等待作者决定是否采用候选。')).toBeVisible();
+    expect(screen.queryByText('时间顺序问题已解决，等待审阅故事档案变更。')).toBeNull();
     expect(screen.getByText('4 个尚未兑现，其中 2 个需要在本卷留意。')).toBeVisible();
     expect(screen.getByText('4 项事实与 6 个时间点已写入故事档案。')).toBeVisible();
     expect(document.querySelector('[role="progressbar"]')).toBeNull();
@@ -59,6 +61,35 @@ describe('project overview', () => {
     expect(screen.getByRole('heading', { name: '比较第二章修订' })).toBeVisible();
     expect(screen.getByRole('button', { name: '接受候选' })).toBeEnabled();
     expect(screen.queryByText('已接受草稿')).toBeNull();
+  });
+
+  test('derives Project Overview copy and next action from an accepted session revision', () => {
+    renderRoute('/project/rain-radio/chapter/2/revision');
+
+    fireEvent.click(screen.getByRole('button', { name: '接受候选' }));
+    fireEvent.click(screen.getByRole('link', { name: '项目概览' }));
+
+    expect(screen.getByText('已接受修订草稿，故事档案变更等待审阅')).toBeVisible();
+    expect(screen.getByText('采纳第二章修订候选')).toBeVisible();
+    expect(screen.getByRole('button', { name: '审阅故事档案变更' })).toBeVisible();
+    expect(screen.queryByText('等待作者决定是否采用候选')).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: '审阅故事档案变更' }));
+    expect(window.location.pathname).toBe('/project/rain-radio/chapter/2/commit-preview');
+    expect(screen.getByText('已接受草稿 · 尚未正式提交')).toBeVisible();
+  });
+
+  test('derives pending Story Record copy from an accepted session revision', async () => {
+    renderRoute('/project/rain-radio/chapter/2/revision');
+
+    fireEvent.click(screen.getByRole('button', { name: '接受候选' }));
+
+    window.history.pushState({}, '', '/project/rain-radio/story-record?view=pending');
+    fireEvent.popState(window);
+
+    expect(await screen.findByRole('heading', { name: '第二章待确认变更' })).toBeVisible();
+    expect(screen.getByText(/来自已接受的第二章雨夜草稿/)).toBeVisible();
+    expect(screen.queryByText(/来自尚未接受的第二章修订候选/)).toBeNull();
   });
 });
 

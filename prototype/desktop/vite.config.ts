@@ -9,6 +9,7 @@ export default defineConfig({
     environment: 'jsdom',
     setupFiles: ['./tests/setup.ts'],
     exclude: [...configDefaults.exclude, 'tests/visual/**'],
-    maxWorkers: 4
+    maxWorkers: 4,
+    testTimeout: 10_000
   }
 });

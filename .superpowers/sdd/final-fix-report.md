@@ -57,6 +57,11 @@ integration.
   regenerate the preview binding from the current accepted draft before resuming review.
 - Inspect-labelled usage-limit, diagnostics, stale-candidate, and cancellation actions now
   reveal fixture-backed preserved-content summaries without closing the recovery dialog.
+- Once the author accepts the candidate, Project Overview and the pending Story Record derive
+  their labels, summaries, recent activity, and next action from the same session revision
+  state. Returning to either route no longer regresses to undecided copy.
+- The accepted-state overview leads directly to Commit Preview, while the default fixture
+  continues to lead to revision comparison.
 
 ## Files Changed
 
@@ -87,20 +92,22 @@ integration.
 - `prototype/desktop/tests/status-model.test.tsx`
 - `prototype/desktop/tests/story-record.test.tsx`
 - `prototype/desktop/tests/visual/prototype.spec.ts`
+- `prototype/desktop/vite.config.ts`
 
 ## Verification
 
 | Command | Result |
 | --- | --- |
-| `corepack pnpm --dir prototype/desktop test` | Passed after final review follow-up: 10 files, 205/205 tests, captured exit code 0, 163.65s. |
-| `corepack pnpm --dir prototype/desktop test:visual` | Passed after final review follow-up: 36 tests, 2 intentional viewport-specific skips, exit code 0, 2.8m. |
-| `corepack pnpm --dir prototype/desktop check` | Passed: `tsc -b --pretty false`, captured exit code 0. |
-| `corepack pnpm --dir prototype/desktop build` | Passed after final review follow-up: 4,680 modules transformed, production bundle built in 1m 30s. |
+| `corepack pnpm --dir prototype/desktop test` | Passed after cross-route state follow-up: 10 files, 207/207 tests, exit code 0, 127.05s. |
+| `corepack pnpm --dir prototype/desktop test:visual` | Passed after cross-route state follow-up: 36 tests, 2 intentional viewport-specific skips, exit code 0, 2.8m. |
+| `corepack pnpm --dir prototype/desktop check` | Passed: `tsc -b --pretty false`, exit code 0. |
+| `corepack pnpm --dir prototype/desktop build` | Passed after cross-route state follow-up: 4,680 modules transformed, production bundle built in 1m 22s. Vite retains a non-blocking 500 kB prototype bundle warning. |
 | `git diff --check` | Passed. |
 
-The longer commands ran detached with captured logs because an unrelated host process was
-creating sustained CPU pressure and foreground executions were being terminated by the
-host. No verification process remains running.
+An unrelated host process created sustained CPU and memory pressure during verification.
+Vitest's explicit per-test budget is now 10 seconds so interaction tests retain their
+behavioral assertions without failing on host scheduling jitter. The final suite completed
+without retries or failures, and no verification process remains running.
 
 ## Residual Human-assisted Checks
 

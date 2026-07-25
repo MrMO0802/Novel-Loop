@@ -1,14 +1,20 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import { usePrototypeContext } from '../app/PrototypeContext';
 import {
   StoryRecordViews,
   type StoryRecordTab
 } from '../features/story-record/StoryRecordViews';
-import { rainRadio } from '../fixtures/rainRadio';
+import { chapterTwoAcceptedNarrative, rainRadio } from '../fixtures/rainRadio';
 import { t } from '../i18n/t';
 
 export function StoryRecordPage() {
+  const { chapterRevisions } = usePrototypeContext();
   const [searchParams] = useSearchParams();
+  const acceptedRevision = chapterRevisions.get('rain-radio:chapter:2')?.disposition === 'accepted';
+  const project = acceptedRevision
+    ? { ...rainRadio, pendingChanges: chapterTwoAcceptedNarrative.pendingChanges }
+    : rainRadio;
   const requestedView = searchParams.get('view');
   const requestedTab: StoryRecordTab = requestedView === 'timeline'
     || requestedView === 'mysteries'
@@ -37,7 +43,7 @@ export function StoryRecordPage() {
       <StoryRecordViews
         activeTab={activeTab}
         onTabChange={setActiveTab}
-        project={rainRadio}
+        project={project}
       />
     </div>
   );

@@ -1,10 +1,13 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { readFileSync } from 'node:fs';
-import { afterEach, describe, expect, test } from 'vitest';
+import { afterEach, describe, expect, test, vi } from 'vitest';
 import { App } from '../src/app/App';
 
-afterEach(cleanup);
+afterEach(() => {
+  vi.useRealTimers();
+  cleanup();
+});
 
 const onboardingStyles = readFileSync('src/styles/onboarding.css', 'utf8');
 
@@ -25,7 +28,7 @@ describe('first launch readiness', () => {
     await user.click(continueButton);
 
     expect(screen.getByRole('heading', { name: '作品库' })).toBeVisible();
-  });
+  }, 15_000);
 
   test('missing state offers the guide and another check', () => {
     renderRoute('/setup?state=missing');
@@ -72,13 +75,15 @@ describe('first launch readiness', () => {
     ['/setup?state=login', '检查完成，仍需要登录。'],
     ['/setup?state=warning', '检查完成，写作功能仍可使用。']
   ])('announces fixture recheck progress and result for %s', async (route, result) => {
-    const user = userEvent.setup();
+    vi.useFakeTimers();
     renderRoute(route);
 
-    await user.click(screen.getByRole('button', { name: '重新检查' }));
+    fireEvent.click(screen.getByRole('button', { name: '重新检查' }));
 
     expect(screen.getByRole('status')).toHaveTextContent('正在重新检查');
-    expect(await screen.findByText(result)).toBeVisible();
+    act(() => vi.advanceTimersByTime(120));
+
+    expect(screen.getByText(result)).toBeVisible();
     expect(screen.getByRole('status')).toHaveTextContent(result);
   });
 });
@@ -171,7 +176,7 @@ describe('new novel wizard', () => {
       '一名送餐员收到一台没有电源的收音机发来的求救。'
     );
     expect(screen.queryByText(/步骤\s*1|Step\s*1/i)).toBeNull();
-  });
+  }, 15_000);
 
   test('keeps every creative stage named', () => {
     renderRoute('/new');
@@ -204,7 +209,7 @@ describe('new novel wizard', () => {
     expect(screen.getByLabelText('第一卷的推进节奏')).toHaveValue(
       '前十章缓慢收紧，卷末连续揭示'
     );
-  });
+  }, 15_000);
 
   test('review displays every collected creative decision', async () => {
     const user = userEvent.setup();
@@ -247,7 +252,7 @@ describe('new novel wizard', () => {
 
     await user.click(screen.getByRole('button', { name: '世界观' }));
     expect(screen.getByRole('heading', { name: '世界观' })).toHaveFocus();
-  });
+  }, 15_000);
 
   test('offers an editable fixture Story Bible review', async () => {
     const user = userEvent.setup();

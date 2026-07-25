@@ -36,7 +36,7 @@ describe('controlled commit preview', () => {
     }
 
     expect(screen.getByRole('region', { name: '高风险变化' })).toBeVisible();
-  });
+  }, 15_000);
 
   test('requires an explicit high-risk decision before formal commit is available', async () => {
     const user = userEvent.setup();

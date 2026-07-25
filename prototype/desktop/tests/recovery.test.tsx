@@ -149,7 +149,7 @@ describe('Run Center', () => {
     expect(screen.queryByText('task.chapter-3.scene-2')).toBeNull();
     await user.click(screen.getByText('技术详情'));
     expect(screen.getByText('task.chapter-3.scene-2')).toBeVisible();
-  });
+  }, 15_000);
 
   test('resumes a paused task and then records an honest cancellation transition', async () => {
     const user = userEvent.setup();

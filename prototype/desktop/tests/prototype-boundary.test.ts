@@ -62,15 +62,15 @@ function sourceFiles(root: string): string[] {
   }).filter((file) => /\.(ts|tsx)$/.test(file));
 }
 
-function withoutQuotedLiterals(content: string): string {
-  return content.replace(/(['"`])(?:\\.|(?!\1)[\s\S])*\1/g, '');
+function withoutFixtureSessionIdentifier(content: string): string {
+  return content.replace(/(['"`])session\.previous-close\.incomplete\1/g, '');
 }
 
 function findForbiddenPatterns(content: string): ForbiddenPattern[] {
-  const executableContent = withoutQuotedLiterals(content);
+  const contentWithoutFixtureIdentifier = withoutFixtureSessionIdentifier(content);
 
   return forbiddenPatterns.filter(({ name, pattern }) => (
-    name === 'Electron API' ? pattern.test(executableContent) : pattern.test(content)
+    pattern.test(contentWithoutFixtureIdentifier)
   ));
 }
 
@@ -83,6 +83,8 @@ describe('prototype boundary', () => {
     ['a process API', 'const projectPath = process.cwd();', 'Node process API'],
     ['a filesystem API', "fs.readFileSync('project.json', 'utf8');", 'filesystem API'],
     ['an Electron API binding', "window.ipcRenderer.send('open-project');", 'Electron API'],
+    ['a computed Electron API binding', "window['ipcRenderer'].send('open-project');", 'Electron API'],
+    ['a computed Electron session binding', "window['session'].defaultSession.clearStorageData();", 'Electron API'],
     ['an Electron shell API binding', "shell.openPath('draft.txt');", 'Electron API'],
     ['an Electron session API binding', 'session.defaultSession.clearStorageData();', 'Electron API'],
     ['a Codex executable invocation', "spawn('codex', ['exec', '--json']);", 'Codex executable invocation'],

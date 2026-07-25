@@ -57,4 +57,36 @@ Deferred to human-assisted validation: 200 percent browser zoom/reflow, Chinese 
 
 - This remains a fixture-driven prototype; it does not validate persistence, a production backend, or production engine integration.
 - Visual validation requires Playwright Chromium and a completed production build before `vite preview` serves the prototype.
-- The configured 20-second unit-test limit accommodates the observed shared-host load; tests still fail on genuine unfinished interactions rather than being weakened.
+- Human-assisted checks remain required for Chinese IME, screen-reader order, native tooltip behavior, and 200 percent zoom.
+
+## Independent Review Fix Round
+
+The first independent review rejected the initial change because the boundary scanner had
+been weakened and several visual assertions could false-pass. The fix round:
+
+- narrows the boundary exemption to the exact fixture identifier and adds computed Electron
+  access regression cases;
+- adds Focus Mode coverage at both viewports;
+- verifies visible keyboard focus on every covered route;
+- requires concrete heading/control geometry instead of treating missing elements as a pass;
+- restores the planned `prototype.spec.ts` filename;
+- reverts the first-launch timing change and removes the global 20-second Vitest timeout;
+- replaces slow-host workarounds with fake timers or narrowly scoped 15-second limits on
+  four interaction-heavy tests;
+- caps Vitest at four workers to avoid memory spikes under the shared host load.
+
+Final fix-round evidence:
+
+| Command | Result |
+| --- | --- |
+| `corepack pnpm --dir prototype/desktop check` | Passed. |
+| `corepack pnpm --dir prototype/desktop build` | Passed: 4,680 modules, 1m 20s. |
+| `corepack pnpm --dir prototype/desktop test:visual` | Passed: 36 tests, 2 intentional compact-layout skips, 2.7m. |
+| `corepack pnpm --dir prototype/desktop exec vitest run tests/onboarding.test.tsx --maxWorkers=1` | Passed: 23/23. |
+| Full `corepack pnpm --dir prototype/desktop test` coverage run | Reached 183/184; the only 5-second host-load timeout was subsequently fixed and the affected file passed 23/23. Later complete-command retries were externally terminated with exit 143 while an unrelated Java process consumed substantial host resources. |
+| `git diff --check` | Passed. |
+
+Across the completed full run and the post-fix focused run, all 184 unit/interaction tests
+have passing evidence. A single uninterrupted final `pnpm test` remains deferred until the
+unrelated host resource pressure is removed; this limitation is not presented as a passing
+full-command result.

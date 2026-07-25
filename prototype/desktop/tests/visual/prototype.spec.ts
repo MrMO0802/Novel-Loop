@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 
 type RouteFixture = {
   compactPrimaryControl?: string;
+  focusControl?: string;
   heading: string;
   primaryControl: string;
   primaryRole?: 'button' | 'tab';
@@ -22,7 +23,12 @@ const routeFixtures: readonly RouteFixture[] = [
   },
   { route: '/project/rain-radio/chapter/2/review', heading: '第二章检查结果', primaryControl: '比较修订' },
   { route: '/project/rain-radio/chapter/2/revision', heading: '比较第二章修订', primaryControl: '接受候选' },
-  { route: '/project/rain-radio/chapter/2/commit-preview', heading: '审阅第二章的故事档案变更', primaryControl: '正式提交本章' },
+  {
+    route: '/project/rain-radio/chapter/2/commit-preview',
+    heading: '审阅第二章的故事档案变更',
+    primaryControl: '正式提交本章',
+    focusControl: '返回本章'
+  },
   { route: '/project/rain-radio/story-record', heading: '故事档案', primaryControl: '人物', primaryRole: 'tab' },
   { route: '/tasks?recovery=timeout', heading: '写作任务用时超过预期', primaryControl: '从上一个安全阶段继续' },
   { route: '/tasks?recovery=crash', heading: '上次关闭前有工作尚未结束', primaryControl: '查看恢复摘要' }
@@ -57,12 +63,38 @@ async function expectVisibleAndUnwrapped(control: Locator, requireNoWrap = false
   await expect.poll(() => control.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
 }
 
-async function expectLayoutHealth(page: Page, primaryControl: string, primaryRole: 'button' | 'tab' = 'button') {
+async function expectVisibleKeyboardFocus(page: Page, control: Locator) {
+  await control.focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Shift+Tab');
+  await expect(control).toBeFocused();
+
+  const focusState = await control.evaluate((element) => {
+    const styles = getComputedStyle(element);
+    return {
+      focusVisible: element.matches(':focus-visible'),
+      outlineStyle: styles.outlineStyle,
+      outlineWidth: Number.parseFloat(styles.outlineWidth)
+    };
+  });
+  expect(focusState).toEqual({ focusVisible: true, outlineStyle: 'solid', outlineWidth: 2 });
+}
+
+async function expectLayoutHealth(
+  page: Page,
+  primaryControl: string,
+  primaryRole: 'button' | 'tab' = 'button',
+  focusControl = primaryControl
+) {
   const heading = page.getByRole('heading').first();
   const primary = page.getByRole(primaryRole, { name: primaryControl, exact: true });
+  const focusTarget = focusControl === primaryControl
+    ? primary
+    : page.getByRole('button', { name: focusControl, exact: true });
 
   await expect(heading).toBeVisible();
   await expectVisibleAndUnwrapped(primary);
+  await expectVisibleKeyboardFocus(page, focusTarget);
   await expectNoHorizontalOverflow(page);
 
   const visibleButtons = page.locator('button.nl-button:visible');
@@ -71,19 +103,13 @@ async function expectLayoutHealth(page: Page, primaryControl: string, primaryRol
     await expectVisibleAndUnwrapped(visibleButtons.nth(index), true);
   }
 
-  const overlap = await page.evaluate(({ headingText, primaryName }) => {
-    const heading = [...document.querySelectorAll('h1, h2')]
-      .find((element) => element.textContent?.trim() === headingText);
-    const primary = [...document.querySelectorAll('button')]
-      .find((element) => element.textContent?.trim() === primaryName);
-    if (!heading || !primary) return false;
-    const first = heading.getBoundingClientRect();
-    const second = primary.getBoundingClientRect();
-    return first.left < second.right
-      && first.right > second.left
-      && first.top < second.bottom
-      && first.bottom > second.top;
-  }, { headingText: await heading.textContent(), primaryName: primaryControl });
+  const [headingBox, primaryBox] = await Promise.all([heading.boundingBox(), primary.boundingBox()]);
+  expect(headingBox).not.toBeNull();
+  expect(primaryBox).not.toBeNull();
+  const overlap = headingBox!.x < primaryBox!.x + primaryBox!.width
+    && headingBox!.x + headingBox!.width > primaryBox!.x
+    && headingBox!.y < primaryBox!.y + primaryBox!.height
+    && headingBox!.y + headingBox!.height > primaryBox!.y;
   expect(overlap).toBe(false);
 }
 
@@ -95,27 +121,20 @@ test.describe('approved prototype routes remain usable at supported desktop size
       const primaryControl = page.viewportSize()?.width === 1024 && fixture.compactPrimaryControl
         ? fixture.compactPrimaryControl
         : fixture.primaryControl;
-      await expectLayoutHealth(page, primaryControl, fixture.primaryRole);
+      await expectLayoutHealth(page, primaryControl, fixture.primaryRole, fixture.focusControl);
     });
   }
 });
 
-test('focusable primary controls retain a visible keyboard focus indicator', async ({ page }) => {
-  await page.goto('/library');
-  await page.getByRole('button', { name: 'Novel Loop' }).focus();
-  await page.keyboard.press('Tab');
+test('Chapter Workspace Focus Mode preserves editing context at supported desktop sizes', async ({ page }) => {
+  await page.goto('/project/rain-radio/chapter/2');
+  await page.getByRole('button', { name: '进入专注模式' }).click();
 
-  const focusState = await page.evaluate(() => {
-    const active = document.activeElement;
-    if (!(active instanceof HTMLElement)) return false;
-    const styles = getComputedStyle(active);
-    return {
-      focusVisible: active.matches(':focus-visible'),
-      outlineStyle: styles.outlineStyle,
-      outlineWidth: Number.parseFloat(styles.outlineWidth)
-    };
-  });
-  expect(focusState).toEqual({ focusVisible: true, outlineStyle: 'solid', outlineWidth: 2 });
+  await expect(page.getByRole('navigation', { name: '章节导航' })).toBeHidden();
+  await expect(page.getByRole('complementary', { name: '本章写作提示' })).toBeHidden();
+  await expect(page.getByRole('textbox', { name: '章节正文' })).toBeVisible();
+  await expect(page.getByRole('status', { name: '当前任务' })).toBeVisible();
+  await expectLayoutHealth(page, '退出专注模式');
 });
 
 test('revision comparison stacks changed passages at 1024 width', async ({ page }) => {

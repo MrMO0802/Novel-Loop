@@ -97,7 +97,7 @@ export function FirstLaunchPage() {
     recheckTimer.current = setTimeout(() => {
       setRecheckState('complete');
       recheckTimer.current = null;
-    }, 500);
+    }, 120);
   }
 
   return (

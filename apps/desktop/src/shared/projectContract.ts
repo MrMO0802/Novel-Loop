@@ -62,7 +62,8 @@ export const LibraryLocationSelectionSchema = z.discriminatedUnion('selection', 
     selection: z.literal('selected'),
     locationLabel: LocationLabelSchema
   }).strict(),
-  z.object({ selection: z.literal('cancelled') }).strict()
+  z.object({ selection: z.literal('cancelled') }).strict(),
+  z.object({ selection: z.literal('location_unavailable') }).strict()
 ]);
 
 export const ProjectOpenResultSchema = z.discriminatedUnion('outcome', [

@@ -93,7 +93,12 @@ export function CreateProjectView({
       if (!mounted.current) {
         return;
       }
-      if (result.outcome === 'location_required') {
+      const shouldChooseDefaultLibrary = !request.useDifferentLocation
+        && (
+          result.outcome === 'location_required'
+          || result.outcome === 'location_unavailable'
+        );
+      if (shouldChooseDefaultLibrary) {
         const selection =
           await window.novelLoop.projects.chooseDefaultLibrary();
         if (!mounted.current) {

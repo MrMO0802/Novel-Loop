@@ -44,6 +44,26 @@ describe('desktop project library', () => {
     })).toMatchObject({ ok: true });
   });
 
+  test('preserves a path-free typed code for a physical project collision', async () => {
+    const projectsRoot = await makeTempDir();
+    const input = {
+      projectId,
+      projectsRoot,
+      brief: { title: projectTitle, coreIdea }
+    };
+    await createDesktopProject(input);
+
+    const error = await createDesktopProject(input).catch(
+      (caught: unknown) => caught
+    );
+
+    expect(error).toMatchObject({ code: 'PROJECT_ALREADY_EXISTS' });
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).not.toContain(
+      new ProjectPaths(projectsRoot, projectId).projectRoot
+    );
+  });
+
   test('inspects an existing project without returning its path', async () => {
     const projectsRoot = await makeTempDir();
     await createDesktopProject({

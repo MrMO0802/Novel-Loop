@@ -1,6 +1,5 @@
 import { app, BrowserWindow, ipcMain, session } from 'electron';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 import { createMainWindow } from './createMainWindow';
 import { NativeProjectDialog } from './dialogs/NativeProjectDialog';
@@ -13,16 +12,21 @@ import {
 import {
   FileProjectRegistryStore
 } from './projects/ProjectRegistryStore';
+import { selectRendererTarget } from './rendererTarget';
 import {
   EngineSystemReadinessService
 } from './services/EngineSystemReadinessService';
+import { installSessionPermissionDenial } from './sessionPermissionPolicy';
 import { SupportedDesktopPlatformSchema } from '../shared/systemContract';
 
 app.enableSandbox();
 
 void app.whenReady().then(() => {
-  const trustedRendererUrl = process.env['ELECTRON_RENDERER_URL']
-    ?? pathToFileURL(path.join(__dirname, '../renderer/index.html')).toString();
+  const rendererTarget = selectRendererTarget({
+    environmentUrl: process.env['ELECTRON_RENDERER_URL'],
+    isDevelopment: import.meta.env.DEV,
+    packagedRendererPath: path.join(__dirname, '../renderer/index.html')
+  });
   const systemService = new EngineSystemReadinessService(
     app.getVersion(),
     SupportedDesktopPlatformSchema.parse(process.platform)
@@ -50,7 +54,7 @@ void app.whenReady().then(() => {
       }
     },
     systemService,
-    trustedRendererUrl
+    rendererTarget.trustedRendererUrl
   );
 
   registerProjectHandlers(
@@ -63,20 +67,16 @@ void app.whenReady().then(() => {
       }
     },
     projectService,
-    trustedRendererUrl
+    rendererTarget.trustedRendererUrl
   );
 
-  session.defaultSession.setPermissionRequestHandler(
-    (_webContents, _permission, callback) => {
-      callback(false);
-    }
-  );
+  installSessionPermissionDenial(session.defaultSession);
 
-  createMainWindow();
+  createMainWindow(rendererTarget);
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createMainWindow();
+      createMainWindow(rendererTarget);
     }
   });
 });

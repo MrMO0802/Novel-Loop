@@ -4,6 +4,7 @@ import {
   mkdir,
   mkdtemp,
   readFile,
+  readdir,
   rm,
   symlink,
   writeFile
@@ -13,18 +14,31 @@ import path from 'node:path';
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
-const fileSystemMocks = vi.hoisted(() => ({ access: vi.fn() }));
-
-vi.mock('node:fs/promises', async (importOriginal) => ({
-  ...await importOriginal<typeof import('node:fs/promises')>(),
-  access: fileSystemMocks.access
+const fileSystemMocks = vi.hoisted(() => ({
+  access: vi.fn<typeof import('node:fs/promises').access>(),
+  actualAccess: undefined as
+    | typeof import('node:fs/promises').access
+    | undefined
 }));
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const original = await importOriginal<typeof import('node:fs/promises')>();
+  fileSystemMocks.actualAccess = original.access;
+  fileSystemMocks.access.mockImplementation(original.access);
+  return {
+    ...original,
+    access: fileSystemMocks.access
+  };
+});
 
 import type {
   DesktopProjectBriefInput,
   DesktopProjectInspection
 } from 'novel-loop-engine/desktop';
 
+import {
+  EngineProjectGateway
+} from '../../src/main/projects/EngineProjectGateway';
 import { FileProjectRegistryStore, type ProjectRegistry } from '../../src/main/projects/ProjectRegistryStore';
 import {
   ProjectLibraryService,
@@ -45,6 +59,7 @@ const validInspection: DesktopProjectInspection = {
 
 afterEach(async () => {
   fileSystemMocks.access.mockReset();
+  fileSystemMocks.access.mockImplementation(fileSystemMocks.actualAccess!);
   await Promise.all(temporaryDirectories.splice(0).map((directory) => (
     rm(directory, { force: true, recursive: true })
   )));
@@ -98,6 +113,41 @@ interface TestContext {
   service: ProjectLibraryService;
 }
 
+type RegistryMutationOperation =
+  | 'chooseDefaultLibrary'
+  | 'create'
+  | 'openExisting'
+  | 'open'
+  | 'remove';
+
+const corruptRegistryCases = [
+  {
+    name: 'malformed JSON',
+    contents: '{not valid json'
+  },
+  {
+    name: 'schema-invalid JSON',
+    contents: JSON.stringify({
+      schemaVersion: 1,
+      defaultLibraryRoot: null,
+      projects: [{ projectKey: 'missing-required-fields' }]
+    })
+  }
+] as const;
+const registryMutationOperations: RegistryMutationOperation[] = [
+  'chooseDefaultLibrary',
+  'create',
+  'openExisting',
+  'open',
+  'remove'
+];
+const warnedRegistryMutationCases = corruptRegistryCases.flatMap(
+  (registryCase) => registryMutationOperations.map((operation) => ({
+    ...registryCase,
+    operation
+  }))
+);
+
 async function createContext(): Promise<TestContext> {
   const root = await mkdtemp(path.join(tmpdir(), 'novel-loop-library-'));
   temporaryDirectories.push(root);
@@ -134,6 +184,105 @@ async function createContext(): Promise<TestContext> {
   };
 }
 
+async function runWarnedRegistryMutation(
+  context: TestContext,
+  operation: RegistryMutationOperation
+) {
+  const projectRoot = path.join(
+    context.libraryRoot,
+    'novel-20260727-120000-a1b2c3'
+  );
+  await mkdir(projectRoot, { recursive: true });
+  context.dialog.defaultLibraryResult = context.libraryRoot;
+  context.dialog.alternateLibraryResult = context.alternateLibraryRoot;
+  context.dialog.projectDirectoryResult = projectRoot;
+
+  switch (operation) {
+    case 'chooseDefaultLibrary':
+      return context.service.chooseDefaultLibrary();
+    case 'create':
+      return context.service.create({
+        title: '雾港来信',
+        coreIdea: '一名夜班邮差收到来自未来的退信。',
+        useDifferentLocation: true
+      });
+    case 'openExisting':
+      return context.service.openExisting();
+    case 'open':
+      return context.service.open('project_0123456789abcdef01234567');
+    case 'remove':
+      return context.service.remove('project_0123456789abcdef01234567');
+  }
+}
+
+function warnedMutationOutcome(operation: RegistryMutationOperation) {
+  if (operation === 'chooseDefaultLibrary') {
+    return { selection: 'location_unavailable' };
+  }
+  if (operation === 'remove') {
+    return {
+      projects: [],
+      defaultLocation: { configured: false, locationLabel: null },
+      warning: 'registry_unavailable'
+    };
+  }
+  return { outcome: 'failed' };
+}
+
+class PhysicalCollisionGateway extends EngineProjectGateway {
+  readonly collisionInjections: boolean[] = [];
+  readonly createInputs: Array<{
+    projectsRoot: string;
+    projectId: string;
+    brief: DesktopProjectBriefInput;
+  }> = [];
+
+  constructor(private remainingCollisions: number) {
+    super();
+  }
+
+  override async create(input: {
+    projectsRoot: string;
+    projectId: string;
+    brief: DesktopProjectBriefInput;
+  }): Promise<void> {
+    this.createInputs.push(input);
+    const injectCollision = this.remainingCollisions > 0;
+    this.collisionInjections.push(injectCollision);
+    if (injectCollision) {
+      this.remainingCollisions -= 1;
+      await mkdir(path.join(input.projectsRoot, input.projectId));
+    }
+    await super.create(input);
+  }
+}
+
+async function createPhysicalCollisionContext(collisionCount: number) {
+  const root = await mkdtemp(path.join(tmpdir(), 'novel-loop-real-collision-'));
+  temporaryDirectories.push(root);
+  const libraryRoot = path.join(root, 'library');
+  await mkdir(libraryRoot);
+  const registry = new FileProjectRegistryStore(path.join(root, 'user-data'));
+  await registry.save({
+    schemaVersion: 1,
+    defaultLibraryRoot: libraryRoot,
+    projects: []
+  });
+  const gateway = new PhysicalCollisionGateway(collisionCount);
+  let randomTick = 0;
+  const service = new ProjectLibraryService({
+    registry,
+    dialog: new FakeProjectDialog(),
+    gateway,
+    clock: () => new Date('2026-07-27T12:00:00.000Z'),
+    randomBytes: (size) => Uint8Array.from(
+      { length: size },
+      () => randomTick++ % 256
+    )
+  });
+  return { gateway, libraryRoot, service };
+}
+
 function createRegistryProject(projectRoot: string, overrides: Partial<{
   projectKey: string;
   title: string;
@@ -167,7 +316,116 @@ async function fileExists(filePath: string): Promise<boolean> {
   }
 }
 
+async function createReadOnlyProjectFixture(
+  libraryRoot: string,
+  gateway: EngineProjectGateway
+): Promise<string> {
+  const projectId = 'novel-20260727-120000-c0ffee';
+  await gateway.create({
+    projectsRoot: libraryRoot,
+    projectId,
+    brief: {
+      title: '雾港来信',
+      coreIdea: '一名夜班邮差收到来自未来的退信。'
+    }
+  });
+  const projectRoot = path.join(libraryRoot, projectId);
+  const fixtureFiles = new Map<string, string>([
+    [
+      'planning/chapter_queue.json',
+      `${JSON.stringify({
+        schemaVersion: '1.0',
+        projectId,
+        chapters: [{
+          chapterNumber: 1,
+          title: '退信',
+          status: 'planned'
+        }]
+      }, null, 2)}\n`
+    ],
+    ['planning/global_outline.md', '# 全局规划\n\n已有规划内容。\n'],
+    ['strategy/story_bible.md', '# 故事基础\n\n已有设定内容。\n'],
+    ['chapters/chapter_001/outline.md', '# 第一章章纲\n'],
+    ['chapters/chapter_001/draft_v1.md', '# 第一章草稿\n'],
+    ['chapters/chapter_001/artifact.json', '{"kind":"chapter-artifact"}\n'],
+    ['runs/run_fixture/manifest.json', '{"status":"complete"}\n'],
+    ['runs/run_fixture/events.jsonl', '{"event":"fixture"}\n'],
+    ['snapshots/chapter_000/story_state.json', '{"snapshot":0}\n'],
+    ['diffs/chapter_001.patch', '--- draft\n+++ final\n']
+  ]);
+
+  for (const [relativePath, contents] of fixtureFiles) {
+    const filePath = path.join(projectRoot, relativePath);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, contents, 'utf8');
+  }
+
+  return projectRoot;
+}
+
+async function snapshotProjectTree(projectRoot: string): Promise<Array<{
+  kind: 'directory' | 'file';
+  path: string;
+  sha256?: string;
+}>> {
+  const snapshot: Array<{
+    kind: 'directory' | 'file';
+    path: string;
+    sha256?: string;
+  }> = [];
+
+  async function visit(directoryPath: string, relativeDirectory: string) {
+    const entries = await readdir(directoryPath, { withFileTypes: true });
+    entries.sort((left, right) => left.name.localeCompare(right.name));
+
+    for (const entry of entries) {
+      const relativePath = relativeDirectory.length === 0
+        ? entry.name
+        : path.join(relativeDirectory, entry.name);
+      const entryPath = path.join(directoryPath, entry.name);
+      if (entry.isDirectory()) {
+        snapshot.push({ kind: 'directory', path: relativePath });
+        await visit(entryPath, relativePath);
+      } else if (entry.isFile()) {
+        snapshot.push({
+          kind: 'file',
+          path: relativePath,
+          sha256: createHash('sha256')
+            .update(await readFile(entryPath))
+            .digest('hex')
+        });
+      } else {
+        throw new Error(`Unsupported fixture entry: ${relativePath}`);
+      }
+    }
+  }
+
+  await visit(projectRoot, '');
+  return snapshot;
+}
+
 describe('ProjectLibraryService', () => {
+  test.each(warnedRegistryMutationCases)(
+    'blocks $operation after loading $name',
+    async ({ contents, operation }) => {
+      const context = await createContext();
+      await mkdir(path.dirname(context.registry.registryPath), {
+        recursive: true
+      });
+      await writeFile(context.registry.registryPath, contents, 'utf8');
+      const save = vi.spyOn(context.registry, 'save');
+
+      await expect(runWarnedRegistryMutation(context, operation)).resolves
+        .toEqual(warnedMutationOutcome(operation));
+
+      expect(save).not.toHaveBeenCalled();
+      expect(context.gateway.create).not.toHaveBeenCalled();
+      expect(context.gateway.inspect).not.toHaveBeenCalled();
+      await expect(readFile(context.registry.registryPath, 'utf8')).resolves
+        .toBe(contents);
+    }
+  );
+
   test('first create requests and remembers a default library', async () => {
     const { dialog, gateway, libraryRoot, registry, service } = await createContext();
     dialog.defaultLibraryResult = libraryRoot;
@@ -299,6 +557,81 @@ describe('ProjectLibraryService', () => {
     await expect(hashFile(storyStatePath)).resolves.toBe(storyHashBefore);
     await expect(fileExists(storyStatePath)).resolves.toBe(true);
     await expect(registrySnapshot(registry)).resolves.toMatchObject({ projects: [] });
+  });
+
+  test('all existing-project library workflows preserve the complete project tree', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'novel-loop-read-only-'));
+    temporaryDirectories.push(root);
+    const libraryRoot = path.join(root, 'library');
+    await mkdir(libraryRoot);
+    const gateway = new EngineProjectGateway();
+    const projectRoot = await createReadOnlyProjectFixture(
+      libraryRoot,
+      gateway
+    );
+    const registry = new FileProjectRegistryStore(path.join(root, 'user-data'));
+    await registry.save({
+      schemaVersion: 1,
+      defaultLibraryRoot: libraryRoot,
+      projects: []
+    });
+    const dialog = new FakeProjectDialog();
+    dialog.projectDirectoryResult = projectRoot;
+    let randomTick = 0;
+    const service = new ProjectLibraryService({
+      registry,
+      dialog,
+      gateway,
+      clock: () => new Date('2026-07-27T12:00:00.000Z'),
+      randomBytes: (size) => Uint8Array.from(
+        { length: size },
+        () => randomTick++ % 256
+      )
+    });
+    const before = await snapshotProjectTree(projectRoot);
+
+    await expect(service.list()).resolves.toMatchObject({ projects: [] });
+    const selectedOpen = await service.openExisting();
+    expect(selectedOpen).toMatchObject({ outcome: 'opened' });
+    if (selectedOpen.outcome !== 'opened') {
+      throw new Error('Expected the fixture project to open.');
+    }
+    await expect(service.list()).resolves.toMatchObject({
+      projects: [{ projectKey: selectedOpen.project.projectKey }]
+    });
+    await expect(gateway.inspect(projectRoot)).resolves.toMatchObject({
+      valid: true,
+      projectId: 'novel-20260727-120000-c0ffee'
+    });
+    await expect(service.open(selectedOpen.project.projectKey)).resolves
+      .toMatchObject({ outcome: 'opened' });
+    await expect(service.remove(selectedOpen.project.projectKey)).resolves
+      .toMatchObject({ projects: [] });
+
+    const after = await snapshotProjectTree(projectRoot);
+    expect(before).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: 'file',
+        path: path.join('planning', 'chapter_queue.json')
+      }),
+      expect.objectContaining({
+        kind: 'file',
+        path: path.join('chapters', 'chapter_001', 'draft_v1.md')
+      }),
+      expect.objectContaining({
+        kind: 'file',
+        path: path.join('runs', 'run_fixture', 'events.jsonl')
+      }),
+      expect.objectContaining({
+        kind: 'file',
+        path: path.join('snapshots', 'chapter_000', 'story_state.json')
+      }),
+      expect.objectContaining({
+        kind: 'file',
+        path: path.join('diffs', 'chapter_001.patch')
+      })
+    ]));
+    expect(after).toEqual(before);
   });
 
   test('alternate creation location does not replace the default library', async () => {
@@ -466,6 +799,46 @@ describe('ProjectLibraryService', () => {
     const firstProjectId = gateway.create.mock.calls[0]?.[0].projectId;
     const secondProjectId = gateway.create.mock.calls[1]?.[0].projectId;
     expect(firstProjectId).not.toBe(secondProjectId);
+  });
+
+  test('a physical adapter collision retries once through the real Engine gateway', async () => {
+    const { gateway, libraryRoot, service } =
+      await createPhysicalCollisionContext(1);
+
+    const result = await service.create({
+      title: '雾港来信',
+      coreIdea: '一名夜班邮差收到来自未来的退信。',
+      useDifferentLocation: false
+    });
+
+    expect(gateway.createInputs.map((input) => input.projectId)).toEqual([
+      'novel-20260727-120000-000102',
+      'novel-20260727-120000-030405'
+    ]);
+    expect(gateway.collisionInjections).toEqual([true, false]);
+    expect(result).toMatchObject({
+      outcome: 'created',
+      project: { title: '雾港来信' }
+    });
+    expect(gateway.createInputs).toHaveLength(2);
+    expect(gateway.createInputs[0]?.projectId)
+      .not.toBe(gateway.createInputs[1]?.projectId);
+    expect(JSON.stringify(result)).not.toContain(libraryRoot);
+  });
+
+  test('two physical adapter collisions return path-free project_exists', async () => {
+    const { gateway, libraryRoot, service } =
+      await createPhysicalCollisionContext(2);
+
+    const result = await service.create({
+      title: '雾港来信',
+      coreIdea: '一名夜班邮差收到来自未来的退信。',
+      useDifferentLocation: false
+    });
+
+    expect(result).toEqual({ outcome: 'project_exists' });
+    expect(gateway.createInputs).toHaveLength(2);
+    expect(JSON.stringify(result)).not.toContain(libraryRoot);
   });
 
   test('engine exception maps to failed without its raw message', async () => {

@@ -99,6 +99,9 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
           typeof window.novelLoop.system.getReadiness === 'function',
         nodeProcessType: typeof globalThis.process,
         nodeRequireType: typeof globalThis.require,
+        notificationPermission: (
+          await navigator.permissions.query({ name: 'notifications' })
+        ).state,
         projectLibrary: await window.novelLoop.projects.list(),
         projectKeys: Object.keys(window.novelLoop.projects),
         systemKeys: Object.keys(window.novelLoop.system)
@@ -109,6 +112,7 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
         hasReadinessMethod: true,
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined',
+        notificationPermission: 'denied',
         projectLibrary: {
           projects: [],
           defaultLocation: {

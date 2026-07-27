@@ -71,7 +71,14 @@ export async function createDesktopProject(input: CreateDesktopProjectInput): Pr
       projectsRoot: input.projectsRoot,
       brief: createDesktopBriefMarkdown(input.brief)
     });
-  } catch {
+  } catch (error) {
+    if (hasErrorCode(error, 'PROJECT_ALREADY_EXISTS')) {
+      throw new AppError(
+        'PROJECT_ALREADY_EXISTS',
+        'Desktop project target already exists.',
+        2
+      );
+    }
     throw new AppError('DESKTOP_PROJECT_CREATION_FAILED', 'Unable to create the desktop project.', 2);
   }
 }
@@ -180,4 +187,11 @@ function findFirstParagraph(lines: string[]): string | undefined {
 
 function clamp(value: string, limit: number): string {
   return value.slice(0, limit).trim();
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === code;
 }

@@ -65,12 +65,16 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
   }
 
   async chooseDefaultLibrary(): Promise<LibraryLocationSelection> {
+    const registry = await this.loadRegistryForMutation();
+    if (registry === null) {
+      return { selection: 'location_unavailable' };
+    }
+
     try {
       const selected = await this.dependencies.dialog.chooseDefaultLibrary();
       if (selected === null) return { selection: 'cancelled' };
       const libraryRoot = await canonicalLibraryPath(selected);
       if (libraryRoot === null) return { selection: 'location_unavailable' };
-      const { registry } = await this.dependencies.registry.load();
       await this.dependencies.registry.save({ ...registry, defaultLibraryRoot: libraryRoot });
       return { selection: 'selected', locationLabel: path.basename(libraryRoot) };
     } catch {
@@ -79,10 +83,8 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
   }
 
   async create(input: CreateProjectRequest): Promise<ProjectOpenResult> {
-    let registry: ProjectRegistry;
-    try {
-      registry = (await this.dependencies.registry.load()).registry;
-    } catch {
+    const registry = await this.loadRegistryForMutation();
+    if (registry === null) {
       return { outcome: 'failed' };
     }
     const root = await this.resolveCreationRoot(input, registry);
@@ -125,21 +127,26 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
   }
 
   async openExisting(): Promise<ProjectOpenResult> {
+    const registry = await this.loadRegistryForMutation();
+    if (registry === null) {
+      return { outcome: 'failed' };
+    }
+
     try {
       const selected = await this.dependencies.dialog.chooseProjectDirectory();
       if (selected === null) return { outcome: 'cancelled' };
       const projectRoot = await canonicalProjectPath(selected);
-      return projectRoot === null ? { outcome: 'location_unavailable' } : this.openProjectRoot(projectRoot);
+      return projectRoot === null
+        ? { outcome: 'location_unavailable' }
+        : this.openProjectRoot(projectRoot, registry);
     } catch {
       return { outcome: 'failed' };
     }
   }
 
   async open(projectKey: string): Promise<ProjectOpenResult> {
-    let registry: ProjectRegistry;
-    try {
-      registry = (await this.dependencies.registry.load()).registry;
-    } catch {
+    const registry = await this.loadRegistryForMutation();
+    if (registry === null) {
       return { outcome: 'failed' };
     }
     const saved = registry.projects.find((project) => project.projectKey === projectKey);
@@ -152,10 +159,14 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
 
   async remove(projectKey: string): Promise<ProjectLibraryResult> {
     try {
-      const { registry, warning } = await this.dependencies.registry.load();
+      const loaded = await this.dependencies.registry.load();
+      if (loaded.warning !== null) {
+        return unavailableLibraryResult();
+      }
+      const { registry } = loaded;
       const updated = removeRegistryProject(registry, projectKey);
       await this.dependencies.registry.save(updated);
-      return await this.toLibraryResult(updated, warning);
+      return await this.toLibraryResult(updated, null);
     } catch {
       return {
         projects: [],
@@ -216,6 +227,15 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
   private async inspect(projectRoot: string): Promise<DesktopProjectInspection | null> {
     try {
       return await this.dependencies.gateway.inspect(projectRoot);
+    } catch {
+      return null;
+    }
+  }
+
+  private async loadRegistryForMutation(): Promise<ProjectRegistry | null> {
+    try {
+      const loaded = await this.dependencies.registry.load();
+      return loaded.warning === null ? loaded.registry : null;
     } catch {
       return null;
     }

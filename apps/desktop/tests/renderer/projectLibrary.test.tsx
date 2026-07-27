@@ -73,6 +73,10 @@ const projectLibraryStyles = readFileSync(
   resolve(process.cwd(), 'src/renderer/src/styles/project-library.css'),
   'utf8'
 );
+const tokenStyles = readFileSync(
+  resolve(process.cwd(), 'src/renderer/src/styles/tokens.css'),
+  'utf8'
+);
 
 type ProjectApiMock = {
   [Key in keyof NovelLoopDesktopApi['projects']]: ReturnType<typeof vi.fn<
@@ -198,6 +202,75 @@ test('creates a project after selecting the first default library', async () => 
   expect(projectApi.create).toHaveBeenCalledTimes(2);
 });
 
+test('replaces an unavailable saved default and retries creation once', async () => {
+  const projectApi = installProjectApi();
+  projectApi.chooseDefaultLibrary.mockResolvedValue({
+    selection: 'selected',
+    locationLabel: '新的小说目录'
+  });
+  projectApi.create
+    .mockResolvedValueOnce({ outcome: 'location_unavailable' })
+    .mockResolvedValueOnce({
+      outcome: 'created',
+      project: readyProject
+    });
+
+  render(<App />);
+  await submitCreateForm({
+    title: '雾港来信',
+    coreIdea: '一名夜班邮差收到来自未来的退信。'
+  });
+
+  expect(await screen.findByRole('heading', {
+    name: '雾港来信'
+  })).toBeVisible();
+  expect(projectApi.chooseDefaultLibrary).toHaveBeenCalledOnce();
+  expect(projectApi.create).toHaveBeenCalledTimes(2);
+});
+
+test('does not retry an unavailable saved default after selection is cancelled', async () => {
+  const projectApi = installProjectApi();
+  projectApi.chooseDefaultLibrary.mockResolvedValue({
+    selection: 'cancelled'
+  });
+  projectApi.create.mockResolvedValue({
+    outcome: 'location_unavailable'
+  });
+
+  render(<App />);
+  await submitCreateForm({
+    title: '雾港来信',
+    coreIdea: '一名夜班邮差收到来自未来的退信。'
+  });
+
+  expect(projectApi.chooseDefaultLibrary).toHaveBeenCalledOnce();
+  expect(projectApi.create).toHaveBeenCalledOnce();
+  expect(await screen.findByRole('button', { name: '创建小说' })).toBeEnabled();
+  expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+});
+
+test('does not retry an unavailable saved default after selection is unavailable', async () => {
+  const projectApi = installProjectApi();
+  projectApi.chooseDefaultLibrary.mockResolvedValue({
+    selection: 'location_unavailable'
+  });
+  projectApi.create.mockResolvedValue({
+    outcome: 'location_unavailable'
+  });
+
+  render(<App />);
+  await submitCreateForm({
+    title: '雾港来信',
+    coreIdea: '一名夜班邮差收到来自未来的退信。'
+  });
+
+  expect(projectApi.chooseDefaultLibrary).toHaveBeenCalledOnce();
+  expect(projectApi.create).toHaveBeenCalledOnce();
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    '无法使用这个保存位置，请重新选择'
+  );
+});
+
 test('opens a valid existing project and enters overview', async () => {
   const projectApi = installProjectApi();
   projectApi.openExisting.mockResolvedValue({
@@ -284,6 +357,26 @@ test('the alternate-location checkbox reaches the create API', async () => {
   expect(await screen.findByRole('heading', {
     name: '雾港来信'
   })).toBeVisible();
+});
+
+test('an unavailable alternate location does not trigger default-library recovery', async () => {
+  const projectApi = installProjectApi();
+  projectApi.create.mockResolvedValue({
+    outcome: 'location_unavailable'
+  });
+
+  render(<App />);
+  await submitCreateForm({
+    title: '雾港来信',
+    coreIdea: '一名夜班邮差收到来自未来的退信。',
+    useDifferentLocation: true
+  });
+
+  expect(projectApi.create).toHaveBeenCalledOnce();
+  expect(projectApi.chooseDefaultLibrary).not.toHaveBeenCalled();
+  expect(await screen.findByRole('alert')).toHaveTextContent(
+    '无法使用这个保存位置，请重新选择'
+  );
 });
 
 test('does not complete creation after the create view unmounts', async () => {
@@ -743,7 +836,7 @@ test('maps a registry warning to fixed author language', async () => {
   await enterProjectLibrary();
 
   expect(screen.getByRole('alert')).toHaveTextContent(
-    '最近项目记录暂时无法读取，你仍可新建或打开项目'
+    '最近项目记录暂时无法读取，为保护原记录，请稍后重试'
   );
 });
 
@@ -753,3 +846,50 @@ test('uses a solid high-contrast focus indicator', () => {
   expect(baseStyles).toContain('outline: 3px solid #1e4c3b;');
   expect(projectLibraryStyles).toContain('outline: 3px solid #1e4c3b;');
 });
+
+test('muted text meets WCAG AA on every project light background', () => {
+  const muted = readCssColorToken(tokenStyles, '--nl-muted');
+  const backgrounds = [
+    readCssColorToken(tokenStyles, '--nl-canvas'),
+    readCssColorToken(tokenStyles, '--nl-surface')
+  ];
+
+  for (const background of backgrounds) {
+    expect(contrastRatio(muted, background)).toBeGreaterThanOrEqual(4.5);
+  }
+});
+
+function readCssColorToken(styles: string, token: string): string {
+  const escapedToken = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`${escapedToken}:\\s*(#[0-9a-fA-F]{6})`).exec(
+    styles
+  );
+  if (match?.[1] === undefined) {
+    throw new Error(`Missing CSS color token: ${token}`);
+  }
+  return match[1];
+}
+
+function contrastRatio(foreground: string, background: string): number {
+  const foregroundLuminance = relativeLuminance(foreground);
+  const backgroundLuminance = relativeLuminance(background);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function relativeLuminance(hexColor: string): number {
+  const channels = hexColor.slice(1).match(/.{2}/g);
+  if (channels === null) {
+    throw new Error(`Invalid hex color: ${hexColor}`);
+  }
+  const [red, green, blue] = channels.map((channel) => {
+    const value = Number.parseInt(channel, 16) / 255;
+    return value <= 0.04045
+      ? value / 12.92
+      : ((value + 0.055) / 1.055) ** 2.4;
+  });
+  return (red ?? 0) * 0.2126
+    + (green ?? 0) * 0.7152
+    + (blue ?? 0) * 0.0722;
+}

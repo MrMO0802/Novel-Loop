@@ -47,7 +47,7 @@ export const zhCN = {
   'library.loading': '正在读取作品库',
   'library.loadFailed': '暂时无法读取作品库，请重试',
   'library.retry': '重新读取',
-  'library.registryWarning': '最近项目记录暂时无法读取，你仍可新建或打开项目',
+  'library.registryWarning': '最近项目记录暂时无法读取，为保护原记录，请稍后重试',
   'library.location.configured': '默认保存位置：{location}',
   'library.location.unconfigured': '首次创建时选择默认保存位置',
   'library.recent.title': '最近项目',

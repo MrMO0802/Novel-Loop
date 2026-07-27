@@ -150,6 +150,24 @@ describe('FileProjectRegistryStore', () => {
     await expect(readFile(store.registryPath, 'utf8')).resolves.toBe(corruptContents);
   });
 
+  test('returns a warning without replacing a schema-invalid registry file', async () => {
+    const store = await createStore();
+    const invalidContents = JSON.stringify({
+      schemaVersion: 1,
+      defaultLibraryRoot: null,
+      projects: [{ projectKey: 'missing-required-fields' }]
+    });
+    await writeFile(store.registryPath, invalidContents, 'utf8');
+
+    await expect(store.load()).resolves.toEqual({
+      registry: emptyRegistry,
+      warning: 'registry_unavailable'
+    });
+    await expect(readFile(store.registryPath, 'utf8')).resolves.toBe(
+      invalidContents
+    );
+  });
+
   test('preserves the previous registry when replacing it fails', async () => {
     const store = await createStore();
     const originalRegistry: ProjectRegistry = {

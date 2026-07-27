@@ -1,5 +1,7 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { statSync, readFileSync } from 'node:fs';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 
 const electronExecutable = require('electron') as string;
@@ -64,50 +66,86 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
   const electronEnvironment = Object.fromEntries(
     Object.entries(process.env).filter(
       (entry): entry is [string, string] => (
-        entry[0] !== 'ELECTRON_RENDERER_URL'
+        ![
+          'ELECTRON_RENDERER_URL',
+          'VITE_DEV_SERVER_URL'
+        ].includes(entry[0])
         && typeof entry[1] === 'string'
       )
     )
   );
-  const application = await electron.launch({
-    args: [desktopRoot],
-    cwd: desktopRoot,
-    env: electronEnvironment
-  });
+  const temporaryUserDataDirectory = await mkdtemp(
+    path.join(tmpdir(), 'novel-loop-electron-smoke-')
+  );
+  electronEnvironment['PATH'] = temporaryUserDataDirectory;
 
   try {
-    const page = await application.firstWindow();
-    await expect(page.getByText('Novel Loop').first()).toBeVisible();
-
-    const boundary = await page.evaluate(() => ({
-      apiKeys: Object.keys(window.novelLoop),
-      hasReadinessMethod:
-        typeof window.novelLoop.system.getReadiness === 'function',
-      systemKeys: Object.keys(window.novelLoop.system),
-      nodeProcessType: typeof globalThis.process,
-      nodeRequireType: typeof globalThis.require
-    }));
-
-    expect(boundary).toEqual({
-      apiKeys: ['system'],
-      hasReadinessMethod: true,
-      systemKeys: ['getReadiness'],
-      nodeProcessType: 'undefined',
-      nodeRequireType: 'undefined'
+    const application = await electron.launch({
+      args: [
+        `--user-data-dir=${temporaryUserDataDirectory}`,
+        desktopRoot
+      ],
+      cwd: desktopRoot,
+      env: electronEnvironment
     });
 
-    const popupWasDenied = await page.evaluate(
-      () => window.open('https://example.com') === null
-    );
-    expect(popupWasDenied).toBe(true);
+    try {
+      const page = await application.firstWindow();
+      await expect(page.getByText('Novel Loop').first()).toBeVisible();
 
-    const originalUrl = page.url();
-    await page.evaluate(() => {
-      window.location.href = 'https://example.com';
-    });
-    await page.waitForTimeout(250);
-    expect(page.url()).toBe(originalUrl);
+      const boundary = await page.evaluate(async () => ({
+        apiKeys: Object.keys(window.novelLoop),
+        hasReadinessMethod:
+          typeof window.novelLoop.system.getReadiness === 'function',
+        nodeProcessType: typeof globalThis.process,
+        nodeRequireType: typeof globalThis.require,
+        projectLibrary: await window.novelLoop.projects.list(),
+        projectKeys: Object.keys(window.novelLoop.projects),
+        systemKeys: Object.keys(window.novelLoop.system)
+      }));
+
+      expect(boundary).toEqual({
+        apiKeys: ['system', 'projects'],
+        hasReadinessMethod: true,
+        nodeProcessType: 'undefined',
+        nodeRequireType: 'undefined',
+        projectLibrary: {
+          projects: [],
+          defaultLocation: {
+            configured: false,
+            locationLabel: null
+          },
+          warning: null
+        },
+        projectKeys: [
+          'list',
+          'chooseDefaultLibrary',
+          'create',
+          'openExisting',
+          'open',
+          'remove'
+        ],
+        systemKeys: ['getReadiness']
+      });
+
+      const popupWasDenied = await page.evaluate(
+        () => window.open('https://example.com') === null
+      );
+      expect(popupWasDenied).toBe(true);
+
+      const originalUrl = page.url();
+      await page.evaluate(() => {
+        window.location.href = 'https://example.com';
+      });
+      await page.waitForTimeout(250);
+      expect(page.url()).toBe(originalUrl);
+    } finally {
+      await application.close();
+    }
   } finally {
-    await application.close();
+    await rm(temporaryUserDataDirectory, {
+      force: true,
+      recursive: true
+    });
   }
 });

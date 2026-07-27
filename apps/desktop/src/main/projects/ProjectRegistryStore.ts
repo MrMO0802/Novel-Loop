@@ -61,7 +61,10 @@ export class FileProjectRegistryStore implements ProjectRegistryStore {
     userDataPath: string,
     private readonly fileSystem: ProjectRegistryFileSystem = nodeFileSystem
   ) {
-    this.registryPath = path.join(path.resolve(userDataPath), 'project-registry.json');
+    const storagePath = path.resolve(userDataPath);
+    this.registryPath = path.extname(storagePath) === '.json'
+      ? storagePath
+      : path.join(storagePath, 'project-registry.json');
   }
 
   async load(): Promise<{

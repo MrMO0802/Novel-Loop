@@ -100,6 +100,20 @@ describe('project renderer contract', () => {
 });
 
 describe('FileProjectRegistryStore', () => {
+  test('uses an explicit registry JSON path without nesting another file', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'novel-loop-registry-'));
+    temporaryDirectories.push(directory);
+    const registryPath = path.join(directory, 'project-library.json');
+    const store = new FileProjectRegistryStore(registryPath);
+
+    await store.save(emptyRegistry);
+
+    expect(store.registryPath).toBe(registryPath);
+    await expect(readFile(registryPath, 'utf8')).resolves.toContain(
+      '"schemaVersion": 1'
+    );
+  });
+
   test('returns an empty registry when the registry file is missing', async () => {
     const store = await createStore();
 

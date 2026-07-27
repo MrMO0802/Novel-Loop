@@ -10,6 +10,12 @@ export interface InitProjectInput {
   projectsRoot?: string;
 }
 
+export interface InitProjectFromBriefTextInput {
+  projectId: string;
+  brief: string;
+  projectsRoot?: string;
+}
+
 export interface InitProjectResult {
   projectId: string;
   projectRoot: string;
@@ -29,6 +35,43 @@ export async function initProject(input: InitProjectInput, fileStore = new FileS
     throw new AppError('BRIEF_NOT_FOUND', `Brief file not found: ${input.briefPath}`, 2);
   }
 
+  const brief = await fileStore.readText(input.briefPath);
+  return initializeProjectWithBrief({
+    projectId: input.projectId,
+    projectsRoot: input.projectsRoot ?? DEFAULT_PROJECTS_ROOT,
+    brief
+  }, fileStore);
+}
+
+export async function initProjectFromBriefText(
+  input: InitProjectFromBriefTextInput,
+  fileStore = new FileStore()
+): Promise<InitProjectResult> {
+  if (input.brief.trim().length === 0) {
+    throw new AppError('BRIEF_EMPTY', 'Brief text must not be empty.', 2);
+  }
+
+  return initializeProjectWithBrief({
+    projectId: input.projectId,
+    projectsRoot: input.projectsRoot ?? DEFAULT_PROJECTS_ROOT,
+    brief: input.brief
+  }, fileStore);
+}
+
+async function initializeProjectWithBrief(
+  input: {
+    projectId: string;
+    projectsRoot: string;
+    brief: string;
+  },
+  fileStore: FileStore
+): Promise<InitProjectResult> {
+  const paths = new ProjectPaths(input.projectsRoot, input.projectId);
+
+  if (await fileStore.exists(paths.projectRoot)) {
+    throw new AppError('PROJECT_ALREADY_EXISTS', `Project already exists: ${paths.projectRoot}`, 2);
+  }
+
   const created: string[] = [];
   const requiredDirs = [
     paths.projectRoot,
@@ -46,8 +89,7 @@ export async function initProject(input: InitProjectInput, fileStore = new FileS
     created.push(dir);
   }
 
-  const brief = await fileStore.readText(input.briefPath);
-  await fileStore.writeText(paths.brief(), brief);
+  await fileStore.writeText(paths.brief(), input.brief);
   created.push(paths.brief());
 
   await fileStore.writeJson(paths.config(), createDefaultConfig(paths.projectId), ConfigSchema);

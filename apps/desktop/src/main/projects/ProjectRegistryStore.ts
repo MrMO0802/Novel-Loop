@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { z } from 'zod';
 
+const MAX_REGISTRY_PROJECTS = 5_000;
 const RegistryPathSchema = z.string()
   .trim()
   .min(1)
@@ -19,7 +20,7 @@ const ProjectRegistryProjectSchema = z.object({
 const ProjectRegistrySchema = z.object({
   schemaVersion: z.literal(1),
   defaultLibraryRoot: RegistryPathSchema.nullable(),
-  projects: z.array(ProjectRegistryProjectSchema).max(5_000)
+  projects: z.array(ProjectRegistryProjectSchema).max(MAX_REGISTRY_PROJECTS)
 }).strict();
 
 export type ProjectRegistry = z.infer<typeof ProjectRegistrySchema>;
@@ -126,7 +127,7 @@ export function upsertRegistryProject(
 
   return {
     ...registry,
-    projects: [...retainedProjects, normalizedProject]
+    projects: limitRegistryProjects([...retainedProjects, normalizedProject])
   };
 }
 
@@ -162,6 +163,41 @@ function retainUniqueProjects(projects: ProjectRegistryProject[]): ProjectRegist
   }
 
   return uniqueProjects.reverse();
+}
+
+function limitRegistryProjects(projects: ProjectRegistryProject[]): ProjectRegistryProject[] {
+  const limitedProjects = [...projects];
+
+  while (limitedProjects.length > MAX_REGISTRY_PROJECTS) {
+    limitedProjects.splice(findLeastRecentlyOpenedIndex(limitedProjects), 1);
+  }
+
+  return limitedProjects;
+}
+
+function findLeastRecentlyOpenedIndex(projects: ProjectRegistryProject[]): number {
+  let leastRecentIndex = 0;
+
+  for (let index = 1; index < projects.length; index += 1) {
+    const currentProject = projects[index];
+    const leastRecentProject = projects[leastRecentIndex];
+    if (currentProject !== undefined
+      && leastRecentProject !== undefined
+      && compareProjectRecency(currentProject, leastRecentProject) < 0) {
+      leastRecentIndex = index;
+    }
+  }
+
+  return leastRecentIndex;
+}
+
+function compareProjectRecency(
+  left: ProjectRegistryProject,
+  right: ProjectRegistryProject
+): number {
+  return left.lastOpenedAt.localeCompare(right.lastOpenedAt)
+    || left.addedAt.localeCompare(right.addedAt)
+    || left.projectKey.localeCompare(right.projectKey);
 }
 
 function isMissingFileError(error: unknown): boolean {

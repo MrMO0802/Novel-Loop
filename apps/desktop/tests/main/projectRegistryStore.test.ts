@@ -208,6 +208,34 @@ describe('FileProjectRegistryStore', () => {
     ]);
   });
 
+  test('evicts the least recently opened project when upserting into a full registry', async () => {
+    const projects = Array.from({ length: 5_000 }, (_, index) => ({
+      ...registryProject,
+      projectKey: `project_${index.toString().padStart(4, '0')}`,
+      projectRoot: `/home/author/novels/${index}`,
+      lastOpenedAt: new Date(Date.UTC(2026, 6, 1, 0, 0, index)).toISOString()
+    }));
+    const registry: ProjectRegistry = {
+      schemaVersion: 1,
+      defaultLibraryRoot: null,
+      projects
+    };
+    const reopenedProject = {
+      ...registryProject,
+      projectKey: 'project_reopened',
+      projectRoot: '/home/author/novels/reopened',
+      lastOpenedAt: '2026-07-27T04:00:00.000Z'
+    };
+
+    const updated = upsertRegistryProject(registry, reopenedProject);
+
+    expect(updated.projects).toHaveLength(5_000);
+    expect(updated.projects).not.toContainEqual(projects[0]);
+    expect(updated.projects).toContainEqual(reopenedProject);
+    const store = await createStore();
+    await expect(store.save(updated)).resolves.toBeUndefined();
+  });
+
   test('removes only the requested registry entry', () => {
     const registry: ProjectRegistry = {
       schemaVersion: 1,

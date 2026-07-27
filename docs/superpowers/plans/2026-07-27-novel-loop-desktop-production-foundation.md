@@ -254,7 +254,7 @@ git commit -m "feat(desktop): add secure Electron shell"
 - Produces: `registerSystemHandlers(service: SystemReadinessService): void`.
 - Exposes: `window.novelLoop.system.getReadiness(): Promise<SystemReadiness>`.
 
-- [ ] **Step 1: Define the schema-first contract**
+- [x] **Step 1: Define the schema-first contract**
 
 `SystemReadinessSchema`:
 
@@ -277,7 +277,7 @@ export const SystemReadinessSchema = z.object({
 
 The response must not include a path, token, environment variable, command, raw output, doctor JSON, run ID, or internal error code.
 
-- [ ] **Step 2: Write failing IPC and preload boundary tests**
+- [x] **Step 2: Write failing IPC and preload boundary tests**
 
 Tests must prove:
 
@@ -287,7 +287,7 @@ Tests must prove:
 - preload exposes exactly `system.getReadiness`;
 - source contains no `ipcRenderer.send`, generic `invoke(channel`, filesystem, shell, Codex, or project write API.
 
-- [ ] **Step 3: Verify RED**
+- [x] **Step 3: Verify RED**
 
 Run:
 
@@ -297,7 +297,7 @@ corepack pnpm --dir apps/desktop test -- tests/main/systemHandlers.test.ts tests
 
 Expected: FAIL because contract and handlers do not exist.
 
-- [ ] **Step 4: Implement the named IPC boundary**
+- [x] **Step 4: Implement the named IPC boundary**
 
 Preload may call:
 
@@ -307,7 +307,7 @@ ipcRenderer.invoke(IPC_CHANNELS.systemGetReadiness)
 
 It must not expose `ipcRenderer` or accept a caller-provided channel. Main validates the sender URL and parses the service result before returning it.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 

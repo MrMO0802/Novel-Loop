@@ -23,6 +23,11 @@ export default defineConfig({
   renderer: {
     root: fileURLToPath(new URL('./src/renderer', import.meta.url)),
     plugins: [react()],
+    server: {
+      host: '127.0.0.1',
+      port: 5173,
+      strictPort: true
+    },
     build: {
       outDir: fileURLToPath(new URL('./out/renderer', import.meta.url))
     },

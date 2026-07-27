@@ -115,4 +115,21 @@ describe('system readiness IPC handler', () => {
       {}
     )).rejects.toThrow();
   });
+
+  test('rejects a semantically contradictory readiness response', async () => {
+    const { handler } = register({
+      getReadiness: async () => ({
+        ...readyResponse,
+        codex: {
+          ...readyResponse.codex,
+          canRunSmoke: false
+        }
+      } as unknown as SystemReadiness)
+    });
+
+    await expect(handler(
+      { senderFrame: { url: 'http://127.0.0.1:5173/setup' } },
+      {}
+    )).rejects.toThrow();
+  });
 });

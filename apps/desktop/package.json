@@ -6,12 +6,15 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "check": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
+    "check": "tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit && tsc -p tsconfig.e2e.json --noEmit",
     "test": "vitest run",
     "test:e2e": "playwright test tests/e2e",
-    "verify": "pnpm check && pnpm test && pnpm build"
+    "test:e2e:required": "NOVEL_LOOP_REQUIRE_ELECTRON_SMOKE=1 playwright test tests/e2e",
+    "verify": "pnpm check && pnpm test && pnpm build && pnpm test:e2e",
+    "verify:release": "pnpm check && pnpm test && pnpm build && pnpm test:e2e:required"
   },
   "dependencies": {
+    "@phosphor-icons/react": "^2.1.10",
     "novel-loop-engine": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",

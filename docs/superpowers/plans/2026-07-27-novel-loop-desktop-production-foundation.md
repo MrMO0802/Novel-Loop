@@ -206,9 +206,14 @@ createMainWindow();
 ```html
 <meta
   http-equiv="Content-Security-Policy"
-  content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'none'"
+  content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*; object-src 'none'; base-uri 'none'; form-action 'none'"
 />
 ```
+
+`frame-ancestors` is intentionally omitted from the meta policy because
+Chromium ignores that directive when it is delivered through a meta element.
+Popup denial and renderer navigation policy enforce the desktop window
+boundary.
 
 The renderer displays a production-foundation boot message only. It must not import prototype fixtures.
 
@@ -413,10 +418,15 @@ git commit -m "feat(desktop): connect read-only Codex readiness"
 
 **Files:**
 
+- Modify: `apps/desktop/package.json`
+- Modify: `apps/desktop/src/main/services/EngineSystemReadinessService.ts`
+- Modify: `apps/desktop/src/shared/systemContract.ts`
+- Modify: `apps/desktop/src/renderer/index.html`
 - Modify: `apps/desktop/src/renderer/src/App.tsx`
 - Create: `apps/desktop/src/renderer/src/i18n/messages.zh-CN.ts`
 - Modify: `apps/desktop/src/renderer/src/styles/tokens.css`
 - Modify: `apps/desktop/src/renderer/src/styles/base.css`
+- Create: `apps/desktop/tsconfig.e2e.json`
 - Create: `apps/desktop/tests/renderer/App.test.tsx`
 - Create: `apps/desktop/tests/e2e/electron-smoke.test.ts`
 - Create: `apps/desktop/playwright.config.ts`
@@ -428,7 +438,7 @@ git commit -m "feat(desktop): connect read-only Codex readiness"
 - Produces: production first-launch loading, ready, warning, not-installed, not-logged-in, and unavailable states.
 - Produces: Electron launch smoke proving renderer isolation.
 
-- [ ] **Step 1: Write failing renderer tests**
+- [x] **Step 1: Write failing renderer tests**
 
 Mock the typed preload API and assert:
 
@@ -440,7 +450,7 @@ Mock the typed preload API and assert:
 - unavailable state offers “重新检查”;
 - no internal error code, path, JSON, command, run ID, or raw output is rendered.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -450,11 +460,11 @@ corepack pnpm --dir apps/desktop test -- tests/renderer/App.test.tsx
 
 Expected: FAIL because the production first-launch states are not implemented.
 
-- [ ] **Step 3: Implement the approved first-launch surface**
+- [x] **Step 3: Implement the approved first-launch surface**
 
 Port only approved tokens and small primitives from the prototype. Do not import prototype source or fixtures. Keep the interface calm, Chinese-first, keyboard accessible, reduced-motion aware, and centered on one next action.
 
-- [ ] **Step 4: Add the Electron isolation smoke**
+- [x] **Step 4: Add the Electron isolation smoke**
 
 Launch the built app with Playwright Electron and assert:
 
@@ -466,7 +476,7 @@ expect(await page.evaluate(() => typeof window.process)).toBe('undefined');
 
 Also assert that `window.open('https://example.com')` creates no window and navigation remains on the packaged renderer.
 
-- [ ] **Step 5: Final verification**
+- [x] **Step 5: Final verification**
 
 Run:
 
@@ -483,7 +493,24 @@ git diff --check
 
 Expected: all commands exit 0.
 
-- [ ] **Step 6: Commit**
+Verification result on 2026-07-27:
+
+- frozen install, root build, 391 root tests, desktop typecheck, 25 desktop
+  tests, and desktop build passed;
+- the Playwright Electron command exited 0 but securely skipped its one launch
+  test because this Ubuntu host restricts unprivileged user namespaces and the
+  local Electron SUID helper is not installed as root mode `4755`;
+- no insecure sandbox-disabling flag was added;
+- `test:e2e:required` and `verify:release` fail instead of skipping when the
+  sandbox is unavailable;
+- independent read-only re-review reported zero Critical and zero Important
+  findings after the release gate, readiness invariant, bounded timeout, i18n
+  summary, and runtime API assertions were added;
+- milestone acceptance items 1 and 7 remain environment-blocked until the
+  actual Electron launch smoke runs on a host or package with a usable Chromium
+  sandbox.
+
+- [x] **Step 6: Commit**
 
 ```bash
 git add apps/desktop docs/superpowers/plans/2026-07-27-novel-loop-desktop-production-foundation.md

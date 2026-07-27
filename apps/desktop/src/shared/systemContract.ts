@@ -8,6 +8,39 @@ export const SupportedDesktopPlatformSchema = z.enum([
 
 export const SystemReadinessRequestSchema = z.object({}).strict();
 
+const CodexReadinessBaseSchema = z.object({
+  summary: z.string().min(1),
+  version: z.string()
+    .trim()
+    .min(1)
+    .max(80)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9 ._()+-]*$/)
+    .nullable()
+});
+
+export const CodexReadinessSchema = z.discriminatedUnion('status', [
+  CodexReadinessBaseSchema.extend({
+    canRunSmoke: z.literal(true),
+    status: z.literal('ready')
+  }).strict(),
+  CodexReadinessBaseSchema.extend({
+    canRunSmoke: z.literal(false),
+    status: z.literal('not_installed')
+  }).strict(),
+  CodexReadinessBaseSchema.extend({
+    canRunSmoke: z.literal(false),
+    status: z.literal('not_logged_in')
+  }).strict(),
+  CodexReadinessBaseSchema.extend({
+    canRunSmoke: z.literal(true),
+    status: z.literal('warning')
+  }).strict(),
+  CodexReadinessBaseSchema.extend({
+    canRunSmoke: z.literal(false),
+    status: z.literal('unavailable')
+  }).strict()
+]);
+
 export const SystemReadinessSchema = z.object({
   app: z.object({
     name: z.literal('Novel Loop'),
@@ -15,18 +48,7 @@ export const SystemReadinessSchema = z.object({
     version: z.string().min(1)
   }).strict(),
   checkedAt: z.string().datetime(),
-  codex: z.object({
-    canRunSmoke: z.boolean(),
-    status: z.enum([
-      'ready',
-      'not_installed',
-      'not_logged_in',
-      'warning',
-      'unavailable'
-    ]),
-    summary: z.string().min(1),
-    version: z.string().min(1).nullable()
-  }).strict()
+  codex: CodexReadinessSchema
 }).strict();
 
 export type SupportedDesktopPlatform = z.infer<

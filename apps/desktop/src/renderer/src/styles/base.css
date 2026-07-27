@@ -5,7 +5,7 @@
 html,
 body,
 #root {
-  min-height: 100%;
+  min-height: 100vh;
   margin: 0;
 }
 
@@ -21,43 +21,221 @@ select {
   font: inherit;
 }
 
-.nl-boot {
+.nl-setup {
   display: grid;
   min-height: 100vh;
-  align-content: center;
-  justify-items: start;
-  gap: 16px;
-  width: min(680px, calc(100% - 64px));
-  margin: 0 auto;
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 38%);
+  background: var(--nl-surface);
 }
 
-.nl-boot__brand {
+.nl-setup__primary {
+  display: grid;
+  align-content: center;
+  padding: 64px clamp(48px, 8vw, 128px);
+}
+
+.nl-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
   color: var(--nl-accent);
-  font-size: 14px;
+  font-size: 16px;
   font-weight: 700;
 }
 
-.nl-boot h1,
-.nl-boot p {
+.nl-eyebrow {
+  margin: 52px 0 12px;
+  color: var(--nl-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.nl-readiness {
+  display: grid;
+  justify-items: start;
+  gap: 16px;
+  max-width: 680px;
+}
+
+.nl-readiness > svg {
+  color: var(--nl-accent);
+  margin-bottom: 8px;
+}
+
+.nl-readiness--warning > svg {
+  color: var(--nl-warning);
+}
+
+.nl-readiness--blocked > svg {
+  color: var(--nl-danger);
+}
+
+.nl-readiness h1,
+.nl-readiness p,
+.nl-library-empty h1,
+.nl-library-empty h2,
+.nl-library-empty p,
+.nl-assurance-item h2,
+.nl-assurance-item p {
   margin: 0;
   letter-spacing: 0;
 }
 
-.nl-boot h1 {
+.nl-readiness h1,
+.nl-library-empty h1 {
   font-family:
     "Noto Serif CJK SC",
     "Source Han Serif SC",
     SimSun,
     serif;
-  font-size: 40px;
-  line-height: 1.2;
+  font-size: 42px;
+  line-height: 1.25;
 }
 
-.nl-boot p:last-child {
+.nl-readiness__summary {
   max-width: 42rem;
   color: var(--nl-muted);
-  font-size: 16px;
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.nl-readiness__guide {
+  max-width: 40rem;
+  padding-left: 16px;
+  border-left: 3px solid var(--nl-border);
+  color: var(--nl-text);
+  font-size: 15px;
   line-height: 1.75;
+}
+
+.nl-readiness__version {
+  color: var(--nl-muted);
+  font-size: 13px;
+}
+
+.nl-primary-action,
+.nl-secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  min-height: 44px;
+  margin-top: 14px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.nl-primary-action {
+  background: var(--nl-accent);
+  color: #ffffff;
+}
+
+.nl-primary-action:hover {
+  background: var(--nl-accent-strong);
+}
+
+.nl-secondary-action {
+  background: var(--nl-surface);
+  border-color: var(--nl-border);
+  color: var(--nl-text);
+}
+
+.nl-primary-action:focus-visible,
+.nl-secondary-action:focus-visible {
+  outline: 3px solid rgb(40 95 75 / 28%);
+  outline-offset: 3px;
+}
+
+.nl-setup__assurance {
+  display: grid;
+  align-content: center;
+  gap: 40px;
+  padding: 64px clamp(40px, 5vw, 72px);
+  background: var(--nl-canvas);
+  border-left: 1px solid var(--nl-border);
+}
+
+.nl-assurance-item {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  gap: 16px;
+}
+
+.nl-assurance-item > svg {
+  color: var(--nl-accent);
+}
+
+.nl-assurance-item h2 {
+  font-size: 16px;
+}
+
+.nl-assurance-item p {
+  margin-top: 8px;
+  color: var(--nl-muted);
+  font-size: 14px;
+  line-height: 1.75;
+}
+
+.nl-library-empty {
+  display: grid;
+  min-height: 100vh;
+  align-content: center;
+  justify-items: start;
+  width: min(760px, calc(100% - 96px));
+  margin: 0 auto;
+}
+
+.nl-library-empty .nl-eyebrow {
+  margin-top: 48px;
+}
+
+.nl-library-empty section {
+  margin-top: 40px;
+  padding: 28px 0;
+  border-top: 1px solid var(--nl-border);
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-library-empty h2 {
+  font-size: 20px;
+}
+
+.nl-library-empty section p {
+  margin-top: 10px;
+  color: var(--nl-muted);
+  line-height: 1.75;
+}
+
+.nl-spin {
+  animation: nl-spin 1.1s linear infinite;
+}
+
+@keyframes nl-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 1100px) {
+  .nl-setup {
+    grid-template-columns: minmax(0, 1fr) 340px;
+  }
+
+  .nl-setup__primary {
+    padding: 48px;
+  }
+
+  .nl-setup__assurance {
+    padding: 48px 36px;
+  }
+
+  .nl-readiness h1,
+  .nl-library-empty h1 {
+    font-size: 36px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

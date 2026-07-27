@@ -9,6 +9,8 @@ import {
 } from '../../shared/systemContract';
 import type { SystemReadinessService } from './SystemReadinessService';
 
+const CODEX_STATUS_COMMAND_TIMEOUT_MS = 5_000;
+
 export type EngineReadinessReader = () => Promise<DesktopSystemReadiness>;
 
 export class EngineSystemReadinessService
@@ -39,5 +41,7 @@ async function defaultEngineReadinessReader(): Promise<DesktopSystemReadiness> {
   const { getDesktopSystemReadiness } = await import(
     'novel-loop-engine/desktop'
   );
-  return getDesktopSystemReadiness();
+  return getDesktopSystemReadiness({
+    timeoutMs: CODEX_STATUS_COMMAND_TIMEOUT_MS
+  });
 }

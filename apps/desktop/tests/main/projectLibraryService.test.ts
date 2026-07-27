@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
 import {
   mkdir,
   mkdtemp,
@@ -11,6 +12,13 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 import { afterEach, describe, expect, test, vi } from 'vitest';
+
+const fileSystemMocks = vi.hoisted(() => ({ access: vi.fn() }));
+
+vi.mock('node:fs/promises', async (importOriginal) => ({
+  ...await importOriginal<typeof import('node:fs/promises')>(),
+  access: fileSystemMocks.access
+}));
 
 import type {
   DesktopProjectBriefInput,
@@ -36,6 +44,7 @@ const validInspection: DesktopProjectInspection = {
 };
 
 afterEach(async () => {
+  fileSystemMocks.access.mockReset();
   await Promise.all(temporaryDirectories.splice(0).map((directory) => (
     rm(directory, { force: true, recursive: true })
   )));
@@ -45,8 +54,10 @@ class FakeProjectDialog implements ProjectDialogPort {
   defaultLibraryResult: string | null = null;
   projectDirectoryResult: string | null = null;
   alternateLibraryResult: string | null = null;
+  defaultLibraryError: unknown = undefined;
 
   async chooseDefaultLibrary(): Promise<string | null> {
+    if (this.defaultLibraryError !== undefined) throw this.defaultLibraryError;
     return this.defaultLibraryResult;
   }
 
@@ -200,6 +211,64 @@ describe('ProjectLibraryService', () => {
     });
   });
 
+  test('default library selection rejects a directory without create access', async () => {
+    const { dialog, libraryRoot, service } = await createContext();
+    dialog.defaultLibraryResult = libraryRoot;
+    fileSystemMocks.access.mockRejectedValueOnce(Object.assign(new Error('denied'), {
+      code: 'EACCES'
+    }));
+
+    await expect(service.chooseDefaultLibrary()).resolves.toEqual({
+      selection: 'location_unavailable'
+    });
+    expect(fileSystemMocks.access).toHaveBeenCalledWith(
+      libraryRoot,
+      constants.R_OK | constants.W_OK
+    );
+  });
+
+  test('alternate library creation rejects a directory without create access', async () => {
+    const { alternateLibraryRoot, dialog, gateway, service } = await createContext();
+    dialog.alternateLibraryResult = alternateLibraryRoot;
+    fileSystemMocks.access.mockRejectedValueOnce(Object.assign(new Error('denied'), {
+      code: 'EACCES'
+    }));
+
+    await expect(service.create({
+      title: '雾港来信',
+      coreIdea: '一名夜班邮差收到来自未来的退信。',
+      useDifferentLocation: true
+    })).resolves.toEqual({ outcome: 'location_unavailable' });
+    expect(gateway.create).not.toHaveBeenCalled();
+    expect(fileSystemMocks.access).toHaveBeenCalledWith(
+      alternateLibraryRoot,
+      constants.R_OK | constants.W_OK
+    );
+  });
+
+  test('existing project selection rejects a directory without read access', async () => {
+    const { dialog, gateway, libraryRoot, service } = await createContext();
+    const projectRoot = path.join(libraryRoot, 'novel-20260727-120000-a1b2c3');
+    await mkdir(projectRoot);
+    dialog.projectDirectoryResult = projectRoot;
+    fileSystemMocks.access.mockRejectedValueOnce(Object.assign(new Error('denied'), {
+      code: 'EACCES'
+    }));
+
+    await expect(service.openExisting()).resolves.toEqual({ outcome: 'location_unavailable' });
+    expect(gateway.inspect).not.toHaveBeenCalled();
+    expect(fileSystemMocks.access).toHaveBeenCalledWith(projectRoot, constants.R_OK);
+  });
+
+  test('default library dialog errors map to location_unavailable', async () => {
+    const { dialog, service } = await createContext();
+    dialog.defaultLibraryError = new Error('dialog unavailable');
+
+    await expect(service.chooseDefaultLibrary()).resolves.toEqual({
+      selection: 'location_unavailable'
+    });
+  });
+
   test('opening an invalid directory does not add it', async () => {
     const { dialog, gateway, root, service } = await createContext();
     const invalidRoot = path.join(root, 'not-a-project');
@@ -307,6 +376,42 @@ describe('ProjectLibraryService', () => {
       'project_newer',
       'project_older'
     ]);
+  });
+
+  test('list maps asynchronous result construction errors to registry_unavailable', async () => {
+    const { gateway, libraryRoot, registry, service } = await createContext();
+    const projectRoot = path.join(libraryRoot, 'novel-20260727-120000-a1b2c3');
+    await mkdir(projectRoot);
+    await registry.save({
+      schemaVersion: 1,
+      defaultLibraryRoot: libraryRoot,
+      projects: [createRegistryProject(projectRoot)]
+    });
+    gateway.inspection = { ...validInspection, title: '' };
+
+    await expect(service.list()).resolves.toEqual({
+      projects: [],
+      defaultLocation: { configured: false, locationLabel: null },
+      warning: 'registry_unavailable'
+    });
+  });
+
+  test('remove maps asynchronous result construction errors to registry_unavailable', async () => {
+    const { gateway, libraryRoot, registry, service } = await createContext();
+    const projectRoot = path.join(libraryRoot, 'novel-20260727-120000-a1b2c3');
+    await mkdir(projectRoot);
+    await registry.save({
+      schemaVersion: 1,
+      defaultLibraryRoot: libraryRoot,
+      projects: [createRegistryProject(projectRoot)]
+    });
+    gateway.inspection = { ...validInspection, title: '' };
+
+    await expect(service.remove('project_not_found')).resolves.toEqual({
+      projects: [],
+      defaultLocation: { configured: false, locationLabel: null },
+      warning: 'registry_unavailable'
+    });
   });
 
   test('reopen revalidates the saved project before returning it', async () => {

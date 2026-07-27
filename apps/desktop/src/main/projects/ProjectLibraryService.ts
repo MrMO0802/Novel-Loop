@@ -1,5 +1,6 @@
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
-import { lstat, realpath } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { access, lstat, realpath, stat } from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
@@ -57,7 +58,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
   async list(): Promise<ProjectLibraryResult> {
     try {
       const { registry, warning } = await this.dependencies.registry.load();
-      return this.toLibraryResult(registry, warning);
+      return await this.toLibraryResult(registry, warning);
     } catch {
       return unavailableLibraryResult();
     }
@@ -67,13 +68,13 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
     try {
       const selected = await this.dependencies.dialog.chooseDefaultLibrary();
       if (selected === null) return { selection: 'cancelled' };
-      const libraryRoot = await canonicalPath(selected);
+      const libraryRoot = await canonicalLibraryPath(selected);
       if (libraryRoot === null) return { selection: 'location_unavailable' };
       const { registry } = await this.dependencies.registry.load();
       await this.dependencies.registry.save({ ...registry, defaultLibraryRoot: libraryRoot });
       return { selection: 'selected', locationLabel: path.basename(libraryRoot) };
     } catch {
-      return { selection: 'cancelled' };
+      return { selection: 'location_unavailable' };
     }
   }
 
@@ -108,7 +109,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
         if (isProjectAlreadyExistsError(error) && attempt === 0) continue;
         return isProjectAlreadyExistsError(error) ? { outcome: 'project_exists' } : { outcome: 'failed' };
       }
-      const canonicalProjectRoot = await canonicalPath(projectRoot);
+      const canonicalProjectRoot = await canonicalProjectPath(projectRoot);
       if (canonicalProjectRoot === null) return { outcome: 'failed' };
       const inspection = await this.inspect(canonicalProjectRoot);
       if (inspection === null || !inspection.valid) return { outcome: 'failed' };
@@ -127,7 +128,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
     try {
       const selected = await this.dependencies.dialog.chooseProjectDirectory();
       if (selected === null) return { outcome: 'cancelled' };
-      const projectRoot = await canonicalPath(selected);
+      const projectRoot = await canonicalProjectPath(selected);
       return projectRoot === null ? { outcome: 'location_unavailable' } : this.openProjectRoot(projectRoot);
     } catch {
       return { outcome: 'failed' };
@@ -143,7 +144,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
     }
     const saved = registry.projects.find((project) => project.projectKey === projectKey);
     if (saved === undefined) return { outcome: 'invalid_project' };
-    const projectRoot = await canonicalPath(saved.projectRoot);
+    const projectRoot = await canonicalProjectPath(saved.projectRoot);
     return projectRoot === null
       ? { outcome: 'location_unavailable' }
       : this.openProjectRoot(projectRoot, registry, saved.projectKey);
@@ -154,7 +155,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
       const { registry, warning } = await this.dependencies.registry.load();
       const updated = removeRegistryProject(registry, projectKey);
       await this.dependencies.registry.save(updated);
-      return this.toLibraryResult(updated, warning);
+      return await this.toLibraryResult(updated, warning);
     } catch {
       return {
         projects: [],
@@ -175,7 +176,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
       if (selected === null) {
         return input.useDifferentLocation ? { outcome: 'cancelled' } : { outcome: 'location_required' };
       }
-      return (await canonicalPath(selected)) ?? { outcome: 'location_unavailable' };
+      return (await canonicalLibraryPath(selected)) ?? { outcome: 'location_unavailable' };
     } catch {
       return { outcome: 'failed' };
     }
@@ -202,7 +203,7 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
   }
 
   private async inspectSavedProject(project: ProjectRegistryProject): Promise<ProjectSummary> {
-    const projectRoot = await canonicalPath(project.projectRoot);
+    const projectRoot = await canonicalProjectPath(project.projectRoot);
     if (projectRoot === null) {
       return needsAttentionSummary(project, path.dirname(project.projectRoot));
     }
@@ -308,9 +309,20 @@ function needsAttentionSummary(project: ProjectRegistryProject, projectsRoot: st
   };
 }
 
-async function canonicalPath(candidate: string): Promise<string | null> {
+async function canonicalLibraryPath(candidate: string): Promise<string | null> {
+  return canonicalDirectory(candidate, constants.R_OK | constants.W_OK);
+}
+
+async function canonicalProjectPath(candidate: string): Promise<string | null> {
+  return canonicalDirectory(candidate, constants.R_OK);
+}
+
+async function canonicalDirectory(candidate: string, accessMode: number): Promise<string | null> {
   try {
-    return await realpath(candidate);
+    const canonical = await realpath(candidate);
+    if (!(await stat(canonical)).isDirectory()) return null;
+    await access(canonical, accessMode);
+    return canonical;
   } catch {
     return null;
   }
@@ -330,7 +342,7 @@ async function findProjectByCanonicalRoot(
   projectRoot: string
 ): Promise<ProjectRegistryProject | undefined> {
   for (const project of projects) {
-    if (await canonicalPath(project.projectRoot) === projectRoot) return project;
+    if (await canonicalProjectPath(project.projectRoot) === projectRoot) return project;
   }
   return undefined;
 }
@@ -341,7 +353,7 @@ async function removeCanonicalAliases(
 ): Promise<ProjectRegistryProject[]> {
   const retained: ProjectRegistryProject[] = [];
   for (const project of projects) {
-    if (await canonicalPath(project.projectRoot) !== projectRoot) retained.push(project);
+    if (await canonicalProjectPath(project.projectRoot) !== projectRoot) retained.push(project);
   }
   return retained;
 }

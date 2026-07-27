@@ -495,20 +495,23 @@ Expected: all commands exit 0.
 
 Verification result on 2026-07-27:
 
-- frozen install, root build, 391 root tests, desktop typecheck, 25 desktop
+- frozen install, root build, 391 root tests, desktop typecheck, 26 desktop
   tests, and desktop build passed;
-- the Playwright Electron command exited 0 but securely skipped its one launch
-  test because this Ubuntu host restricts unprivileged user namespaces and the
-  local Electron SUID helper is not installed as root mode `4755`;
 - no insecure sandbox-disabling flag was added;
 - `test:e2e:required` and `verify:release` fail instead of skipping when the
   sandbox is unavailable;
+- after the local SUID sandbox helper was configured, `verify:release` launched
+  the real Electron window and passed its required preload, Node isolation,
+  popup, and navigation assertions;
+- real launch validation found and fixed a sandboxed-preload incompatibility:
+  Zod remains the main-process IPC validator, while preload now has no
+  third-party runtime dependency;
+- the real readiness flow returns `warning` with `canRunSmoke=true` for the
+  installed and logged-in Codex CLI, without exposing doctor details;
 - independent read-only re-review reported zero Critical and zero Important
   findings after the release gate, readiness invariant, bounded timeout, i18n
   summary, and runtime API assertions were added;
-- milestone acceptance items 1 and 7 remain environment-blocked until the
-  actual Electron launch smoke runs on a host or package with a usable Chromium
-  sandbox.
+- all Production Desktop Foundation acceptance items are now satisfied.
 
 - [x] **Step 6: Commit**
 

@@ -61,9 +61,18 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
   }
   test.skip(blocker !== null, blocker ?? '');
 
+  const electronEnvironment = Object.fromEntries(
+    Object.entries(process.env).filter(
+      (entry): entry is [string, string] => (
+        entry[0] !== 'ELECTRON_RENDERER_URL'
+        && typeof entry[1] === 'string'
+      )
+    )
+  );
   const application = await electron.launch({
     args: [desktopRoot],
-    cwd: desktopRoot
+    cwd: desktopRoot,
+    env: electronEnvironment
   });
 
   try {

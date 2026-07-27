@@ -30,4 +30,12 @@ describe('typed preload boundary', () => {
     );
     expect(source).not.toMatch(/\b(send|invoke|subscribe)\s*:\s*\(/);
   });
+
+  test('keeps sandboxed preload free of third-party runtime dependencies', () => {
+    const preload = readFileSync(preloadPath, 'utf8');
+
+    expect(preload).not.toContain('SystemReadinessSchema');
+    expect(preload).not.toMatch(/from ['"]zod['"]/);
+    expect(preload).toMatch(/import type \{ SystemReadiness \}/);
+  });
 });

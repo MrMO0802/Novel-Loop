@@ -1,0 +1,72 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--nl-canvas);
+  color: var(--nl-text);
+}
+
+button,
+input,
+textarea,
+select {
+  font: inherit;
+}
+
+.nl-boot {
+  display: grid;
+  min-height: 100vh;
+  align-content: center;
+  justify-items: start;
+  gap: 16px;
+  width: min(680px, calc(100% - 64px));
+  margin: 0 auto;
+}
+
+.nl-boot__brand {
+  color: var(--nl-accent);
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.nl-boot h1,
+.nl-boot p {
+  margin: 0;
+  letter-spacing: 0;
+}
+
+.nl-boot h1 {
+  font-family:
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
+    SimSun,
+    serif;
+  font-size: 40px;
+  line-height: 1.2;
+}
+
+.nl-boot p:last-child {
+  max-width: 42rem;
+  color: var(--nl-muted);
+  font-size: 16px;
+  line-height: 1.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+  }
+}

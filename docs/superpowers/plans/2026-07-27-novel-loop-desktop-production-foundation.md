@@ -108,7 +108,7 @@ src/desktop/
 - Produces: `installNavigationPolicy(window: BrowserWindow): void`.
 - Security invariant: renderer receives no preload API in this task.
 
-- [ ] **Step 1: Add the package manifest and build configuration**
+- [x] **Step 1: Add the package manifest and build configuration**
 
 `apps/desktop/package.json`:
 
@@ -153,7 +153,7 @@ src/desktop/
 
 `electron.vite.config.ts` must define separate main, preload, and React renderer builds. Main and preload use their conventional entry files; renderer root is `src/renderer`.
 
-- [ ] **Step 2: Write failing security-policy tests**
+- [x] **Step 2: Write failing security-policy tests**
 
 `windowPolicy.test.ts` must assert:
 
@@ -172,7 +172,7 @@ expect(options.show).toBe(false);
 
 `navigationPolicy.test.ts` must assert that same-document navigation is allowed, while `https:`, `http:`, `file:` outside the packaged renderer, `javascript:`, and popup creation are denied.
 
-- [ ] **Step 3: Run the focused tests and verify RED**
+- [x] **Step 3: Run the focused tests and verify RED**
 
 Run:
 
@@ -182,7 +182,7 @@ corepack pnpm --dir apps/desktop test -- tests/main/windowPolicy.test.ts tests/m
 
 Expected: FAIL because the policy modules do not exist.
 
-- [ ] **Step 4: Implement the secure window and navigation policy**
+- [x] **Step 4: Implement the secure window and navigation policy**
 
 `createSecureWindowOptions()` must set fixed minimum dimensions, delay display until `ready-to-show`, and apply the exact security flags above.
 
@@ -199,7 +199,7 @@ createMainWindow();
 
 `installNavigationPolicy()` must deny `setWindowOpenHandler`, prevent untrusted `will-navigate`, and never call `shell.openExternal`.
 
-- [ ] **Step 5: Add a restrictive renderer document**
+- [x] **Step 5: Add a restrictive renderer document**
 
 `index.html` must include:
 
@@ -212,7 +212,7 @@ createMainWindow();
 
 The renderer displays a production-foundation boot message only. It must not import prototype fixtures.
 
-- [ ] **Step 6: Verify GREEN**
+- [x] **Step 6: Verify GREEN**
 
 Run:
 
@@ -224,7 +224,7 @@ corepack pnpm --dir apps/desktop build
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit**
 
 ```bash
 git add apps/desktop
@@ -502,4 +502,3 @@ The Production Desktop Foundation is accepted only when:
 6. Production renderer handles all readiness states in author language.
 7. Unit, build, type, Electron smoke, and existing root regression commands pass.
 8. Independent review reports no Critical or Important security-boundary findings.
-

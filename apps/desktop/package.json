@@ -12,6 +12,7 @@
     "verify": "pnpm check && pnpm test && pnpm build"
   },
   "dependencies": {
+    "novel-loop-engine": "workspace:*",
     "react": "^19.1.1",
     "react-dom": "^19.1.1",
     "zod": "^4.4.3"

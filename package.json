@@ -3,6 +3,12 @@
   "version": "2.5.0-rc.1",
   "description": "Local-first CLI skeleton for the Novel Loop Engine.",
   "type": "module",
+  "exports": {
+    "./desktop": {
+      "types": "./dist/desktop/index.d.ts",
+      "import": "./dist/desktop/index.js"
+    }
+  },
   "bin": {
     "novel-loop": "dist/cli/index.js"
   },
@@ -18,6 +24,9 @@
     "clean:generated": "node scripts/clean-generated.mjs generated",
     "demo:codex-single-chapter": "node scripts/demo-codex-single-chapter.mjs",
     "demo:codex-multi-chapter": "node scripts/demo-codex-multi-chapter.mjs",
+    "desktop:dev": "pnpm build && pnpm --dir apps/desktop dev",
+    "desktop:build": "pnpm build && pnpm --dir apps/desktop build",
+    "desktop:test": "pnpm --dir apps/desktop test",
     "release:checklist": "node scripts/print-release-checklist.mjs"
   },
   "files": [

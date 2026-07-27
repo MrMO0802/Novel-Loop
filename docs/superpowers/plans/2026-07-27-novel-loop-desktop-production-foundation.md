@@ -342,7 +342,7 @@ git commit -m "feat(desktop): add typed preload readiness contract"
 - Consumes in desktop main: `EngineSystemReadinessService`.
 - Safety: maps existing `checkCodexStatus()` into the redacted desktop contract.
 
-- [ ] **Step 1: Write engine mapping tests**
+- [x] **Step 1: Write engine mapping tests**
 
 Inject the existing Codex status checker and cover:
 
@@ -354,7 +354,7 @@ Inject the existing Codex status checker and cover:
 
 Assertions must prove no `binaryPath`, `doctorJson`, auth, raw output, environment, or command data survives mapping.
 
-- [ ] **Step 2: Verify RED**
+- [x] **Step 2: Verify RED**
 
 Run:
 
@@ -364,7 +364,7 @@ corepack pnpm test -- tests/unit/desktopSystemReadiness.test.ts
 
 Expected: FAIL because `src/desktop/systemReadiness.ts` does not exist.
 
-- [ ] **Step 3: Implement the read-only engine export**
+- [x] **Step 3: Implement the read-only engine export**
 
 The adapter calls `checkCodexStatus()` only. It catches known readiness failures and returns author-facing categories; it never calls smoke, `codex exec`, a provider, project storage, or Story State services.
 
@@ -387,11 +387,11 @@ Add workspace scripts:
 "desktop:test": "pnpm --dir apps/desktop test"
 ```
 
-- [ ] **Step 4: Implement the main service**
+- [x] **Step 4: Implement the main service**
 
 `EngineSystemReadinessService` depends on the exported engine function and adds only Electron `app.getVersion()` and `process.platform`. It returns data parsed by `SystemReadinessSchema`.
 
-- [ ] **Step 5: Verify and commit**
+- [x] **Step 5: Verify and commit**
 
 Run:
 

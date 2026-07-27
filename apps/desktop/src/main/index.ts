@@ -4,7 +4,9 @@ import { pathToFileURL } from 'node:url';
 
 import { createMainWindow } from './createMainWindow';
 import { registerSystemHandlers } from './ipc/registerSystemHandlers';
-import { BootstrapSystemReadinessService } from './services/SystemReadinessService';
+import {
+  EngineSystemReadinessService
+} from './services/EngineSystemReadinessService';
 import { SupportedDesktopPlatformSchema } from '../shared/systemContract';
 
 app.enableSandbox();
@@ -12,7 +14,7 @@ app.enableSandbox();
 void app.whenReady().then(() => {
   const trustedRendererUrl = process.env['ELECTRON_RENDERER_URL']
     ?? pathToFileURL(path.join(__dirname, '../renderer/index.html')).toString();
-  const service = new BootstrapSystemReadinessService(
+  const service = new EngineSystemReadinessService(
     app.getVersion(),
     SupportedDesktopPlatformSchema.parse(process.platform)
   );

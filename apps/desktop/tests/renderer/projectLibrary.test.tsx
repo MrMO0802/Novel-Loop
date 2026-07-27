@@ -2,6 +2,8 @@
 
 import '@testing-library/jest-dom/vitest';
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   act,
   cleanup,
@@ -16,6 +18,9 @@ import { App } from '../../src/renderer/src/App';
 import {
   CreateProjectView
 } from '../../src/renderer/src/features/projects/CreateProjectView';
+import {
+  ProjectLibrary
+} from '../../src/renderer/src/features/projects/ProjectLibrary';
 import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import type {
   ProjectLibraryResult,
@@ -59,6 +64,15 @@ const emptyLibrary: ProjectLibraryResult = {
   },
   warning: null
 };
+
+const baseStyles = readFileSync(
+  resolve(process.cwd(), 'src/renderer/src/styles/base.css'),
+  'utf8'
+);
+const projectLibraryStyles = readFileSync(
+  resolve(process.cwd(), 'src/renderer/src/styles/project-library.css'),
+  'utf8'
+);
 
 type ProjectApiMock = {
   [Key in keyof NovelLoopDesktopApi['projects']]: ReturnType<typeof vi.fn<
@@ -302,6 +316,106 @@ test('does not complete creation after the create view unmounts', async () => {
   expect(onCreated).not.toHaveBeenCalled();
 });
 
+test('does not navigate when an existing-project result arrives after unmount', async () => {
+  const projectApi = installProjectApi();
+  let resolveOpen: (result: ProjectOpenResult) => void = () => {};
+  projectApi.openExisting.mockReturnValue(new Promise((resolve) => {
+    resolveOpen = resolve;
+  }));
+  const onOpenProject = vi.fn();
+  const view = render(
+    <ProjectLibrary
+      onBack={vi.fn()}
+      onCreate={vi.fn()}
+      onOpenProject={onOpenProject}
+    />
+  );
+  fireEvent.click(await screen.findByRole('button', {
+    name: '打开已有项目'
+  }));
+
+  view.unmount();
+  await act(async () => {
+    resolveOpen({
+      outcome: 'opened',
+      project: readyProject
+    });
+  });
+
+  expect(onOpenProject).not.toHaveBeenCalled();
+});
+
+test('does not navigate when a recent-project result arrives after unmount', async () => {
+  const projectApi = installProjectApi({
+    ...emptyLibrary,
+    projects: [readyProject]
+  });
+  let resolveOpen: (result: ProjectOpenResult) => void = () => {};
+  projectApi.open.mockReturnValue(new Promise((resolve) => {
+    resolveOpen = resolve;
+  }));
+  const onOpenProject = vi.fn();
+  const view = render(
+    <ProjectLibrary
+      onBack={vi.fn()}
+      onCreate={vi.fn()}
+      onOpenProject={onOpenProject}
+    />
+  );
+  fireEvent.click(await screen.findByRole('button', {
+    name: '打开《雾港来信》'
+  }));
+
+  view.unmount();
+  await act(async () => {
+    resolveOpen({
+      outcome: 'opened',
+      project: readyProject
+    });
+  });
+
+  expect(onOpenProject).not.toHaveBeenCalled();
+});
+
+test('locks library navigation and project actions while an open is pending', async () => {
+  const secondProject: ProjectSummary = {
+    ...readyProject,
+    projectKey: 'project_snow_line',
+    title: '雪线以南'
+  };
+  const projectApi = installProjectApi({
+    ...emptyLibrary,
+    projects: [readyProject, secondProject]
+  });
+  let resolveOpen: (result: ProjectOpenResult) => void = () => {};
+  projectApi.open.mockReturnValue(new Promise((resolve) => {
+    resolveOpen = resolve;
+  }));
+
+  render(<App />);
+  await enterProjectLibrary();
+  fireEvent.click(screen.getByRole('button', {
+    name: '打开《雾港来信》'
+  }));
+
+  expect(screen.getByRole('button', { name: '返回环境检查' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '新建小说' })).toBeDisabled();
+  expect(screen.getByRole('button', { name: '打开已有项目' })).toBeDisabled();
+  expect(screen.getByRole('button', {
+    name: '打开《雪线以南》'
+  })).toBeDisabled();
+  screen.getAllByRole('button', {
+    name: /从最近项目中移除/
+  }).forEach((button) => expect(button).toBeDisabled());
+
+  await act(async () => {
+    resolveOpen({ outcome: 'cancelled' });
+  });
+  expect(screen.getByRole('button', {
+    name: '返回环境检查'
+  })).toBeEnabled();
+});
+
 test('sorts recent projects by last opened time and reopens one', async () => {
   const olderProject: ProjectSummary = {
     ...readyProject,
@@ -377,6 +491,70 @@ test('removal explains file retention and calls only projects.remove', async () 
   expect(projectApi.open).not.toHaveBeenCalled();
   expect(projectApi.openExisting).not.toHaveBeenCalled();
   expect(projectApi.create).not.toHaveBeenCalled();
+  expect(await screen.findByText('还没有添加小说项目')).toBeVisible();
+});
+
+test('remove dialog traps focus, closes with Escape, and restores its trigger', async () => {
+  installProjectApi({
+    ...emptyLibrary,
+    projects: [readyProject]
+  });
+
+  render(<App />);
+  await enterProjectLibrary();
+  const trigger = screen.getByRole('button', {
+    name: '从最近项目中移除《雾港来信》'
+  });
+  fireEvent.click(trigger);
+
+  const dialog = screen.getByRole('dialog', { name: '移除最近项目' });
+  const cancel = within(dialog).getByRole('button', { name: '取消' });
+  const confirm = within(dialog).getByRole('button', { name: '确认移除' });
+  expect(cancel).toHaveFocus();
+  expect(screen.getByRole('banner', { hidden: true })).toHaveAttribute('inert');
+  expect(document.querySelector('.nl-project-content')).toHaveAttribute(
+    'inert'
+  );
+
+  fireEvent.keyDown(cancel, { key: 'Tab', shiftKey: true });
+  expect(confirm).toHaveFocus();
+  fireEvent.keyDown(confirm, { key: 'Tab' });
+  expect(cancel).toHaveFocus();
+
+  fireEvent.keyDown(dialog, { key: 'Escape' });
+  expect(screen.queryByRole('dialog', {
+    name: '移除最近项目'
+  })).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+});
+
+test('remove failure stays in the dialog and can be retried', async () => {
+  const projectApi = installProjectApi({
+    ...emptyLibrary,
+    projects: [readyProject]
+  });
+  projectApi.remove
+    .mockRejectedValueOnce(new Error('remove failed at /home/private'))
+    .mockResolvedValueOnce(emptyLibrary);
+
+  render(<App />);
+  await enterProjectLibrary();
+  fireEvent.click(screen.getByRole('button', {
+    name: '从最近项目中移除《雾港来信》'
+  }));
+
+  const dialog = screen.getByRole('dialog', { name: '移除最近项目' });
+  fireEvent.click(within(dialog).getByRole('button', { name: '确认移除' }));
+
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+    '暂时无法完成操作，请稍后重试'
+  );
+  expect(dialog).not.toHaveTextContent(/remove failed|\/home\/private/i);
+  const retry = within(dialog).getByRole('button', { name: '确认移除' });
+  expect(retry).toBeEnabled();
+  fireEvent.click(retry);
+
+  expect(projectApi.remove).toHaveBeenCalledTimes(2);
   expect(await screen.findByText('还没有添加小说项目')).toBeVisible();
 });
 
@@ -522,4 +700,11 @@ test('maps a registry warning to fixed author language', async () => {
   expect(screen.getByRole('alert')).toHaveTextContent(
     '最近项目记录暂时无法读取，你仍可新建或打开项目'
   );
+});
+
+test('uses a solid high-contrast focus indicator', () => {
+  expect(baseStyles).not.toContain('rgb(40 95 75 / 28%)');
+  expect(projectLibraryStyles).not.toContain('rgb(40 95 75 / 28%)');
+  expect(baseStyles).toContain('outline: 3px solid #1e4c3b;');
+  expect(projectLibraryStyles).toContain('outline: 3px solid #1e4c3b;');
 });

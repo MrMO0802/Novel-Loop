@@ -49,7 +49,7 @@
 
 .nl-view-title:focus-visible {
   border-radius: 4px;
-  outline: 3px solid rgb(40 95 75 / 28%);
+  outline: 3px solid #1e4c3b;
   outline-offset: 5px;
 }
 
@@ -568,7 +568,7 @@
 .nl-project-shell button:focus-visible,
 .nl-project-shell input:focus-visible,
 .nl-project-shell textarea:focus-visible {
-  outline: 3px solid rgb(40 95 75 / 28%);
+  outline: 3px solid #1e4c3b;
   outline-offset: 3px;
 }
 

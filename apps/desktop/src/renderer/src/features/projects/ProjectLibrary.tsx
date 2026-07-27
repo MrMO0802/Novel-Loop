@@ -11,7 +11,8 @@ import {
   useEffect,
   useMemo,
   useRef,
-  useState
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent
 } from 'react';
 
 import type {
@@ -43,8 +44,14 @@ export function ProjectLibrary({
 }: ProjectLibraryProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(true);
+  const actionRequestId = useRef(0);
+  const actionInFlight = useRef(false);
+  const removeTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const shouldRestoreRemoveFocus = useRef(false);
   const [view, setView] = useState<LibraryView>({ kind: 'loading' });
   const [errorKey, setErrorKey] = useState<MessageKey | null>(null);
+  const [removeErrorKey, setRemoveErrorKey] =
+    useState<MessageKey | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [removeCandidate, setRemoveCandidate] =
     useState<ProjectSummary | null>(null);
@@ -70,11 +77,59 @@ export function ProjectLibrary({
     void loadLibrary();
     return () => {
       mounted.current = false;
+      actionInFlight.current = false;
+      actionRequestId.current += 1;
     };
   }, [loadLibrary]);
 
-  const handleOpenResult = (result: ProjectOpenResult) => {
+  useEffect(() => {
+    if (!removeCandidate && shouldRestoreRemoveFocus.current) {
+      shouldRestoreRemoveFocus.current = false;
+      const trigger = removeTriggerRef.current;
+      removeTriggerRef.current = null;
+      if (trigger?.isConnected) {
+        trigger.focus();
+      } else {
+        headingRef.current?.focus();
+      }
+    }
+  }, [removeCandidate]);
+
+  const beginAction = (action: string): number | null => {
+    if (actionInFlight.current) {
+      return null;
+    }
+    actionInFlight.current = true;
+    const currentRequest = ++actionRequestId.current;
+    setPendingAction(action);
+    setErrorKey(null);
+    return currentRequest;
+  };
+
+  const isCurrentAction = (currentRequest: number): boolean => (
+    mounted.current
+      && actionRequestId.current === currentRequest
+  );
+
+  const finishAction = (currentRequest: number) => {
+    if (actionRequestId.current !== currentRequest) {
+      return;
+    }
+    actionInFlight.current = false;
+    if (mounted.current) {
+      setPendingAction(null);
+    }
+  };
+
+  const handleOpenResult = (
+    result: ProjectOpenResult,
+    currentRequest: number
+  ) => {
+    if (!isCurrentAction(currentRequest)) {
+      return;
+    }
     if (result.outcome === 'opened' || result.outcome === 'created') {
+      finishAction(currentRequest);
       onOpenProject(result.project);
       return;
     }
@@ -85,30 +140,40 @@ export function ProjectLibrary({
   };
 
   const openExisting = async () => {
-    setPendingAction('open-existing');
-    setErrorKey(null);
+    const currentRequest = beginAction('open-existing');
+    if (currentRequest === null) {
+      return;
+    }
     try {
-      handleOpenResult(await window.novelLoop.projects.openExisting());
+      handleOpenResult(
+        await window.novelLoop.projects.openExisting(),
+        currentRequest
+      );
     } catch {
-      setErrorKey('project.error.failed');
-    } finally {
-      if (mounted.current) {
-        setPendingAction(null);
+      if (isCurrentAction(currentRequest)) {
+        setErrorKey('project.error.failed');
       }
+    } finally {
+      finishAction(currentRequest);
     }
   };
 
   const openRecent = async (projectKey: string) => {
-    setPendingAction(`open:${projectKey}`);
-    setErrorKey(null);
+    const currentRequest = beginAction(`open:${projectKey}`);
+    if (currentRequest === null) {
+      return;
+    }
     try {
-      handleOpenResult(await window.novelLoop.projects.open(projectKey));
+      handleOpenResult(
+        await window.novelLoop.projects.open(projectKey),
+        currentRequest
+      );
     } catch {
-      setErrorKey('project.error.failed');
-    } finally {
-      if (mounted.current) {
-        setPendingAction(null);
+      if (isCurrentAction(currentRequest)) {
+        setErrorKey('project.error.failed');
       }
+    } finally {
+      finishAction(currentRequest);
     }
   };
 
@@ -117,26 +182,52 @@ export function ProjectLibrary({
       return;
     }
 
-    setPendingAction(`remove:${removeCandidate.projectKey}`);
-    setErrorKey(null);
+    const projectKey = removeCandidate.projectKey;
+    const currentRequest = beginAction(`remove:${projectKey}`);
+    if (currentRequest === null) {
+      return;
+    }
+    setRemoveErrorKey(null);
     try {
-      const library = await window.novelLoop.projects.remove(
-        removeCandidate.projectKey
-      );
-      if (mounted.current) {
+      const library = await window.novelLoop.projects.remove(projectKey);
+      if (isCurrentAction(currentRequest)) {
+        shouldRestoreRemoveFocus.current = true;
         setView({ kind: 'loaded', library });
         setRemoveCandidate(null);
       }
     } catch {
-      setErrorKey('project.error.failed');
-    } finally {
-      if (mounted.current) {
-        setPendingAction(null);
+      if (isCurrentAction(currentRequest)) {
+        setRemoveErrorKey('project.error.failed');
       }
+    } finally {
+      finishAction(currentRequest);
     }
   };
 
+  const openRemoveDialog = (
+    project: ProjectSummary,
+    trigger: HTMLButtonElement
+  ) => {
+    if (actionInFlight.current) {
+      return;
+    }
+    removeTriggerRef.current = trigger;
+    setRemoveErrorKey(null);
+    setRemoveCandidate(project);
+  };
+
+  const closeRemoveDialog = () => {
+    if (actionInFlight.current) {
+      return;
+    }
+    shouldRestoreRemoveFocus.current = true;
+    setRemoveErrorKey(null);
+    setRemoveCandidate(null);
+  };
+
   const library = view.kind === 'loaded' ? view.library : null;
+  const backgroundIsInactive = removeCandidate !== null;
+  const actionsDisabled = pendingAction !== null || backgroundIsInactive;
   const projects = useMemo(() => (
     library
       ? [...library.projects].sort((left, right) => (
@@ -147,8 +238,16 @@ export function ProjectLibrary({
 
   return (
     <main className="nl-project-shell">
-      <ProjectHeader onBack={onBack} />
-      <div className="nl-project-content">
+      <ProjectHeader
+        disabled={actionsDisabled}
+        inert={backgroundIsInactive}
+        onBack={onBack}
+      />
+      <div
+        aria-hidden={backgroundIsInactive ? true : undefined}
+        className="nl-project-content"
+        inert={backgroundIsInactive}
+      >
         <section className="nl-library-heading" aria-labelledby="library-title">
           <div>
             <p className="nl-section-label">{t('library.eyebrow')}</p>
@@ -175,7 +274,7 @@ export function ProjectLibrary({
             <div className="nl-library-commands">
               <button
                 className="nl-primary-action"
-                disabled={pendingAction !== null}
+                disabled={actionsDisabled}
                 onClick={onCreate}
                 type="button"
               >
@@ -184,7 +283,7 @@ export function ProjectLibrary({
               </button>
               <button
                 className="nl-secondary-action"
-                disabled={pendingAction !== null}
+                disabled={actionsDisabled}
                 onClick={() => void openExisting()}
                 type="button"
               >
@@ -257,10 +356,11 @@ export function ProjectLibrary({
             <ul aria-label={t('library.recent.ariaLabel')}>
               {projects.map((project) => (
                 <ProjectItem
+                  disabled={actionsDisabled}
                   isPending={pendingAction === `open:${project.projectKey}`}
                   key={project.projectKey}
                   onOpen={() => void openRecent(project.projectKey)}
-                  onRemove={() => setRemoveCandidate(project)}
+                  onRemove={(trigger) => openRemoveDialog(project, trigger)}
                   project={project}
                 />
               ))}
@@ -274,7 +374,8 @@ export function ProjectLibrary({
           isPending={
             pendingAction === `remove:${removeCandidate.projectKey}`
           }
-          onCancel={() => setRemoveCandidate(null)}
+          errorKey={removeErrorKey}
+          onCancel={closeRemoveDialog}
           onConfirm={() => void removeRecent()}
           project={removeCandidate}
         />
@@ -283,14 +384,31 @@ export function ProjectLibrary({
   );
 }
 
-function ProjectHeader({ onBack }: { onBack: () => void }) {
+function ProjectHeader({
+  disabled,
+  inert,
+  onBack
+}: {
+  disabled: boolean;
+  inert: boolean;
+  onBack: () => void;
+}) {
   return (
-    <header className="nl-project-header">
+    <header
+      aria-hidden={inert ? true : undefined}
+      className="nl-project-header"
+      inert={inert}
+    >
       <div className="nl-brand">
         <BookOpenText aria-hidden size={24} weight="fill" />
         <span>{t('app.brand')}</span>
       </div>
-      <button className="nl-tertiary-action" onClick={onBack} type="button">
+      <button
+        className="nl-tertiary-action"
+        disabled={disabled}
+        onClick={onBack}
+        type="button"
+      >
         <ArrowLeft aria-hidden size={17} />
         {t('library.back')}
       </button>
@@ -299,14 +417,16 @@ function ProjectHeader({ onBack }: { onBack: () => void }) {
 }
 
 function ProjectItem({
+  disabled,
   isPending,
   onOpen,
   onRemove,
   project
 }: {
+  disabled: boolean;
   isPending: boolean;
   onOpen: () => void;
-  onRemove: () => void;
+  onRemove: (trigger: HTMLButtonElement) => void;
   project: ProjectSummary;
 }) {
   const openLabel = formatMessage('library.project.open', {
@@ -339,7 +459,7 @@ function ProjectItem({
       <div className="nl-project-item__actions">
         <button
           className="nl-secondary-action"
-          disabled={isPending}
+          disabled={disabled}
           onClick={onOpen}
           type="button"
         >
@@ -349,7 +469,8 @@ function ProjectItem({
         <button
           aria-label={removeLabel}
           className="nl-icon-action"
-          onClick={onRemove}
+          disabled={disabled}
+          onClick={(event) => onRemove(event.currentTarget)}
           title={removeLabel}
           type="button"
         >
@@ -383,16 +504,61 @@ function ProjectHealth({
 }
 
 function RemoveProjectDialog({
+  errorKey,
   isPending,
   onCancel,
   onConfirm,
   project
 }: {
+  errorKey: MessageKey | null;
   isPending: boolean;
   onCancel: () => void;
   onConfirm: () => void;
   project: ProjectSummary;
 }) {
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    cancelRef.current?.focus();
+  }, []);
+
+  const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (!isPending) {
+        onCancel();
+      }
+      return;
+    }
+
+    if (event.key !== 'Tab' || !dialogRef.current) {
+      return;
+    }
+
+    const focusable = Array.from(
+      dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]), [href], input:not([disabled]), '
+          + 'select:not([disabled]), textarea:not([disabled]), '
+          + '[tabindex]:not([tabindex="-1"])'
+      )
+    );
+    const first = focusable[0];
+    const last = focusable.at(-1);
+    if (!first || !last) {
+      event.preventDefault();
+      return;
+    }
+
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
   return (
     <div className="nl-dialog-backdrop">
       <section
@@ -400,6 +566,8 @@ function RemoveProjectDialog({
         aria-labelledby="remove-project-title"
         aria-modal="true"
         className="nl-confirm-dialog"
+        onKeyDown={handleKeyDown}
+        ref={dialogRef}
         role="dialog"
       >
         <h2 id="remove-project-title">{t('library.remove.title')}</h2>
@@ -409,11 +577,22 @@ function RemoveProjectDialog({
         <p className="nl-confirm-dialog__assurance">
           {t('library.remove.retainsFiles')}
         </p>
+        {errorKey && (
+          <p
+            className="nl-inline-alert nl-inline-alert--error"
+            id="remove-project-error"
+            role="alert"
+          >
+            <WarningCircle aria-hidden size={20} weight="fill" />
+            {t(errorKey)}
+          </p>
+        )}
         <div className="nl-confirm-dialog__actions">
           <button
             className="nl-secondary-action"
             disabled={isPending}
             onClick={onCancel}
+            ref={cancelRef}
             type="button"
           >
             {t('common.cancel')}

@@ -12,7 +12,8 @@ import {
   useEffect,
   useRef,
   useState,
-  type ComponentType
+  type ComponentType,
+  type RefObject
 } from 'react';
 
 import type { ProjectSummary } from '../../shared/projectContract';
@@ -52,6 +53,7 @@ interface StatusPresentation {
 
 export function App() {
   const requestId = useRef(0);
+  const readinessHeadingRef = useRef<HTMLHeadingElement>(null);
   const [view, setView] = useState<ReadinessView>({ kind: 'loading' });
   const [route, setRoute] = useState<AppRoute>({ kind: 'readiness' });
 
@@ -85,6 +87,12 @@ export function App() {
       requestId.current += 1;
     };
   }, [checkReadiness]);
+
+  useEffect(() => {
+    if (route.kind === 'readiness') {
+      readinessHeadingRef.current?.focus();
+    }
+  }, [route.kind]);
 
   if (route.kind === 'library') {
     return (
@@ -123,6 +131,7 @@ export function App() {
         </div>
         <p className="nl-eyebrow">{t('setup.eyebrow')}</p>
         <ReadinessContent
+          headingRef={readinessHeadingRef}
           onContinue={() => setRoute({ kind: 'library' })}
           onRetry={() => void checkReadiness()}
           view={view}
@@ -149,10 +158,12 @@ export function App() {
 }
 
 function ReadinessContent({
+  headingRef,
   onContinue,
   onRetry,
   view
 }: {
+  headingRef: RefObject<HTMLHeadingElement | null>;
   onContinue: () => void;
   onRetry: () => void;
   view: ReadinessView;
@@ -161,7 +172,14 @@ function ReadinessContent({
     return (
       <div className="nl-readiness nl-readiness--loading">
         <CircleNotch aria-hidden className="nl-spin" size={34} />
-        <h1 id="setup-title">{t('setup.loading.title')}</h1>
+        <h1
+          className="nl-route-heading"
+          id="setup-title"
+          ref={headingRef}
+          tabIndex={-1}
+        >
+          {t('setup.loading.title')}
+        </h1>
         <p aria-live="polite" className="nl-readiness__summary" role="status">
           {t('setup.loading.summary')}
         </p>
@@ -181,7 +199,14 @@ function ReadinessContent({
   return (
     <div className={`nl-readiness nl-readiness--${presentation.tone}`}>
       <Icon aria-hidden size={34} weight="fill" />
-      <h1 id="setup-title">{presentation.title}</h1>
+      <h1
+        className="nl-route-heading"
+        id="setup-title"
+        ref={headingRef}
+        tabIndex={-1}
+      >
+        {presentation.title}
+      </h1>
       <p aria-live="polite" className="nl-readiness__summary">
         {presentation.summary}
       </p>

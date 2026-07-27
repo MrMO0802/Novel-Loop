@@ -123,6 +123,23 @@ describe('production first-launch readiness', () => {
     })).toBeEnabled();
   });
 
+  test('returns from the library with focus on the readiness heading', async () => {
+    installReadiness(baseReadiness);
+
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', {
+      name: '进入作品库'
+    }));
+    fireEvent.click(await screen.findByRole('button', {
+      name: '返回环境检查'
+    }));
+
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '本地创作环境已准备好'
+    })).toHaveFocus();
+  });
+
   test.each([
     {
       action: '安装完成后重新检查',

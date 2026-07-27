@@ -517,11 +517,31 @@ function RemoveProjectDialog({
   project: ProjectSummary;
 }) {
   const cancelRef = useRef<HTMLButtonElement>(null);
+  const confirmRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
+  const wasPending = useRef(false);
 
   useEffect(() => {
     cancelRef.current?.focus();
   }, []);
+
+  useEffect(() => {
+    if (isPending) {
+      wasPending.current = true;
+      dialogRef.current?.focus();
+      return;
+    }
+
+    if (wasPending.current) {
+      wasPending.current = false;
+      confirmRef.current?.focus();
+    }
+  }, [isPending]);
+
+  const handleConfirm = () => {
+    dialogRef.current?.focus();
+    onConfirm();
+  };
 
   const handleKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
     if (event.key === 'Escape') {
@@ -569,6 +589,7 @@ function RemoveProjectDialog({
         onKeyDown={handleKeyDown}
         ref={dialogRef}
         role="dialog"
+        tabIndex={-1}
       >
         <h2 id="remove-project-title">{t('library.remove.title')}</h2>
         <p id="remove-project-description">
@@ -600,7 +621,8 @@ function RemoveProjectDialog({
           <button
             className="nl-danger-action"
             disabled={isPending}
-            onClick={onConfirm}
+            onClick={handleConfirm}
+            ref={confirmRef}
             type="button"
           >
             {isPending

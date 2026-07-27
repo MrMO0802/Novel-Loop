@@ -558,6 +558,51 @@ test('remove failure stays in the dialog and can be retried', async () => {
   expect(await screen.findByText('还没有添加小说项目')).toBeVisible();
 });
 
+test('remove dialog keeps focus enclosed while pending and after failure', async () => {
+  const projectApi = installProjectApi({
+    ...emptyLibrary,
+    projects: [readyProject]
+  });
+  let rejectRemove: (reason: Error) => void = () => {};
+  projectApi.remove.mockReturnValue(new Promise((_, reject) => {
+    rejectRemove = reject;
+  }));
+
+  render(<App />);
+  await enterProjectLibrary();
+  const trigger = screen.getByRole('button', {
+    name: '从最近项目中移除《雾港来信》'
+  });
+  fireEvent.click(trigger);
+
+  const dialog = screen.getByRole('dialog', { name: '移除最近项目' });
+  const cancel = within(dialog).getByRole('button', { name: '取消' });
+  const confirm = within(dialog).getByRole('button', { name: '确认移除' });
+  fireEvent.click(confirm);
+
+  expect(cancel).toBeDisabled();
+  expect(confirm).toBeDisabled();
+  expect(dialog).toHaveFocus();
+
+  await act(async () => {
+    rejectRemove(new Error('remove failed at /home/private'));
+  });
+
+  expect(await within(dialog).findByRole('alert')).toHaveTextContent(
+    '暂时无法完成操作，请稍后重试'
+  );
+  expect(confirm).toBeEnabled();
+  expect(confirm).toHaveFocus();
+
+  fireEvent.keyDown(confirm, { key: 'Tab' });
+  expect(cancel).toHaveFocus();
+  fireEvent.keyDown(cancel, { key: 'Escape' });
+  expect(screen.queryByRole('dialog', {
+    name: '移除最近项目'
+  })).not.toBeInTheDocument();
+  expect(trigger).toHaveFocus();
+});
+
 test('overview shows story-foundation and global-planning availability', async () => {
   const projectApi = installProjectApi();
   projectApi.openExisting.mockResolvedValue({

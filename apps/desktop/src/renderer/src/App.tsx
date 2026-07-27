@@ -15,13 +15,23 @@ import {
   type ComponentType
 } from 'react';
 
+import type { ProjectSummary } from '../../shared/projectContract';
 import type { SystemReadiness } from '../../shared/systemContract';
+import { CreateProjectView } from './features/projects/CreateProjectView';
+import { ProjectLibrary } from './features/projects/ProjectLibrary';
+import { ProjectOverview } from './features/projects/ProjectOverview';
 import { t } from './i18n/messages.zh-CN';
 
 type ReadinessView =
   | { kind: 'loading' }
   | { kind: 'loaded'; readiness: SystemReadiness }
   | { kind: 'failed'; reason: 'error' | 'timeout' };
+
+type AppRoute =
+  | { kind: 'readiness' }
+  | { kind: 'library' }
+  | { kind: 'create' }
+  | { kind: 'overview'; project: ProjectSummary };
 
 const READINESS_UI_TIMEOUT_MS = 20_000;
 
@@ -43,7 +53,7 @@ interface StatusPresentation {
 export function App() {
   const requestId = useRef(0);
   const [view, setView] = useState<ReadinessView>({ kind: 'loading' });
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [route, setRoute] = useState<AppRoute>({ kind: 'readiness' });
 
   const checkReadiness = useCallback(async () => {
     const currentRequest = ++requestId.current;
@@ -76,8 +86,32 @@ export function App() {
     };
   }, [checkReadiness]);
 
-  if (libraryOpen) {
-    return <LibraryPlaceholder onBack={() => setLibraryOpen(false)} />;
+  if (route.kind === 'library') {
+    return (
+      <ProjectLibrary
+        onBack={() => setRoute({ kind: 'readiness' })}
+        onCreate={() => setRoute({ kind: 'create' })}
+        onOpenProject={(project) => setRoute({ kind: 'overview', project })}
+      />
+    );
+  }
+
+  if (route.kind === 'create') {
+    return (
+      <CreateProjectView
+        onCancel={() => setRoute({ kind: 'library' })}
+        onCreated={(project) => setRoute({ kind: 'overview', project })}
+      />
+    );
+  }
+
+  if (route.kind === 'overview') {
+    return (
+      <ProjectOverview
+        onBack={() => setRoute({ kind: 'library' })}
+        project={route.project}
+      />
+    );
   }
 
   return (
@@ -89,13 +123,16 @@ export function App() {
         </div>
         <p className="nl-eyebrow">{t('setup.eyebrow')}</p>
         <ReadinessContent
-          onContinue={() => setLibraryOpen(true)}
+          onContinue={() => setRoute({ kind: 'library' })}
           onRetry={() => void checkReadiness()}
           view={view}
         />
       </section>
 
-      <aside className="nl-setup__assurance" aria-label="本地使用说明">
+      <aside
+        className="nl-setup__assurance"
+        aria-label={t('setup.assuranceLabel')}
+      >
         <AssuranceItem
           body={t('setup.localData.body')}
           icon={ShieldCheck}
@@ -255,26 +292,5 @@ function AssuranceItem({
         <p>{body}</p>
       </div>
     </section>
-  );
-}
-
-function LibraryPlaceholder({ onBack }: { onBack: () => void }) {
-  return (
-    <main className="nl-library-empty">
-      <div className="nl-brand">
-        <BookOpenText aria-hidden size={26} weight="fill" />
-        <span>{t('app.brand')}</span>
-      </div>
-      <p className="nl-eyebrow">{t('library.eyebrow')}</p>
-      <h1>{t('library.title')}</h1>
-      <section aria-labelledby="empty-library-title">
-        <h2 id="empty-library-title">{t('library.emptyTitle')}</h2>
-        <p>{t('library.emptyBody')}</p>
-      </section>
-      <button className="nl-secondary-action" onClick={onBack} type="button">
-        <ArrowClockwise aria-hidden size={18} />
-        {t('library.back')}
-      </button>
-    </main>
   );
 }

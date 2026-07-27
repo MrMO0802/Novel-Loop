@@ -13,6 +13,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { App } from '../../src/renderer/src/App';
 import type {
+  NovelLoopDesktopApi
+} from '../../src/shared/desktopApi';
+import type {
   SystemReadiness
 } from '../../src/shared/systemContract';
 
@@ -46,8 +49,23 @@ function installReadiness(
     value: {
       system: {
         getReadiness
+      },
+      projects: {
+        list: vi.fn().mockResolvedValue({
+          projects: [],
+          defaultLocation: {
+            configured: false,
+            locationLabel: null
+          },
+          warning: null
+        }),
+        chooseDefaultLibrary: vi.fn(),
+        create: vi.fn(),
+        openExisting: vi.fn(),
+        open: vi.fn(),
+        remove: vi.fn()
       }
-    }
+    } satisfies NovelLoopDesktopApi
   });
   return getReadiness;
 }
@@ -85,6 +103,24 @@ describe('production first-launch readiness', () => {
     expect(document.body).not.toHaveTextContent(
       /CODEX_READY|private|auth|token|json/i
     );
+  });
+
+  test('enters the real project library from readiness', async () => {
+    installReadiness(baseReadiness);
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', {
+      name: '进入作品库'
+    }));
+    expect(await screen.findByRole('heading', {
+      level: 1,
+      name: '作品库'
+    })).toHaveFocus();
+    expect(screen.getByRole('button', { name: '新建小说' })).toBeEnabled();
+    expect(screen.getByRole('button', {
+      name: '打开已有项目'
+    })).toBeEnabled();
   });
 
   test.each([

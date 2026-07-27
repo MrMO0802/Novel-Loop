@@ -9,7 +9,8 @@ import {
 } from '../../shared/systemContract';
 import type { SystemReadinessService } from './SystemReadinessService';
 
-const CODEX_STATUS_COMMAND_TIMEOUT_MS = 5_000;
+// A cold `codex doctor` can take several seconds while loading local state.
+const CODEX_STATUS_COMMAND_TIMEOUT_MS = 15_000;
 
 export type EngineReadinessReader = () => Promise<DesktopSystemReadiness>;
 

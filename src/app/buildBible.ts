@@ -13,6 +13,10 @@ import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
 import { BuildBibleCacheReportSchema } from '../schemas/index.js';
 import type { BuildBibleCacheReport } from '../schemas/index.js';
+import {
+  acquireProjectBuildLock,
+  type ProjectBuildLock
+} from './projectBuildLock.js';
 
 export type BuildBibleStage =
   | 'preparing'
@@ -66,6 +70,7 @@ const DEFAULT_PROJECTS_ROOT = './projects';
 const PACKAGE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const DEFAULT_PROMPT_ROOT = path.join(PACKAGE_ROOT, 'prompts');
 const DEFAULT_FIXTURES_ROOT = path.join(PACKAGE_ROOT, 'fixtures', 'llm');
+const MAX_BUILD_BIBLE_ARTIFACT_BYTES = 2 * 1024 * 1024;
 
 const BUILD_BIBLE_PROMPTS: MarkdownPromptArtifact[] = [
   {
@@ -114,7 +119,9 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
     }
   });
 
+  let buildLock: ProjectBuildLock | undefined;
   try {
+    buildLock = await acquireProjectBuildLock(paths.projectRoot);
     await reportProgress(input, { stage: 'preparing', state: 'started' });
     const brief = await fileStore.readText(paths.brief());
     const briefHash = sha256(brief);
@@ -204,6 +211,13 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
         user: renderedPrompt,
         responseFormat: 'markdown'
       });
+      if (Buffer.byteLength(response.text, 'utf8') > MAX_BUILD_BIBLE_ARTIFACT_BYTES) {
+        throw new AppError(
+          'BUILD_BIBLE_INVALID_OUTPUT',
+          'Generated Story Foundation output exceeds the 2 MiB document limit.',
+          2
+        );
+      }
       const outputPath = path.join(paths.strategyDir(), promptArtifact.outputPath);
 
       await writePromptRunArtifacts(fileStore, paths, runId, promptArtifact.promptId, renderedPrompt, response.text);
@@ -264,6 +278,8 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
     });
     await runLogger.endRun(runId, 'failed');
     throw error;
+  } finally {
+    await buildLock?.release();
   }
 }
 

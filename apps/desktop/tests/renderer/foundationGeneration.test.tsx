@@ -2,7 +2,14 @@
 
 import '@testing-library/jest-dom/vitest';
 
-import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within
+} from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { App } from '../../src/renderer/src/App';
@@ -27,6 +34,19 @@ const incompleteProject: ProjectSummary = {
   locationLabel: '我的小说',
   storyBibleAvailable: false,
   globalPlanAvailable: false
+};
+const completeProject: ProjectSummary = {
+  ...incompleteProject,
+  storyBibleAvailable: true
+};
+const completeReview = {
+  available: true as const,
+  documents: [
+    { kind: 'story_bible' as const, title: '故事核心', markdown: '# 故事核心' },
+    { kind: 'genre_contract' as const, title: '类型边界', markdown: '# 类型边界' },
+    { kind: 'reader_promise' as const, title: '读者期待', markdown: '# 读者期待' },
+    { kind: 'style_guide' as const, title: '写作风格', markdown: '# 写作风格' }
+  ]
 };
 
 function foundationTask(overrides: Partial<FoundationTask> = {}): FoundationTask {
@@ -94,6 +114,8 @@ describe('Story Foundation generation', () => {
     render(<App />);
     await openGeneration();
     expect(screen.getByRole('heading', { name: '生成故事基础' })).toBeVisible();
+    expect(screen.getByText('生成通常需要几分钟，期间不会写入正式故事状态。'))
+      .toBeVisible();
     expect(api.foundation.start).not.toHaveBeenCalled();
     await confirmStart();
     expect(api.foundation.start).toHaveBeenCalledWith({ projectKey });
@@ -109,6 +131,7 @@ describe('Story Foundation generation', () => {
     render(<App />);
     await openGeneration();
     vi.useFakeTimers();
+    vi.setSystemTime('2026-07-28T01:02:05.000Z');
     await confirmStart();
     await act(async () => { await Promise.resolve(); });
     await act(async () => {
@@ -116,6 +139,13 @@ describe('Story Foundation generation', () => {
       await Promise.resolve();
     });
     expect(screen.getByText('正在整理类型边界')).toBeVisible();
+    const stageList = screen.getByRole('list', { name: '故事基础生成阶段' });
+    expect(within(stageList).getAllByRole('listitem')).toHaveLength(7);
+    expect(within(stageList).getByRole('listitem', { name: '读取项目资料，已完成' }))
+      .toBeVisible();
+    expect(within(stageList).getByRole('listitem', { name: '整理类型边界，当前阶段' }))
+      .toHaveAttribute('aria-current', 'step');
+    expect(screen.getByRole('timer')).toHaveTextContent('已用时 2 分钟');
     expect(screen.getByText('停止会在当前步骤完成后生效。')).toBeVisible();
     fireEvent.click(screen.getByRole('button', { name: '完成当前步骤后停止' }));
     expect(api.foundation.cancel).toHaveBeenCalledWith({ taskId: 'foundation_0123456789abcdef' });
@@ -212,6 +242,96 @@ describe('Story Foundation generation', () => {
     expect(screen.getByRole('heading', { name: '故事基础' })).toBeVisible();
   });
 
+  test('refreshes stale overview data when another process completed the foundation', async () => {
+    const api = installApi();
+    api.foundation.start.mockResolvedValue(foundationTask({
+      status: 'failed',
+      canCancel: false,
+      canRetry: false,
+      error: { kind: 'already_complete', message: 'private detail' }
+    }));
+    api.projects.open
+      .mockResolvedValueOnce({ outcome: 'opened', project: incompleteProject })
+      .mockResolvedValueOnce({ outcome: 'opened', project: completeProject });
+    api.foundation.read.mockResolvedValue(completeReview);
+    render(<App />);
+    await openGeneration();
+
+    await confirmStart();
+
+    expect(await screen.findByRole('heading', { name: '故事基础' })).toBeVisible();
+    expect(api.projects.open).toHaveBeenLastCalledWith(projectKey);
+    expect(screen.queryByText('故事基础已经准备完成，请返回项目概览查看。'))
+      .not.toBeInTheDocument();
+  });
+
+  test('recovers after leaving a running task that completes in the background', async () => {
+    const api = installApi();
+    api.foundation.start
+      .mockResolvedValueOnce(foundationTask())
+      .mockResolvedValueOnce(foundationTask({
+        status: 'failed',
+        canCancel: false,
+        canRetry: false,
+        error: { kind: 'already_complete', message: 'private detail' }
+      }));
+    api.projects.open
+      .mockResolvedValueOnce({ outcome: 'opened', project: incompleteProject })
+      .mockResolvedValueOnce({ outcome: 'opened', project: completeProject });
+    api.foundation.read.mockResolvedValue(completeReview);
+    render(<App />);
+    await openGeneration();
+    await confirmStart();
+    expect(await screen.findByText('正在构建故事核心')).toBeVisible();
+
+    fireEvent.click(screen.getAllByRole('button', { name: '返回项目概览' })[0]!);
+    expect(await screen.findByRole('heading', { name: '雾港来信' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '准备生成故事基础' }));
+    await confirmStart();
+
+    expect(await screen.findByRole('heading', { name: '故事基础' })).toBeVisible();
+    expect(api.foundation.start).toHaveBeenCalledTimes(2);
+  });
+
+  test('ignores an already-complete refresh after leaving the generation view', async () => {
+    const api = installApi();
+    let resolveRefresh!: (value: {
+      outcome: 'opened';
+      project: ProjectSummary;
+    }) => void;
+    const refresh = new Promise<{
+      outcome: 'opened';
+      project: ProjectSummary;
+    }>((resolve) => {
+      resolveRefresh = resolve;
+    });
+    api.foundation.start.mockResolvedValue(foundationTask({
+      status: 'failed',
+      canCancel: false,
+      canRetry: false,
+      error: { kind: 'already_complete', message: 'private detail' }
+    }));
+    api.projects.open
+      .mockResolvedValueOnce({ outcome: 'opened', project: incompleteProject })
+      .mockImplementationOnce(async () => refresh);
+    render(<App />);
+    await openGeneration();
+    await confirmStart();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(api.projects.open).toHaveBeenCalledTimes(2);
+
+    fireEvent.click(screen.getAllByRole('button', { name: '返回项目概览' })[0]!);
+    await act(async () => {
+      resolveRefresh({ outcome: 'opened', project: completeProject });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('heading', { name: '雾港来信' })).toBeVisible();
+    expect(screen.queryByRole('heading', { name: '故事基础' })).not.toBeInTheDocument();
+  });
+
   test.each([
     ['codex_unavailable', '暂时无法使用本地 Codex，请确认它已安装并可用后重试。'],
     ['login_required', '请先在系统中登录 Codex，然后重新生成。'],
@@ -219,6 +339,7 @@ describe('Story Foundation generation', () => {
     ['timeout', '生成等待时间过长，故事基础尚未完成。请重试。'],
     ['invalid_output', '生成内容暂时无法使用，请重试。'],
     ['project_unavailable', '当前项目暂时无法读取，请返回作品库后重新打开。'],
+    ['generation_busy', '这个项目正在生成故事基础，请稍后重试。'],
     ['unexpected', '生成时出现意外情况，请重试。']
   ] as const)('uses a natural recovery message for %s', async (kind, message) => {
     const api = installApi();

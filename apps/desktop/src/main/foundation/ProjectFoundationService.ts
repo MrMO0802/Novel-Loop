@@ -150,11 +150,7 @@ export class ProjectFoundationService implements ProjectFoundationApplicationSer
         onProgress: (event) => this.reportProgress(internal, event),
         shouldStop: () => internal.stopRequested
       });
-      if (internal.stopRequested) {
-        this.finishCancelled(internal);
-      } else {
-        this.finishSucceeded(internal);
-      }
+      this.finishSucceeded(internal);
     } catch (error) {
       if (isCancellation(error)) {
         this.finishCancelled(internal);
@@ -299,19 +295,30 @@ function isCancellation(error: unknown): boolean {
 }
 
 function toFoundationErrorKind(error: unknown): FoundationErrorKind {
+  const classification = providerClassification(error);
+  if (classification === 'login_required') return 'login_required';
+  if (classification === 'usage_limit') return 'usage_limit';
+  if (classification === 'invalid_output') return 'invalid_output';
+  if (classification === 'unavailable') return 'codex_unavailable';
+
   const code = errorCode(error);
   if (code === 'ARTIFACT_ALREADY_EXISTS') return 'already_complete';
-  if (code === 'ENOENT' || code.includes('CODEX_UNAVAILABLE') || code.includes('CODEX_EXEC_FAILED')) {
-    return 'codex_unavailable';
-  }
+  if (code === 'BUILD_BIBLE_LOCKED') return 'generation_busy';
   if (code.includes('LOGIN') || code.includes('AUTH')) return 'login_required';
   if (code.includes('USAGE_LIMIT') || code.includes('RATE_LIMIT')) return 'usage_limit';
   if (code.includes('TIMEOUT')) return 'timeout';
-  if (code === 'DESKTOP_STORY_BIBLE_INCOMPLETE'
+  if (code === 'CODEX_OUTPUT_MISSING'
+    || code === 'DESKTOP_STORY_BIBLE_INCOMPLETE'
     || code.includes('SCHEMA')
     || code.includes('INVALID_JSON')
     || code.includes('INVALID_OUTPUT')) {
     return 'invalid_output';
+  }
+  if (code === 'ENOENT'
+    || code === 'CODEX_BINARY_NOT_FOUND'
+    || code.includes('CODEX_UNAVAILABLE')
+    || code.includes('CODEX_EXEC_FAILED')) {
+    return 'codex_unavailable';
   }
   if (code === 'PROJECT_NOT_FOUND'
     || code === 'BRIEF_NOT_FOUND'
@@ -320,6 +327,14 @@ function toFoundationErrorKind(error: unknown): FoundationErrorKind {
     return 'project_unavailable';
   }
   return 'unexpected';
+}
+
+function providerClassification(error: unknown): string {
+  if (typeof error === 'object' && error !== null && 'classification' in error) {
+    const classification = (error as { classification?: unknown }).classification;
+    if (typeof classification === 'string') return classification;
+  }
+  return '';
 }
 
 function errorCode(error: unknown): string {
@@ -350,6 +365,8 @@ function foundationErrorMessage(kind: FoundationErrorKind): string {
       return 'This project is unavailable.';
     case 'already_complete':
       return 'Story Foundation is already complete.';
+    case 'generation_busy':
+      return 'Story Foundation generation is already running for this project.';
     case 'unexpected':
       return 'Story Foundation generation failed unexpectedly.';
   }

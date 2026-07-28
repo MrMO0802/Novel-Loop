@@ -2,6 +2,8 @@
 
 import '@testing-library/jest-dom/vitest';
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
 
@@ -27,6 +29,10 @@ const project: ProjectSummary = {
   storyBibleAvailable: true,
   globalPlanAvailable: false
 };
+const foundationStyles = readFileSync(
+  resolve(process.cwd(), 'src/renderer/src/styles/foundation.css'),
+  'utf8'
+);
 
 function installApi() {
   const api = {
@@ -114,4 +120,10 @@ test('preserves immediate body text and markup-like text without injecting HTML'
   expect(document).toHaveTextContent('正文紧接标题。');
   expect(document).toHaveTextContent('<img src=x onerror=alert(1)>');
   expect(document.querySelector('img')).toBeNull();
+});
+
+test('allows generated review headings to wrap within the reading column', () => {
+  expect(foundationStyles).toMatch(
+    /\.nl-foundation-document h2\s*\{[^}]*overflow-wrap:\s*anywhere;/s
+  );
 });

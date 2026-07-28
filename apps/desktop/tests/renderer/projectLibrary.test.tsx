@@ -10,6 +10,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within
 } from '@testing-library/react';
 import { afterEach, expect, test, vi } from 'vitest';
@@ -752,16 +753,20 @@ test('keyboard focus moves to each new view heading', async () => {
 
   render(<App />);
   await enterProjectLibrary();
-  expect(screen.getByRole('heading', {
-    level: 1,
-    name: '作品库'
-  })).toHaveFocus();
+  await waitFor(() => {
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '作品库'
+    })).toHaveFocus();
+  });
 
   fireEvent.click(screen.getByRole('button', { name: '新建小说' }));
-  expect(await screen.findByRole('heading', {
-    level: 1,
-    name: '新建小说'
-  })).toHaveFocus();
+  await waitFor(() => {
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '新建小说'
+    })).toHaveFocus();
+  });
 
   fireEvent.change(screen.getByLabelText('作品名'), {
     target: { value: '雾港来信' }
@@ -771,10 +776,12 @@ test('keyboard focus moves to each new view heading', async () => {
   });
   fireEvent.click(screen.getByRole('button', { name: '创建小说' }));
 
-  expect(await screen.findByRole('heading', {
-    level: 1,
-    name: '雾港来信'
-  })).toHaveFocus();
+  await waitFor(() => {
+    expect(screen.getByRole('heading', {
+      level: 1,
+      name: '雾港来信'
+    })).toHaveFocus();
+  });
 });
 
 test('project library exposes loading and recoverable retry states', async () => {

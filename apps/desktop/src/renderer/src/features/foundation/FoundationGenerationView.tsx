@@ -19,7 +19,7 @@ import type {
   FoundationTaskStatus
 } from '../../../../shared/foundationContract';
 import type { ProjectSummary } from '../../../../shared/projectContract';
-import { t } from '../../i18n/messages.zh-CN';
+import { formatMessage, t } from '../../i18n/messages.zh-CN';
 
 const POLL_INTERVAL_MS = 750;
 const ACTIVE_STATUSES = new Set<FoundationTaskStatus>([
@@ -36,6 +36,26 @@ const STAGE_LABELS = {
   style_guide: '正在形成写作风格',
   finalizing: '正在检查生成结果',
   completed: '故事基础已准备完成'
+} satisfies Record<FoundationStage, string>;
+
+const STAGE_ORDER: FoundationStage[] = [
+  'preparing',
+  'story_bible',
+  'genre_contract',
+  'reader_promise',
+  'style_guide',
+  'finalizing',
+  'completed'
+];
+
+const STAGE_LIST_LABELS = {
+  preparing: '读取项目资料',
+  story_bible: '构建故事核心',
+  genre_contract: '整理类型边界',
+  reader_promise: '明确读者期待',
+  style_guide: '形成写作风格',
+  finalizing: '检查生成结果',
+  completed: '准备完成'
 } satisfies Record<FoundationStage, string>;
 
 interface FoundationGenerationViewProps {
@@ -73,7 +93,8 @@ export function FoundationGenerationView({
       if (!mounted.current || currentRequest !== requestToken.current) {
         return;
       }
-      if (result.outcome === 'opened' || result.outcome === 'created') {
+      if ((result.outcome === 'opened' || result.outcome === 'created')
+        && result.project.storyBibleAvailable) {
         onCompleted(result.project);
         return;
       }
@@ -89,7 +110,8 @@ export function FoundationGenerationView({
     setTask(nextTask);
     setRefreshWarning(false);
     setStartError(null);
-    if (nextTask.status === 'succeeded') {
+    if (nextTask.status === 'succeeded'
+      || nextTask.error?.kind === 'already_complete') {
       void completeReview();
     }
   }, [completeReview]);
@@ -282,11 +304,58 @@ function GenerationProgress({
   task: FoundationTask;
 }) {
   const stopRequested = task.status === 'stop_requested';
+  const completedStages = new Set(task.completedStages);
+  const [, setElapsedTick] = useState(0);
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      setElapsedTick((tick) => tick + 1);
+    }, 30_000);
+    return () => {
+      window.clearInterval(timer);
+    };
+  }, [task.startedAt]);
+  const elapsedMinutes = Math.max(
+    0,
+    Math.floor((Date.now() - Date.parse(task.startedAt)) / 60_000)
+  );
+
   return (
     <div className="nl-foundation-progress" role="status">
       <CircleNotch aria-hidden className="nl-spin" size={28} />
-      <div>
+      <div className="nl-foundation-progress__body">
         <p className="nl-foundation-progress__stage">{STAGE_LABELS[task.stage]}</p>
+        <p className="nl-foundation-progress__elapsed" role="timer">
+          {formatMessage('foundation.generation.elapsed', { minutes: elapsedMinutes })}
+        </p>
+        <ol
+          aria-label={t('foundation.generation.stageList')}
+          className="nl-foundation-progress__stages"
+        >
+          {STAGE_ORDER.map((stage) => {
+            const stageState = completedStages.has(stage)
+              ? 'completed'
+              : task.stage === stage ? 'current' : 'pending';
+            return (
+              <li
+                aria-current={stageState === 'current' ? 'step' : undefined}
+                aria-label={`${STAGE_LIST_LABELS[stage]}，${stageStateLabel(stageState)}`}
+                className={`nl-foundation-progress__stage-item nl-foundation-progress__stage-item--${stageState}`}
+                key={stage}
+              >
+                {stageState === 'completed' && (
+                  <CheckCircle aria-hidden size={17} weight="fill" />
+                )}
+                {stageState === 'current' && (
+                  <CircleNotch aria-hidden className="nl-spin" size={17} />
+                )}
+                {stageState === 'pending' && (
+                  <span aria-hidden className="nl-foundation-progress__pending-marker" />
+                )}
+                <span>{STAGE_LIST_LABELS[stage]}</span>
+              </li>
+            );
+          })}
+        </ol>
         <p className="nl-foundation-supporting-copy">
           {stopRequested ? t('foundation.generation.stopRequested') : t('foundation.generation.stopNote')}
         </p>
@@ -304,6 +373,12 @@ function GenerationProgress({
       )}
     </div>
   );
+}
+
+function stageStateLabel(stageState: 'completed' | 'current' | 'pending'): string {
+  if (stageState === 'completed') return t('foundation.generation.stageCompleted');
+  if (stageState === 'current') return t('foundation.generation.stageCurrent');
+  return t('foundation.generation.stagePending');
 }
 
 function GenerationFailure({
@@ -352,6 +427,7 @@ function foundationErrorMessage(kind: FoundationErrorKind): string {
     case 'invalid_output': return t('foundation.error.invalidOutput');
     case 'project_unavailable': return t('foundation.error.projectUnavailable');
     case 'already_complete': return t('foundation.error.alreadyComplete');
+    case 'generation_busy': return t('foundation.error.generationBusy');
     case 'unexpected': return t('foundation.error.unexpected');
   }
 }

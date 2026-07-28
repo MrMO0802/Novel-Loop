@@ -202,6 +202,28 @@ describe('ProjectFoundationService', () => {
     });
   });
 
+  test('succeeds when stop is requested during the final in-flight call', async () => {
+    const { gateway, service } = createService();
+    const task = await service.start(projectKey);
+    await eventually(() => expect(gateway.builds).toHaveLength(1));
+    gateway.emit({ stage: 'style_guide', state: 'started' });
+
+    await expect(service.cancel(task.taskId)).resolves.toMatchObject({
+      status: 'stop_requested'
+    });
+    expect(gateway.builds[0]?.input.shouldStop()).toBe(true);
+    gateway.complete();
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'succeeded',
+        stage: 'completed',
+        canRetry: false,
+        error: null
+      });
+    });
+  });
+
   test('never starts when all four documents already exist', async () => {
     const gateway = new DeferredFoundationGateway();
     gateway.reviewResult = completeReview;
@@ -317,9 +339,9 @@ describe('ProjectFoundationService', () => {
 
   test.each([
     ['ENOENT', 'codex_unavailable'],
-    ['CODEX_LOGIN_REQUIRED', 'login_required'],
-    ['CODEX_USAGE_LIMIT', 'usage_limit'],
     ['CODEX_TIMEOUT', 'timeout'],
+    ['CODEX_BINARY_NOT_FOUND', 'codex_unavailable'],
+    ['CODEX_OUTPUT_MISSING', 'invalid_output'],
     ['CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', 'invalid_output'],
     ['PROJECT_NOT_FOUND', 'project_unavailable'],
     ['BRIEF_NOT_FOUND', 'project_unavailable'],

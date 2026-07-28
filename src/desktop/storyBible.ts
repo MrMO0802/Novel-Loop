@@ -1,3 +1,4 @@
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 
 import { z } from 'zod';
@@ -32,6 +33,8 @@ const FOUNDATION_DOCUMENTS = [
 ] as const;
 
 const FOUNDATION_ARTIFACTS: readonly string[] = FOUNDATION_DOCUMENTS.map((document) => document.artifact);
+const MAX_FOUNDATION_DOCUMENT_BYTES = 2 * 1024 * 1024;
+const MAX_FOUNDATION_TOTAL_BYTES = MAX_FOUNDATION_DOCUMENT_BYTES * FOUNDATION_DOCUMENTS.length;
 
 const DesktopStoryBibleResultSchema = z.object({
   artifactCount: z.literal(4),
@@ -109,11 +112,35 @@ export async function readDesktopStoryBible(
   const fileStore = new FileStore();
   const artifactPaths = FOUNDATION_DOCUMENTS.map((document) => paths.projectArtifact(document.artifact));
 
-  if (!(await Promise.all(artifactPaths.map((artifactPath) => fileStore.exists(artifactPath)))).every(Boolean)) {
+  const artifactStats = await Promise.all(artifactPaths.map(async (artifactPath) => {
+    try {
+      return await lstat(artifactPath);
+    } catch (error) {
+      if (isNotFoundError(error)) return undefined;
+      throw error;
+    }
+  }));
+  if (artifactStats.some((artifactStat) => artifactStat === undefined)) {
     return DesktopStoryBibleReviewSchema.parse({ available: false });
+  }
+  if (artifactStats.some((artifactStat) => !artifactStat?.isFile())) {
+    throw invalidFoundationOutput('A Story Foundation document is not a regular file.');
+  }
+  if (artifactStats.some((artifactStat) => artifactStat !== undefined
+    && artifactStat.size > MAX_FOUNDATION_DOCUMENT_BYTES)) {
+    throw invalidFoundationOutput('A Story Foundation document exceeds the 2 MiB limit.');
+  }
+  if (artifactStats.reduce((total, artifactStat) => total + (artifactStat?.size ?? 0), 0)
+    > MAX_FOUNDATION_TOTAL_BYTES) {
+    throw invalidFoundationOutput('The Story Foundation exceeds the 8 MiB total limit.');
   }
 
   const markdown = await Promise.all(artifactPaths.map((artifactPath) => fileStore.readText(artifactPath)));
+  const markdownSizes = markdown.map((document) => Buffer.byteLength(document, 'utf8'));
+  if (markdownSizes.some((size) => size > MAX_FOUNDATION_DOCUMENT_BYTES)
+    || markdownSizes.reduce((total, size) => total + size, 0) > MAX_FOUNDATION_TOTAL_BYTES) {
+    throw invalidFoundationOutput('The Story Foundation changed while it was being read.');
+  }
   return DesktopStoryBibleReviewSchema.parse({
     available: true,
     documents: FOUNDATION_DOCUMENTS.map((document, index) => ({
@@ -122,4 +149,12 @@ export async function readDesktopStoryBible(
       markdown: markdown[index]
     }))
   });
+}
+
+function invalidFoundationOutput(message: string): AppError {
+  return new AppError('DESKTOP_STORY_BIBLE_INVALID_OUTPUT', message, 2);
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }

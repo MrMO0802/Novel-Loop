@@ -47,6 +47,7 @@ export const FoundationErrorKindSchema = z.enum([
   'invalid_output',
   'project_unavailable',
   'already_complete',
+  'generation_busy',
   'unexpected'
 ]);
 

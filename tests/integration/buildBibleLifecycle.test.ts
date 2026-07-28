@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -29,6 +29,36 @@ afterEach(async () => {
 });
 
 describe('buildBible lifecycle', () => {
+  test('rejects a concurrent project build while its filesystem lock is fresh', async () => {
+    const lockPath = path.join(paths.projectRoot, '.novel-loop-build-bible.lock');
+    await mkdir(lockPath);
+    await writeFile(path.join(lockPath, 'owner.json'), '{"token":"active"}\n');
+
+    await expect(buildBible({
+      projectId,
+      projectsRoot,
+      provider: 'mock',
+      runId: 'run_lifecycle_locked'
+    })).rejects.toMatchObject({ code: 'BUILD_BIBLE_LOCKED' });
+    expect(await fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md'))).toBe(false);
+  });
+
+  test('recovers a crashed build lock after its bounded stale interval', async () => {
+    const lockPath = path.join(paths.projectRoot, '.novel-loop-build-bible.lock');
+    await mkdir(lockPath);
+    await writeFile(path.join(lockPath, 'owner.json'), '{"token":"crashed"}\n');
+    const staleAt = new Date(Date.now() - 11 * 60 * 1000);
+    await utimes(lockPath, staleAt, staleAt);
+
+    await expect(buildBible({
+      projectId,
+      projectsRoot,
+      provider: 'mock',
+      runId: 'run_lifecycle_stale_lock'
+    })).resolves.toBeDefined();
+    expect(await fileStore.exists(lockPath)).toBe(false);
+  });
+
   test('reports ordered stages and leaves Story State unchanged', async () => {
     const before = await fileStore.readText(paths.storyState());
     const events: BuildBibleProgressEvent[] = [];

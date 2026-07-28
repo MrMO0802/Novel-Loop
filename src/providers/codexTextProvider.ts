@@ -37,16 +37,29 @@ export interface CodexTextProviderOptions {
   };
 }
 
+export type CodexProviderFailureClassification =
+  | 'unavailable'
+  | 'login_required'
+  | 'usage_limit'
+  | 'invalid_output';
+
 export class ProviderError extends Error {
   readonly code: string;
   readonly provider = 'codex-text';
   readonly recoverable: boolean;
+  readonly classification: CodexProviderFailureClassification | undefined;
 
-  constructor(code: string, message: string, recoverable = true) {
+  constructor(
+    code: string,
+    message: string,
+    recoverable = true,
+    classification?: CodexProviderFailureClassification
+  ) {
     super(message);
     this.name = 'ProviderError';
     this.code = code;
     this.recoverable = recoverable;
+    this.classification = classification;
   }
 }
 
@@ -502,37 +515,78 @@ interface FailureAttempt {
 }
 
 function providerErrorFromFailure(error: unknown, errorType: CodexErrorType, useRegisteredSchema: boolean): ProviderError {
-  if (errorType === 'CODEX_OUTPUT_MISSING') return new ProviderError('CODEX_OUTPUT_MISSING', getErrorMessage(error));
+  if (errorType === 'CODEX_OUTPUT_MISSING') {
+    return new ProviderError('CODEX_OUTPUT_MISSING', getErrorMessage(error), true, 'invalid_output');
+  }
   if (errorType === 'CODEX_REPAIR_FAILED') return new ProviderError('CODEX_REPAIR_FAILED', getErrorMessage(error));
-  if (useRegisteredSchema && errorType === 'CODEX_INVALID_JSON') return new ProviderError('CODEX_INVALID_JSON', getErrorMessage(error));
-  if (useRegisteredSchema && errorType === 'CODEX_SCHEMA_VALIDATION_FAILED') return new ProviderError('CODEX_SCHEMA_VALIDATION_FAILED', getErrorMessage(error));
+  if (useRegisteredSchema && errorType === 'CODEX_INVALID_JSON') {
+    return new ProviderError('CODEX_INVALID_JSON', getErrorMessage(error), true, 'invalid_output');
+  }
+  if (useRegisteredSchema && errorType === 'CODEX_SCHEMA_VALIDATION_FAILED') {
+    return new ProviderError(
+      'CODEX_SCHEMA_VALIDATION_FAILED',
+      getErrorMessage(error),
+      true,
+      'invalid_output'
+    );
+  }
   return normalizeProviderError(error);
 }
 
 function normalizeProviderError(error: unknown): ProviderError {
   if (error instanceof ProviderError) return error;
   if (error instanceof JsonResponseParseError) {
-    return new ProviderError('INVALID_JSON', error.message);
+    return new ProviderError('INVALID_JSON', error.message, true, 'invalid_output');
   }
   if (error instanceof AppError) {
     if (error.code === 'CODEX_TIMEOUT') {
       return new ProviderError('CODEX_TIMEOUT', error.message);
     }
     if (error.code === 'CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED') {
-      return new ProviderError('SCHEMA_VALIDATION_FAILED', error.message);
+      return new ProviderError(
+        'SCHEMA_VALIDATION_FAILED',
+        error.message,
+        true,
+        'invalid_output'
+      );
     }
     if (error.code === 'CODEX_BINARY_NOT_FOUND') {
-      return new ProviderError('CODEX_BINARY_NOT_FOUND', error.message);
+      return new ProviderError(
+        'CODEX_BINARY_NOT_FOUND',
+        error.message,
+        true,
+        'unavailable'
+      );
     }
     if (error.code === 'CODEX_EXEC_FAILED') {
-      return new ProviderError('CODEX_EXEC_FAILED', error.message);
+      return new ProviderError(
+        'CODEX_EXEC_FAILED',
+        error.message,
+        true,
+        classifyExecFailure(error.message)
+      );
     }
     if (error.code === 'CODEX_OUTPUT_MISSING') {
-      return new ProviderError('CODEX_OUTPUT_MISSING', error.message);
+      return new ProviderError(
+        'CODEX_OUTPUT_MISSING',
+        error.message,
+        true,
+        'invalid_output'
+      );
     }
     return new ProviderError(error.code, error.message);
   }
   return new ProviderError('CODEX_PROVIDER_ERROR', getErrorMessage(error));
+}
+
+function classifyExecFailure(message: string): CodexProviderFailureClassification {
+  if (/usage limit|rate limit|quota|too many requests|limit reached|\b429\b/i.test(message)) {
+    return 'usage_limit';
+  }
+  if (/not logged in|login required|run\s+codex\s+login|please (?:sign|log) in|authentication required|unauthorized|invalid (?:auth|credential)/i.test(message)) {
+    return 'login_required';
+  }
+  return 'unavailable';
 }
 
 function isRepairableJsonError(error: unknown): boolean {

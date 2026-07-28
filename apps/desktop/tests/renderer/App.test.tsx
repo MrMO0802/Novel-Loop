@@ -195,7 +195,8 @@ describe('production first-launch readiness', () => {
     await screen.findByRole('heading', { name: '状态边界' });
     fireEvent.click(screen.getByRole('button', { name: '准备生成故事基础' }));
 
-    expect(screen.getByText('生成期间不会写入正式故事状态。')).toBeVisible();
+    expect(screen.getByText('生成通常需要几分钟，期间不会写入正式故事状态。'))
+      .toBeVisible();
     expect(foundationStart).not.toHaveBeenCalled();
   });
 

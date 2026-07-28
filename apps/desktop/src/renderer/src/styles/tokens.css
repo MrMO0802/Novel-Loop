@@ -1,0 +1,22 @@
+:root {
+  color-scheme: light;
+  font-family:
+    "Noto Sans CJK SC",
+    "Source Han Sans SC",
+    "Microsoft YaHei",
+    sans-serif;
+  font-synthesis: none;
+  --nl-canvas: #f3f5f1;
+  --nl-surface: #ffffff;
+  --nl-text: #1f2521;
+  --nl-muted: #68726b;
+  --nl-accent: #285f4b;
+  --nl-accent-strong: #1e4c3b;
+  --nl-accent-soft: #e8f0eb;
+  --nl-warning: #8a5b17;
+  --nl-warning-soft: #f5eee2;
+  --nl-danger: #8a3d38;
+  --nl-danger-soft: #f5e9e7;
+  --nl-border: #d7ddd8;
+  --nl-shadow: 0 20px 60px rgb(31 37 33 / 8%);
+}

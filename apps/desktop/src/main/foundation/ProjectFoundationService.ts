@@ -307,10 +307,16 @@ function toFoundationErrorKind(error: unknown): FoundationErrorKind {
   if (code.includes('LOGIN') || code.includes('AUTH')) return 'login_required';
   if (code.includes('USAGE_LIMIT') || code.includes('RATE_LIMIT')) return 'usage_limit';
   if (code.includes('TIMEOUT')) return 'timeout';
-  if (code.includes('SCHEMA') || code.includes('INVALID_JSON') || code.includes('INVALID_OUTPUT')) {
+  if (code === 'DESKTOP_STORY_BIBLE_INCOMPLETE'
+    || code.includes('SCHEMA')
+    || code.includes('INVALID_JSON')
+    || code.includes('INVALID_OUTPUT')) {
     return 'invalid_output';
   }
-  if (code.includes('PROJECT_UNAVAILABLE') || code.includes('PROJECT_DATA_INVALID')) {
+  if (code === 'PROJECT_NOT_FOUND'
+    || code === 'BRIEF_NOT_FOUND'
+    || code.includes('PROJECT_UNAVAILABLE')
+    || code.includes('PROJECT_DATA_INVALID')) {
     return 'project_unavailable';
   }
   return 'unexpected';

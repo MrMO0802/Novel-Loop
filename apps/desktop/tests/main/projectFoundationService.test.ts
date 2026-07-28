@@ -321,6 +321,9 @@ describe('ProjectFoundationService', () => {
     ['CODEX_USAGE_LIMIT', 'usage_limit'],
     ['CODEX_TIMEOUT', 'timeout'],
     ['CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', 'invalid_output'],
+    ['PROJECT_NOT_FOUND', 'project_unavailable'],
+    ['BRIEF_NOT_FOUND', 'project_unavailable'],
+    ['DESKTOP_STORY_BIBLE_INCOMPLETE', 'invalid_output'],
     ['OTHER_FAILURE', 'unexpected']
   ] as const)('maps %s failures to the %s author-safe category', async (code, kind) => {
     const { gateway, service } = createService();

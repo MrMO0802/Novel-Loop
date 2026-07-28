@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
@@ -55,6 +56,35 @@ describe('desktop Story Bible', () => {
     });
   });
 
+  test('keeps canonical state and chapter artifacts untouched during generation', async () => {
+    const originalCodexBin = process.env.NLE_CODEX_BIN;
+    const fake = await writeFakeCodex(projectsRoot);
+
+    try {
+      process.env.NLE_CODEX_BIN = fake.codexBin;
+      const before = {
+        storyState: await sha256(paths.storyState())
+      };
+
+      const { buildDesktopStoryBible } = await import('../../src/desktop/storyBible.js');
+      await buildDesktopStoryBible({ projectRoot: paths.projectRoot });
+
+      expect(await sha256(paths.storyState())).toBe(before.storyState);
+      expect(await fileStore.exists(paths.chapterQueue())).toBe(false);
+      expect(await fileStore.exists(paths.chapterDir(1))).toBe(false);
+      expect(await fileStore.list(paths.snapshotsDir())).toEqual([]);
+      expect(await fileStore.list(paths.diffsDir())).toEqual([]);
+      expect(await fileStore.exists(paths.chapterArtifact(1, 'canon_patch.json'))).toBe(false);
+      expect(await fileStore.exists(paths.chapterArtifact(1, 'commit_report.json'))).toBe(false);
+    } finally {
+      if (originalCodexBin === undefined) {
+        delete process.env.NLE_CODEX_BIN;
+      } else {
+        process.env.NLE_CODEX_BIN = originalCodexBin;
+      }
+    }
+  });
+
   test('uses packaged prompt fixtures and output schemas after cwd changes', async () => {
     const originalCwd = process.cwd();
     const originalCodexBin = process.env.NLE_CODEX_BIN;
@@ -83,3 +113,7 @@ describe('desktop Story Bible', () => {
     }
   });
 });
+
+async function sha256(filePath: string): Promise<string> {
+  return createHash('sha256').update(await readFile(filePath)).digest('hex');
+}

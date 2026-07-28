@@ -16,6 +16,9 @@ import type {
   NovelLoopDesktopApi
 } from '../../src/shared/desktopApi';
 import type {
+  ProjectSummary
+} from '../../src/shared/projectContract';
+import type {
   SystemReadiness
 } from '../../src/shared/systemContract';
 
@@ -32,6 +35,18 @@ const baseReadiness: SystemReadiness = {
     summary: '本地 Codex 已准备好。',
     version: 'codex-cli 1.2.3'
   }
+};
+
+const incompleteProject: ProjectSummary = {
+  projectKey: 'project_0123456789abcdef01234567',
+  title: '状态边界',
+  latestCommittedChapter: 0,
+  health: 'ready',
+  lastOpenedAt: '2026-07-28T03:00:00.000Z',
+  briefExcerpt: '故事基础只能生成策略文档。',
+  locationLabel: '测试作品库',
+  storyBibleAvailable: false,
+  globalPlanAvailable: false
 };
 
 afterEach(() => {
@@ -144,6 +159,44 @@ describe('production first-launch readiness', () => {
       level: 1,
       name: '本地创作环境已准备好'
     })).toHaveFocus();
+  });
+
+  test('shows Story Foundation state protection before generation begins', async () => {
+    const foundationStart = vi.fn();
+    Object.defineProperty(window, 'novelLoop', {
+      configurable: true,
+      value: {
+        system: { getReadiness: vi.fn().mockResolvedValue(baseReadiness) },
+        projects: {
+          list: vi.fn().mockResolvedValue({
+            projects: [incompleteProject],
+            defaultLocation: { configured: true, locationLabel: '测试作品库' },
+            warning: null
+          }),
+          chooseDefaultLibrary: vi.fn(),
+          create: vi.fn(),
+          openExisting: vi.fn(),
+          open: vi.fn().mockResolvedValue({ outcome: 'opened', project: incompleteProject }),
+          remove: vi.fn()
+        },
+        foundation: {
+          start: foundationStart,
+          get: vi.fn(),
+          cancel: vi.fn(),
+          read: vi.fn()
+        }
+      } satisfies NovelLoopDesktopApi
+    });
+
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '进入作品库' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开《状态边界》' }));
+    await screen.findByRole('heading', { name: '状态边界' });
+    fireEvent.click(screen.getByRole('button', { name: '准备生成故事基础' }));
+
+    expect(screen.getByText('生成期间不会写入正式故事状态。')).toBeVisible();
+    expect(foundationStart).not.toHaveBeenCalled();
   });
 
   test.each([

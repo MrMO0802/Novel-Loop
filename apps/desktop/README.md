@@ -6,10 +6,10 @@ shell, a Chinese-first first-launch readiness flow, and a usable local Project
 Library.
 
 Authors can create a new Novel Loop project from a short brief, open a valid
-existing project, return to recent projects, and inspect a read-only project
-overview. This milestone does not generate Story Bible or planning artifacts,
-write chapters, change Story State or the chapter queue, commit chapters, roll
-back snapshots, or restore archives.
+existing project, return to recent projects, inspect a project overview, and
+generate and review a Story Foundation. This milestone does not expose global
+planning, chapter writing, Story State or chapter-queue changes, chapter
+commits, snapshot rollback, or archive restore.
 
 ## Architecture Boundary
 
@@ -21,7 +21,7 @@ React renderer
   -> Novel Loop Engine desktop adapter
 ```
 
-The renderer receives named system and project methods:
+The renderer receives named system, project, and Story Foundation methods:
 
 ```ts
 window.novelLoop.system.getReadiness();
@@ -31,6 +31,10 @@ window.novelLoop.projects.create(request);
 window.novelLoop.projects.openExisting();
 window.novelLoop.projects.open(projectKey);
 window.novelLoop.projects.remove(projectKey);
+window.novelLoop.foundation.start({ projectKey });
+window.novelLoop.foundation.get({ taskId });
+window.novelLoop.foundation.cancel({ taskId });
+window.novelLoop.foundation.read({ projectKey });
 ```
 
 The renderer cannot access Node.js, Electron, `ipcRenderer`, the filesystem,
@@ -59,10 +63,29 @@ Removing a recent project changes only the application registry. It does not
 delete, move, or modify project files. Creating a project initializes the
 standard local skeleton from the supplied brief and performs no Codex call.
 
-The project overview is currently read-only. It reports the latest committed
-chapter, project health, Story Bible availability, and global planning
-availability. `准备生成故事基础` is intentionally unavailable until the next
-workflow stage; Story Bible and planning generation are not implemented here.
+The project overview reports the latest committed chapter, project health,
+Story Foundation availability, and global planning availability. It can open
+the Story Foundation workflow, but remains read-only for project planning and
+chapter state.
+
+## Story Foundation Workflow
+
+Story Foundation generation requires a locally ready and logged-in Codex
+installation. From an incomplete project, choose `准备生成故事基础`, review the
+confirmation, and select `开始生成`. No generation starts before that explicit
+confirmation.
+
+Generation runs as a background task and can take several minutes. The author
+sees four visible stages: story core, genre boundaries, reader expectations,
+and writing style. A stop request is cooperative: it takes effect after the
+current Codex step finishes. Failed or cancelled incomplete generation can be
+retried from the workflow.
+
+When complete, the desktop provides a read-only review of exactly four strategy
+documents: Story Bible, Genre Contract, Reader Promise, and Style Guide.
+Completion does not expose planning, chapter, or state-commit actions. Story
+Foundation generation and review do not modify formal Story State, the chapter
+queue, committed chapters, snapshots, diffs, or canon-patch artifacts.
 
 ## Development
 
@@ -136,10 +159,21 @@ Then verify the author workflow:
 
 1. Enter the Project Library after the readiness check.
 2. Create a project and choose a default parent directory when prompted.
-3. Confirm the read-only project overview, then return to the library.
-4. Remove the project from recent projects and confirm its files remain.
-5. Open the same project through the native directory dialog.
-6. Restart the application and confirm the recent entry persists.
+3. Open an incomplete project and select `准备生成故事基础`.
+4. Confirm no generation starts before `开始生成`, then verify the four-stage
+   progress wording and the statement that stopping takes effect after the
+   current Codex step.
+5. If local Codex is ready and quota is available, complete generation and
+   review Story Bible, Genre Contract, Reader Promise, and Style Guide.
+6. Return to the overview and confirm Story Foundation is ready while the
+   latest committed chapter remains unchanged.
+
+The local Electron smoke verifies the built desktop application, preload
+boundary, and Chromium security controls without calling Codex or changing a
+project. A manual run without a ready local Codex can verify confirmation,
+progress wording, and navigation only; it cannot verify a real completion. Use
+a disposable project for an intentional real-Codex author smoke. Do not use the
+manual smoke to claim a Codex completion that was not run.
 
 Run the required real Electron smoke separately:
 
@@ -157,6 +191,11 @@ corepack pnpm --dir apps/desktop test:e2e:required
 - Local project creation from author brief fields without Codex.
 - Recent project persistence, validation, reopening, and registry-only removal.
 - Read-only project overview.
+- Local-Codex Story Foundation generation as a cancellable background task.
+- Read-only review of Story Bible, Genre Contract, Reader Promise, and Style
+  Guide.
+- Story State, chapter queue, planning, and chapter commits remain unavailable
+  from the desktop Story Foundation workflow.
 - Read-only mapping to the existing Codex execution boundary for readiness.
 - First-launch states for ready, missing, logged out, warning, and unavailable.
 - Unit tests for window policy, navigation, IPC, preload, engine mapping, and UI.

@@ -76,10 +76,10 @@ confirmation, and select `开始生成`. No generation starts before that explic
 confirmation.
 
 Generation runs as a background task and can take several minutes. The author
-sees four visible stages: story core, genre boundaries, reader expectations,
-and writing style. A stop request is cooperative: it takes effect after the
-current Codex step finishes. Failed or cancelled incomplete generation can be
-retried from the workflow.
+sees four document-generation stages, with preparation and finalization status:
+story core, genre boundaries, reader expectations, and writing style. A stop
+request is cooperative: it takes effect after the current Codex step finishes.
+Failed or cancelled incomplete generation can be retried from the workflow.
 
 When complete, the desktop provides a read-only review of exactly four strategy
 documents: Story Bible, Genre Contract, Reader Promise, and Style Guide.

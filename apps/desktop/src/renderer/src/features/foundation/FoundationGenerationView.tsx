@@ -55,6 +55,7 @@ export function FoundationGenerationView({
   const [task, setTask] = useState<FoundationTask | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
+  const [refreshWarning, setRefreshWarning] = useState(false);
   const [startError, setStartError] = useState<FoundationErrorKind | null>(null);
 
   useEffect(() => {
@@ -86,6 +87,7 @@ export function FoundationGenerationView({
 
   const receiveTask = useCallback((nextTask: FoundationTask) => {
     setTask(nextTask);
+    setRefreshWarning(false);
     setStartError(null);
     if (nextTask.status === 'succeeded') {
       void completeReview();
@@ -145,20 +147,41 @@ export function FoundationGenerationView({
     if (!task || !ACTIVE_STATUSES.has(task.status)) {
       return;
     }
+    let disposed = false;
     const taskId = task.taskId;
-    const timer = window.setTimeout(() => {
+    let timer: number | undefined;
+    const schedulePoll = () => {
+      if (disposed || !mounted.current) {
+        return;
+      }
+      timer = window.setTimeout(() => {
+        void poll();
+      }, POLL_INTERVAL_MS);
+    };
+    const poll = async () => {
       const currentRequest = ++requestToken.current;
-      void window.novelLoop.foundation.get({ taskId }).then((nextTask) => {
+      try {
+        const nextTask = await window.novelLoop.foundation.get({ taskId });
         if (mounted.current && currentRequest === requestToken.current) {
           receiveTask(nextTask);
+          if (ACTIVE_STATUSES.has(nextTask.status)) {
+            schedulePoll();
+          }
         }
-      }).catch(() => {
+      } catch {
         if (mounted.current && currentRequest === requestToken.current) {
-          setStartError('unexpected');
+          setRefreshWarning(true);
+          schedulePoll();
         }
-      });
-    }, POLL_INTERVAL_MS);
-    return () => window.clearTimeout(timer);
+      }
+    };
+    schedulePoll();
+    return () => {
+      disposed = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [receiveTask, task]);
 
   const retry = () => {
@@ -214,11 +237,19 @@ export function FoundationGenerationView({
             </div>
           )}
           {task && ACTIVE_STATUSES.has(task.status) && (
-            <GenerationProgress
-              isStopping={isStopping}
-              onStop={requestStop}
-              task={task}
-            />
+            <>
+              <GenerationProgress
+                isStopping={isStopping}
+                onStop={requestStop}
+                task={task}
+              />
+              {refreshWarning && (
+                <p className="nl-inline-alert nl-inline-alert--warning" role="status">
+                  <WarningCircle aria-hidden size={20} weight="fill" />
+                  {t('foundation.generation.refreshWarning')}
+                </p>
+              )}
+            </>
           )}
           {task?.status === 'succeeded' && (
             <div className="nl-foundation-progress" role="status">

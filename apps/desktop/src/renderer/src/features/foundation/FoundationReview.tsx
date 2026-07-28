@@ -128,12 +128,32 @@ export function FoundationReview({ onBack, project }: FoundationReviewProps) {
 }
 
 function SafeMarkdown({ markdown }: { markdown: string }) {
-  return markdown.split(/\n\s*\n/).filter(Boolean).map((block, index) => {
-    const lines = block.split('\n');
-    const heading = /^(#{1,6})\s+(.+)$/.exec(lines[0] ?? '');
-    if (heading) {
-      return <h2 key={`${index}-${heading[2]}`}>{heading[2]}</h2>;
+  const blocks: Array<{ kind: 'heading' | 'paragraph'; text: string }> = [];
+  let paragraphLines: string[] = [];
+  const flushParagraph = () => {
+    if (paragraphLines.length > 0) {
+      blocks.push({ kind: 'paragraph', text: paragraphLines.join('\n') });
+      paragraphLines = [];
     }
-    return <p key={`${index}-${block}`}>{block}</p>;
+  };
+
+  for (const line of markdown.split('\n')) {
+    const heading = /^(#{1,6})[ \t]+(.*)$/.exec(line);
+    if (heading) {
+      flushParagraph();
+      blocks.push({ kind: 'heading', text: heading[2] ?? '' });
+    } else if (line.trim() === '') {
+      flushParagraph();
+    } else {
+      paragraphLines.push(line);
+    }
+  }
+  flushParagraph();
+
+  return blocks.map((block, index) => {
+    if (block.kind === 'heading') {
+      return <h2 key={`heading-${index}`}>{block.text}</h2>;
+    }
+    return <p key={`paragraph-${index}`}>{block.text}</p>;
   });
 }

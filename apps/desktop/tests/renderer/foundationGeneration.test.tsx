@@ -171,6 +171,47 @@ describe('Story Foundation generation', () => {
     expect(screen.getByRole('heading', { name: '故事基础' })).toBeVisible();
   });
 
+  test('continues polling after a transient refresh failure and enters review on success', async () => {
+    const api = installApi();
+    api.foundation.start.mockResolvedValue(foundationTask());
+    api.foundation.get
+      .mockRejectedValueOnce(new Error('temporary refresh failure'))
+      .mockResolvedValueOnce(foundationTask({
+        status: 'succeeded', stage: 'completed', canCancel: false
+      }));
+    api.projects.open
+      .mockResolvedValueOnce({ outcome: 'opened', project: incompleteProject })
+      .mockResolvedValueOnce({
+        outcome: 'opened', project: { ...incompleteProject, storyBibleAvailable: true }
+      });
+    api.foundation.read.mockResolvedValue({ available: true, documents: [
+      { kind: 'story_bible', title: '故事核心', markdown: '# 故事核心' },
+      { kind: 'genre_contract', title: '类型边界', markdown: '# 类型边界' },
+      { kind: 'reader_promise', title: '读者期待', markdown: '# 读者期待' },
+      { kind: 'style_guide', title: '写作风格', markdown: '# 写作风格' }
+    ] });
+    render(<App />);
+    await openGeneration();
+    vi.useFakeTimers();
+    await confirmStart();
+    await act(async () => { await Promise.resolve(); });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+      await Promise.resolve();
+    });
+    expect(screen.getByText('正在构建故事核心')).toBeVisible();
+    expect(screen.getByText('暂时无法刷新进度，正在继续尝试。')).toBeVisible();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(api.projects.open).toHaveBeenLastCalledWith(projectKey);
+    expect(screen.getByRole('heading', { name: '故事基础' })).toBeVisible();
+  });
+
   test.each([
     ['codex_unavailable', '暂时无法使用本地 Codex，请确认它已安装并可用后重试。'],
     ['login_required', '请先在系统中登录 Codex，然后重新生成。'],

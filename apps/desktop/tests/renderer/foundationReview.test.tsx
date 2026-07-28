@@ -95,10 +95,14 @@ test('moves focus to the route heading and supports keyboard document navigation
   expect(screen.getByText('悬疑与成长并行。')).toBeVisible();
 });
 
-test('renders source markdown as text without injecting HTML', async () => {
+test('preserves immediate body text and markup-like text without injecting HTML', async () => {
   const api = installApi();
   api.foundation.read.mockResolvedValue({ available: true, documents: [
-    { kind: 'story_bible', title: '故事核心', markdown: '# 故事核心\n\n<img src=x onerror=alert(1)>' },
+    {
+      kind: 'story_bible',
+      title: '故事核心',
+      markdown: '# 故事核心\n正文紧接标题。\n<img src=x onerror=alert(1)>'
+    },
     { kind: 'genre_contract', title: '类型边界', markdown: '# 类型边界' },
     { kind: 'reader_promise', title: '读者期待', markdown: '# 读者期待' },
     { kind: 'style_guide', title: '写作风格', markdown: '# 写作风格' }
@@ -106,6 +110,8 @@ test('renders source markdown as text without injecting HTML', async () => {
   render(<App />);
   await openCompleteProject();
   fireEvent.click(screen.getByRole('button', { name: '查看故事基础' }));
-  expect(await screen.findByText('<img src=x onerror=alert(1)>')).toBeVisible();
+  const document = await screen.findByRole('article');
+  expect(document).toHaveTextContent('正文紧接标题。');
+  expect(document).toHaveTextContent('<img src=x onerror=alert(1)>');
   expect(document.querySelector('img')).toBeNull();
 });

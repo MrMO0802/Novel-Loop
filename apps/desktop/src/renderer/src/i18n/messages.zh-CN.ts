@@ -122,6 +122,7 @@ export const zhCN = {
   'foundation.generation.stopping': '正在请求停止',
   'foundation.generation.stopNote': '停止会在当前步骤完成后生效。',
   'foundation.generation.stopRequested': '已请求停止，会在当前步骤完成后生效。',
+  'foundation.generation.refreshWarning': '暂时无法刷新进度，正在继续尝试。',
   'foundation.generation.retry': '重新生成',
   'foundation.error.codexUnavailable': '暂时无法使用本地 Codex，请确认它已安装并可用后重试。',
   'foundation.error.loginRequired': '请先在系统中登录 Codex，然后重新生成。',

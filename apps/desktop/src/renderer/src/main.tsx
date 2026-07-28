@@ -4,6 +4,7 @@ import { App } from './App';
 import './styles/tokens.css';
 import './styles/base.css';
 import './styles/project-library.css';
+import './styles/foundation.css';
 
 const root = document.getElementById('root');
 

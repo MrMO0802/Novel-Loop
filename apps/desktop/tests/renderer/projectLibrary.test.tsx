@@ -723,7 +723,7 @@ test('overview shows story-foundation and global-planning availability', async (
   expect(screen.getByText('尚未准备')).toBeVisible();
 });
 
-test('overview generation command is explicitly unavailable', async () => {
+test('overview enables Story Foundation generation', async () => {
   const projectApi = installProjectApi();
   projectApi.openExisting.mockResolvedValue({
     outcome: 'opened',
@@ -739,8 +739,8 @@ test('overview generation command is explicitly unavailable', async () => {
   const action = await screen.findByRole('button', {
     name: '准备生成故事基础'
   });
-  expect(action).toBeDisabled();
-  expect(screen.getByText('故事基础生成将在下一阶段开放')).toBeVisible();
+  expect(action).toBeEnabled();
+  expect(screen.getByText('生成后可先阅读草稿，再进入后续规划。')).toBeVisible();
 });
 
 test('keyboard focus moves to each new view heading', async () => {
@@ -844,6 +844,23 @@ test('maps a registry warning to fixed author language', async () => {
   expect(screen.getByRole('alert')).toHaveTextContent(
     '最近项目记录暂时无法读取，为保护原记录，请稍后重试'
   );
+});
+
+test('overview enables the next Story Foundation action for incomplete projects', async () => {
+  const projectApi = installProjectApi();
+  projectApi.openExisting.mockResolvedValue({
+    outcome: 'opened',
+    project: readyProject
+  });
+
+  render(<App />);
+  await enterProjectLibrary();
+  fireEvent.click(screen.getByRole('button', { name: '打开已有项目' }));
+
+  expect(await screen.findByRole('button', {
+    name: '准备生成故事基础'
+  })).toBeEnabled();
+  expect(screen.queryByRole('button', { name: '开始全局规划' })).not.toBeInTheDocument();
 });
 
 test('uses a solid high-contrast focus indicator', () => {

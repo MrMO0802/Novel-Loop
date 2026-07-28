@@ -3,6 +3,9 @@ import path from 'node:path';
 
 import { createMainWindow } from './createMainWindow';
 import { NativeProjectDialog } from './dialogs/NativeProjectDialog';
+import { EngineFoundationGateway } from './foundation/EngineFoundationGateway';
+import { ProjectFoundationService } from './foundation/ProjectFoundationService';
+import { registerFoundationHandlers } from './ipc/registerFoundationHandlers';
 import { registerProjectHandlers } from './ipc/registerProjectHandlers';
 import { registerSystemHandlers } from './ipc/registerSystemHandlers';
 import { EngineProjectGateway } from './projects/EngineProjectGateway';
@@ -43,6 +46,10 @@ void app.whenReady().then(() => {
     dialog: projectDialog,
     gateway: projectGateway
   });
+  const foundationService = new ProjectFoundationService({
+    projects: projectService,
+    gateway: new EngineFoundationGateway()
+  });
 
   registerSystemHandlers(
     {
@@ -67,6 +74,19 @@ void app.whenReady().then(() => {
       }
     },
     projectService,
+    rendererTarget.trustedRendererUrl
+  );
+
+  registerFoundationHandlers(
+    {
+      handle: (channel, handler) => {
+        ipcMain.handle(channel, (event, request) => handler(
+          { senderFrame: { url: event.senderFrame?.url ?? '' } },
+          request
+        ));
+      }
+    },
+    foundationService,
     rendererTarget.trustedRendererUrl
   );
 

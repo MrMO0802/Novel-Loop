@@ -114,7 +114,13 @@ function installProjectApi(
       system: {
         getReadiness: vi.fn().mockResolvedValue(readyReadiness)
       },
-      projects
+      projects,
+      foundation: {
+        start: vi.fn(),
+        get: vi.fn(),
+        cancel: vi.fn(),
+        read: vi.fn()
+      }
     } satisfies NovelLoopDesktopApi
   });
 

@@ -5,6 +5,14 @@ import type {
   ProjectOpenResult
 } from './projectContract';
 import type { SystemReadiness } from './systemContract';
+import type {
+  FoundationCancelRequest,
+  FoundationGetRequest,
+  FoundationReadRequest,
+  FoundationReviewResult,
+  FoundationStartRequest,
+  FoundationTask
+} from './foundationContract';
 
 export interface NovelLoopDesktopApi {
   system: {
@@ -17,5 +25,11 @@ export interface NovelLoopDesktopApi {
     openExisting(): Promise<ProjectOpenResult>;
     open(projectKey: string): Promise<ProjectOpenResult>;
     remove(projectKey: string): Promise<ProjectLibraryResult>;
+  };
+  foundation: {
+    start(request: FoundationStartRequest): Promise<FoundationTask>;
+    get(request: FoundationGetRequest): Promise<FoundationTask>;
+    cancel(request: FoundationCancelRequest): Promise<FoundationTask>;
+    read(request: FoundationReadRequest): Promise<FoundationReviewResult>;
   };
 }

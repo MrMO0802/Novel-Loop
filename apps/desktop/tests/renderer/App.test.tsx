@@ -64,6 +64,12 @@ function installReadiness(
         openExisting: vi.fn(),
         open: vi.fn(),
         remove: vi.fn()
+      },
+      foundation: {
+        start: vi.fn(),
+        get: vi.fn(),
+        cancel: vi.fn(),
+        read: vi.fn()
       }
     } satisfies NovelLoopDesktopApi
   });

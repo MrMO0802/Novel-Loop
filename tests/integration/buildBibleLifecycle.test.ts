@@ -43,16 +43,21 @@ describe('buildBible lifecycle', () => {
       }
     });
 
-    expect(events).toEqual(expect.arrayContaining([
+    expect(events).toEqual([
       { stage: 'preparing', state: 'started' },
+      { stage: 'preparing', state: 'completed' },
       { stage: 'story_bible', state: 'started' },
       { stage: 'story_bible', state: 'completed' },
       { stage: 'genre_contract', state: 'started' },
+      { stage: 'genre_contract', state: 'completed' },
       { stage: 'reader_promise', state: 'started' },
+      { stage: 'reader_promise', state: 'completed' },
       { stage: 'style_guide', state: 'started' },
+      { stage: 'style_guide', state: 'completed' },
+      { stage: 'finalizing', state: 'started' },
       { stage: 'finalizing', state: 'completed' },
       { stage: 'completed', state: 'completed' }
-    ]));
+    ]);
     expect(await fileStore.readText(paths.storyState())).toBe(before);
   });
 
@@ -74,7 +79,7 @@ describe('buildBible lifecycle', () => {
 
     expect(await fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md'))).toBe(true);
     expect(await fileStore.exists(path.join(paths.strategyDir(), 'genre_contract.md'))).toBe(false);
-    expect((await fileStore.readJson(paths.runManifest('run_lifecycle_cancelled'), RunManifestSchema)).status).toBe('blocked');
+    expect((await fileStore.readJson(paths.runManifest('run_lifecycle_cancelled'), RunManifestSchema)).status).toBe('cancelled');
   });
 
   test('resumeIncomplete can replace a partial set but not a complete set', async () => {

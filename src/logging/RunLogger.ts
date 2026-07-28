@@ -670,7 +670,6 @@ function buildArgv(command: string, args: Record<string, unknown>): string[] {
 
 function normalizeStatus(status: RunStatus): RunManifestV2['status'] {
   if (status === 'completed' || status === 'human_review_required') return 'success';
-  if (status === 'cancelled') return 'blocked';
   return status;
 }
 

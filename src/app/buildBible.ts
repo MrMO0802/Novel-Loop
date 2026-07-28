@@ -291,7 +291,7 @@ async function ensureCanWriteOutputs(
     2
   );
 
-  if (existingCount === BUILD_BIBLE_PROMPTS.length) {
+  if (existingCount === BUILD_BIBLE_PROMPTS.length && !force) {
     throw artifactAlreadyExists;
   }
   if (existingCount > 0 && resumeIncomplete !== true && !force) {

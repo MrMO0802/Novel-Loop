@@ -518,6 +518,29 @@ describe('ProjectLibraryService', () => {
     expect(fileSystemMocks.access).toHaveBeenCalledWith(projectRoot, constants.R_OK);
   });
 
+  test('resolves only registered readable valid project roots for main-process services', async () => {
+    const { gateway, libraryRoot, registry, service } = await createContext();
+    const projectKey = 'project_0123456789abcdef01234567';
+    const projectRoot = path.join(libraryRoot, 'novel-20260727-120000-a1b2c3');
+    await mkdir(projectRoot);
+    await registry.save({
+      schemaVersion: 1,
+      defaultLibraryRoot: libraryRoot,
+      projects: [createRegistryProject(projectRoot, { projectKey })]
+    });
+
+    await expect(service.resolveProjectRoot(projectKey)).resolves.toBe(projectRoot);
+    await expect(service.resolveProjectRoot('project_missing')).resolves.toBeNull();
+
+    fileSystemMocks.access.mockRejectedValueOnce(Object.assign(new Error('denied'), {
+      code: 'EACCES'
+    }));
+    await expect(service.resolveProjectRoot(projectKey)).resolves.toBeNull();
+
+    gateway.inspection = { valid: false, reason: 'project_data_invalid' };
+    await expect(service.resolveProjectRoot(projectKey)).resolves.toBeNull();
+  });
+
   test('default library dialog errors map to location_unavailable', async () => {
     const { dialog, service } = await createContext();
     dialog.defaultLibraryError = new Error('dialog unavailable');

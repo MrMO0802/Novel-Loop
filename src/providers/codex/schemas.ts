@@ -1,11 +1,14 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 export interface CodexOutputSchemaDescriptor {
   schemaName: string;
   schemaPath: string;
 }
 
-const SCHEMA_ROOT = path.resolve('schemas', 'codex-output');
+const SCHEMA_ROOT = fileURLToPath(
+  new URL('../../../schemas/codex-output/', import.meta.url)
+);
 
 const CODEX_OUTPUT_SCHEMAS: Record<string, CodexOutputSchemaDescriptor> = {
   'strategy.build_story_bible': descriptor('CodexStoryBibleResponseSchema', 'strategy.story_bible.schema.json'),

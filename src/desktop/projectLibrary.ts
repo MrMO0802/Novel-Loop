@@ -42,6 +42,12 @@ export type DesktopProjectInspection =
 
 const MAX_TITLE_LENGTH = 160;
 const MAX_BRIEF_EXCERPT_LENGTH = 320;
+const STORY_BIBLE_ARTIFACTS = [
+  'story_bible.md',
+  'genre_contract.md',
+  'reader_promise.md',
+  'style_guide.md'
+];
 
 export function createDesktopBriefMarkdown(input: DesktopProjectBriefInput): string {
   const title = requireBriefField(input.title);
@@ -110,7 +116,7 @@ export async function inspectDesktopProject(input: InspectDesktopProjectInput): 
     const [storyState, brief, storyBibleAvailable, globalPlanAvailable] = await Promise.all([
       fileStore.readJson(paths.storyState(), StoryStateSchema),
       fileStore.readText(paths.brief()),
-      fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md')),
+      hasCompleteStoryBible(paths, fileStore),
       fileStore.exists(path.join(paths.planningDir(), 'global_outline.md'))
     ]);
     const { title, briefExcerpt } = extractBriefPreview(brief, paths.projectId);
@@ -127,6 +133,12 @@ export async function inspectDesktopProject(input: InspectDesktopProjectInput): 
   } catch {
     return { valid: false, reason: 'project_data_invalid' };
   }
+}
+
+async function hasCompleteStoryBible(paths: ProjectPaths, fileStore: FileStore): Promise<boolean> {
+  return (await Promise.all(STORY_BIBLE_ARTIFACTS.map((artifact) => (
+    fileStore.exists(path.join(paths.strategyDir(), artifact))
+  )))).every(Boolean);
 }
 
 function requireBriefField(value: string): string {

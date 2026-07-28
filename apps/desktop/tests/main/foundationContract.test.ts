@@ -75,11 +75,16 @@ describe('Story Foundation contract', () => {
     })).toThrow();
   });
 
-  test('requires exactly four strict review documents', () => {
+  test('requires exactly one document of each kind and preserves engine order', () => {
+    const engineOrder = [documents[2], documents[0], documents[3], documents[1]];
     expect(FoundationReviewResultSchema.parse({
       available: true,
-      documents
-    })).toMatchObject({ available: true });
+      documents: engineOrder
+    })).toEqual({ available: true, documents: engineOrder });
+    expect(() => FoundationReviewResultSchema.parse({
+      available: true,
+      documents: [documents[0], documents[1], documents[2], documents[0]]
+    })).toThrow();
     expect(() => FoundationReviewResultSchema.parse({
       available: true,
       documents: documents.slice(0, 3)

@@ -1,6 +1,12 @@
 import { z } from 'zod';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
+const FOUNDATION_DOCUMENT_KINDS = [
+  'story_bible',
+  'genre_contract',
+  'reader_promise',
+  'style_guide'
+] as const;
 
 export const ProjectKeySchema = z.string()
   .trim()
@@ -74,12 +80,7 @@ export const FoundationCancelRequestSchema = FoundationGetRequestSchema;
 export const FoundationReadRequestSchema = FoundationStartRequestSchema;
 
 export const FoundationDocumentSchema = z.object({
-  kind: z.enum([
-    'story_bible',
-    'genre_contract',
-    'reader_promise',
-    'style_guide'
-  ]),
+  kind: z.enum(FOUNDATION_DOCUMENT_KINDS),
   title: z.string().trim().min(1).max(160),
   markdown: z.string()
     .max(MAX_MARKDOWN_BYTES)
@@ -96,7 +97,12 @@ export const FoundationReviewResultSchema = z.discriminatedUnion('available', [
   }).strict(),
   z.object({
     available: z.literal(true),
-    documents: z.array(FoundationDocumentSchema).length(4)
+    documents: z.array(FoundationDocumentSchema)
+      .length(FOUNDATION_DOCUMENT_KINDS.length)
+      .refine(
+        (documents) => new Set(documents.map((document) => document.kind)).size === FOUNDATION_DOCUMENT_KINDS.length,
+        { message: 'Review must contain exactly one document of each foundation kind.' }
+      )
   }).strict()
 ]);
 

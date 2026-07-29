@@ -27,6 +27,11 @@ const ACTIVE_STATUSES = new Set<PlanningTaskStatus>([
   'running',
   'stop_requested'
 ]);
+const TERMINAL_STATUSES = new Set<PlanningTaskStatus>([
+  'succeeded',
+  'failed',
+  'cancelled'
+]);
 
 const STAGE_LABELS = {
   preparing: '正在读取故事基础',
@@ -72,6 +77,8 @@ export function PlanningGenerationView({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const requestToken = useRef(0);
   const mounted = useRef(true);
+  const terminalTaskAccepted = useRef(false);
+  const completionRefreshStarted = useRef(false);
   const [task, setTask] = useState<PlanningTask | null>(null);
   const [isStarting, setIsStarting] = useState(false);
   const [isStopping, setIsStopping] = useState(false);
@@ -105,13 +112,20 @@ export function PlanningGenerationView({
   }, [onCompleted, project.projectKey]);
 
   const receiveTask = useCallback((nextTask: PlanningTask) => {
+    if (terminalTaskAccepted.current) return;
+    if (TERMINAL_STATUSES.has(nextTask.status)) {
+      terminalTaskAccepted.current = true;
+    }
     setTask(nextTask);
     setRefreshWarning(false);
     setStartError(null);
     setIsStopping(nextTask.status === 'stop_requested');
     if (nextTask.status === 'succeeded'
       || nextTask.error?.kind === 'already_complete') {
-      void completeReview();
+      if (!completionRefreshStarted.current) {
+        completionRefreshStarted.current = true;
+        void completeReview();
+      }
     }
   }, [completeReview]);
 
@@ -196,6 +210,8 @@ export function PlanningGenerationView({
 
   const retry = () => {
     requestToken.current += 1;
+    terminalTaskAccepted.current = false;
+    completionRefreshStarted.current = false;
     setTask(null);
     setStartError(null);
     setRefreshWarning(false);

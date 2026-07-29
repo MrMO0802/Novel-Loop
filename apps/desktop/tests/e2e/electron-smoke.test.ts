@@ -1,6 +1,6 @@
 import { _electron as electron, expect, test } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { execFile as execFileCallback } from 'node:child_process';
+import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { statSync, readFileSync } from 'node:fs';
 import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -11,6 +11,12 @@ const electronExecutable = require('electron') as string;
 const desktopRoot = path.resolve(__dirname, '../..');
 const repositoryRoot = path.resolve(desktopRoot, '../..');
 const execFile = promisify(execFileCallback);
+const PLANNING_PROMPT_IDS = [
+  'planning.generate_global_outline_text',
+  'planning.generate_volume_outline_text',
+  'planning.generate_arc_map_minimal_json',
+  'planning.generate_chapter_queue_minimal_json'
+] as const;
 
 function readKernelSetting(settingPath: string): string | null {
   try {
@@ -252,8 +258,11 @@ test('authors can complete global planning from Story Foundation without changin
       await expect(page.getByLabel('全局规划生成阶段')).toBeVisible();
       await expect(page.getByText('正在读取故事基础')).toBeVisible();
 
-      await expect(page.getByRole('heading', { name: '全局规划' })).toBeVisible({
-        timeout: 15_000
+      await expect(page.getByRole('heading', {
+        name: '全局规划',
+        exact: true
+      })).toBeVisible({
+        timeout: 45_000
       });
       await expect(page.getByRole('tab', { name: '全书方向' })).toBeVisible();
       await expect(page.getByText('Codex Global Outline')).toBeVisible();
@@ -274,6 +283,25 @@ test('authors can complete global planning from Story Foundation without changin
       await application.close();
     }
 
+    const calls = await readPlanningFakeCalls(
+      path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+    );
+    expect(calls.map((call) => call.promptId)).toEqual(PLANNING_PROMPT_IDS);
+    expect(calls).toHaveLength(PLANNING_PROMPT_IDS.length);
+    for (const call of calls) {
+      expect(call.outputPath.startsWith(`${projectRoot}${path.sep}`)).toBe(true);
+      expect(call.args).toContain('--sandbox');
+      expect(call.args[call.args.indexOf('--sandbox') + 1]).toBe('read-only');
+      expect(call.args).toContain('--ask-for-approval');
+      expect(call.args[call.args.indexOf('--ask-for-approval') + 1]).toBe('never');
+      expect(call.args).not.toEqual(expect.arrayContaining([
+        'workspace-write',
+        'danger-full-access',
+        '--dangerously-bypass-approvals-and-sandbox',
+        '--bypass-approvals-and-sandbox',
+        '--no-sandbox'
+      ]));
+    }
     await expect(sha256(path.join(projectRoot, 'state', 'story_state.json')))
       .resolves.toBe(storyStateHashBefore);
   } finally {
@@ -281,7 +309,47 @@ test('authors can complete global planning from Story Foundation without changin
   }
 });
 
-function electronEnvironment(overrides: Record<string, string>): NodeJS.ProcessEnv {
+test('planning fake Codex rejects unknown commands, prompts, and unsafe execution flags', async () => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), 'novel-loop-electron-fake-codex-')
+  );
+  const projectRoot = path.join(temporaryRoot, 'projects', 'desktop-planning-e2e');
+  const outputPath = path.join(projectRoot, 'codex', 'runs', 'test', 'final_output.md');
+  const fake = await writePlanningFakeCodex(temporaryRoot);
+
+  try {
+    await mkdir(path.dirname(outputPath), { recursive: true });
+    await expect(runFakeCodex(fake.codexBin, ['unsupported-command'], '')).rejects.toThrow(
+      'Unknown fake Codex command'
+    );
+    await expect(runFakeCodex(fake.codexBin, [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--sandbox',
+      'read-only',
+      '--output-last-message',
+      outputPath
+    ], 'PROMPT_ID: planning.unknown_stage\n')).rejects.toThrow(
+      'Unknown planning prompt ID'
+    );
+    await expect(runFakeCodex(fake.codexBin, [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--sandbox',
+      'danger-full-access',
+      '--output-last-message',
+      outputPath
+    ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[0]}\n`)).rejects.toThrow(
+      'Unsafe Codex execution arguments'
+    );
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+function electronEnvironment(overrides: Record<string, string>): Record<string, string> {
   return {
     ...Object.fromEntries(
       Object.entries(process.env).filter(
@@ -314,6 +382,42 @@ async function sha256(filePath: string): Promise<string> {
   return createHash('sha256').update(await readFile(filePath)).digest('hex');
 }
 
+async function readPlanningFakeCalls(filePath: string): Promise<Array<{
+  args: string[];
+  outputPath: string;
+  promptId: string;
+}>> {
+  const contents = await readFile(filePath, 'utf8');
+  return contents.trim().split('\n').filter(Boolean).map((line) => JSON.parse(line) as {
+    args: string[];
+    outputPath: string;
+    promptId: string;
+  });
+}
+
+async function runFakeCodex(
+  binaryPath: string,
+  args: string[],
+  prompt: string
+): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    let stderr = '';
+    child.stderr.on('data', (chunk: Buffer) => {
+      stderr += chunk.toString('utf8');
+    });
+    child.once('error', reject);
+    child.once('close', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(stderr.trim() || `fake Codex exited with ${code ?? 'null'}`));
+    });
+    child.stdin.end(prompt);
+  });
+}
+
 async function writeProjectRegistry(input: {
   projectId: string;
   projectKey: string;
@@ -341,40 +445,103 @@ async function writeProjectRegistry(input: {
 
 async function writePlanningFakeCodex(root: string): Promise<{ codexBin: string }> {
   const codexBin = path.join(root, 'codex');
+  const callsLogPath = path.join(root, 'planning-codex-calls.ndjson');
+  const statePath = path.join(root, 'planning-codex-state.json');
+  const expectedProjectRoot = path.join(
+    root,
+    'projects',
+    'desktop-planning-e2e'
+  );
   const script = `#!/usr/bin/env node
 const fs = require('node:fs');
+const path = require('node:path');
 const args = process.argv.slice(2);
-if (args[0] === '--version') {
+const expectedPromptIds = ${JSON.stringify(PLANNING_PROMPT_IDS)};
+const callsLogPath = ${JSON.stringify(callsLogPath)};
+const statePath = ${JSON.stringify(statePath)};
+const expectedProjectRoot = path.resolve(${JSON.stringify(expectedProjectRoot)});
+if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('codex-cli 9.9.9\\n');
   process.exit(0);
 }
-if (args[0] === 'login' && args[1] === 'status') {
+if (args.length === 2 && args[0] === 'login' && args[1] === 'status') {
   process.stdout.write('Logged in as fake-codex@example.com\\n');
   process.exit(0);
 }
-if (args[0] === 'doctor') {
+if (args.length === 2 && args[0] === 'doctor' && args[1] === '--json') {
   process.stdout.write(JSON.stringify({ ok: true }) + '\\n');
   process.exit(0);
 }
 if (!args.includes('exec')) {
-  process.stderr.write('unknown fake codex command');
+  process.stderr.write('Unknown fake Codex command');
+  process.exit(2);
+}
+const unsafeArguments = [
+  'workspace-write',
+  '--workspace-write',
+  'danger-full-access',
+  '--dangerously-bypass-approvals-and-sandbox',
+  '--bypass-approval-and-sandbox',
+  '--bypass-approvals-and-sandbox',
+  '--no-sandbox',
+  '--disable-sandbox',
+  '--disable-setuid-sandbox',
+  '--full-auto'
+];
+const sandboxIndex = args.indexOf('--sandbox');
+const approvalIndex = args.indexOf('--ask-for-approval');
+const outputIndex = args.indexOf('--output-last-message');
+if (
+  args.filter((arg) => arg === 'exec').length !== 1
+  || unsafeArguments.some((arg) => args.includes(arg))
+  || sandboxIndex === -1
+  || args[sandboxIndex + 1] !== 'read-only'
+  || approvalIndex === -1
+  || args[approvalIndex + 1] !== 'never'
+  || outputIndex === -1
+  || !args[outputIndex + 1]
+) {
+  process.stderr.write('Unsafe Codex execution arguments');
+  process.exit(2);
+}
+const outputPath = path.resolve(args[outputIndex + 1]);
+if (outputPath !== expectedProjectRoot && !outputPath.startsWith(expectedProjectRoot + path.sep)) {
+  process.stderr.write('Codex output artifact path is outside the temporary project');
   process.exit(2);
 }
 const stdin = fs.readFileSync(0, 'utf8');
-const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || 'unknown';
-const outputIndex = args.indexOf('--output-last-message');
-const outputPath = outputIndex >= 0 ? args[outputIndex + 1] : undefined;
+const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || '';
+const completedPromptIds = readCompletedPromptIds();
+if (promptId !== expectedPromptIds[completedPromptIds.length]) {
+  process.stderr.write('Unknown planning prompt ID or unexpected planning prompt order');
+  process.exit(2);
+}
 const outputs = {
   'planning.generate_global_outline_text': '# Codex Global Outline\\n\\nA three chapter opening arc around the radio signal.\\n',
   'planning.generate_volume_outline_text': '# Codex Volume 01 Outline\\n\\nThe radio mystery escalates through the first volume.\\n',
   'planning.generate_arc_map_minimal_json': JSON.stringify({ arcs: [{ id: 'arc_radio', name: 'Radio Signal', type: 'plot', summary: 'The signal pulls Lin Cheng toward the old building.' }] }),
   'planning.generate_chapter_queue_minimal_json': JSON.stringify({ chapters: [{ chapterNumber: 1, title: 'The Radio Wakes', summary: 'The radio speaks without power.', primaryFunction: 'Open the impossible broadcast.', targetDebts: [] }, { chapterNumber: 2, title: 'The Elevator Log', summary: 'The elevator records an impossible stop.', primaryFunction: 'Escalate the building mystery.', targetDebts: [] }, { chapterNumber: 3, title: 'The Missing Floor', summary: 'Lin Cheng finds signs of a hidden floor.', primaryFunction: 'Create a strong midpoint hook.', targetDebts: [] }] })
 };
-const finalText = outputs[promptId] || 'Codex text final\\n';
-if (outputPath) fs.writeFileSync(outputPath, finalText);
+const finalText = outputs[promptId];
+if (typeof finalText !== 'string') {
+  process.stderr.write('Unknown planning prompt ID');
+  process.exit(2);
+}
+fs.writeFileSync(outputPath, finalText);
+fs.writeFileSync(statePath, JSON.stringify([...completedPromptIds, promptId]));
+fs.appendFileSync(callsLogPath, JSON.stringify({ args, outputPath, promptId }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'thread.started' }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: finalText } }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\\n');
+
+function readCompletedPromptIds() {
+  try {
+    const value = JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    return Array.isArray(value) && value.every((item) => typeof item === 'string') ? value : [];
+  } catch {
+    return [];
+  }
+}
 `;
   await writeFile(codexBin, script, { mode: 0o700 });
   await chmod(codexBin, 0o700);

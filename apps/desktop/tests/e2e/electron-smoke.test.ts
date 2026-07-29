@@ -315,10 +315,20 @@ test('planning fake Codex rejects unknown commands, prompts, and unsafe executio
   );
   const projectRoot = path.join(temporaryRoot, 'projects', 'desktop-planning-e2e');
   const outputPath = path.join(projectRoot, 'codex', 'runs', 'test', 'final_output.md');
+  const jsonOutputPath = path.join(projectRoot, 'codex', 'runs', 'test-json', 'final_output.json');
+  const untrustedSchemaPath = path.join(
+    temporaryRoot,
+    'untrusted',
+    'schemas',
+    'codex-output',
+    'slim',
+    'planning.arc_map.slim.schema.json'
+  );
   const fake = await writePlanningFakeCodex(temporaryRoot);
 
   try {
     await mkdir(path.dirname(outputPath), { recursive: true });
+    await mkdir(path.dirname(jsonOutputPath), { recursive: true });
     await expect(runFakeCodex(fake.codexBin, ['unsupported-command'], '')).rejects.toThrow(
       'Unknown fake Codex command'
     );
@@ -328,8 +338,12 @@ test('planning fake Codex rejects unknown commands, prompts, and unsafe executio
       'exec',
       '--sandbox',
       'read-only',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--json',
       '--output-last-message',
-      outputPath
+      outputPath,
+      '-'
     ], 'PROMPT_ID: planning.unknown_stage\n')).rejects.toThrow(
       'Unknown planning prompt ID'
     );
@@ -339,10 +353,74 @@ test('planning fake Codex rejects unknown commands, prompts, and unsafe executio
       'exec',
       '--sandbox',
       'danger-full-access',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--json',
       '--output-last-message',
-      outputPath
+      outputPath,
+      '-'
     ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[0]}\n`)).rejects.toThrow(
       'Unsafe Codex execution arguments'
+    );
+    await expect(runFakeCodex(fake.codexBin, [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--sandbox',
+      'read-only',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--json',
+      '--output-last-message',
+      outputPath,
+      '-',
+      '--model',
+      'unexpected'
+    ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[0]}\n`)).rejects.toThrow(
+      'Unexpected Codex execution arguments'
+    );
+    await expect(runFakeCodex(fake.codexBin, [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--sandbox',
+      'read-only',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--json',
+      '--output-last-message',
+      outputPath,
+      '-'
+    ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[0]}\n`)).resolves.toBeUndefined();
+    await expect(runFakeCodex(fake.codexBin, [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--sandbox',
+      'read-only',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--json',
+      '--output-last-message',
+      outputPath,
+      '-'
+    ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[1]}\n`)).resolves.toBeUndefined();
+    await expect(runFakeCodex(fake.codexBin, [
+      '--ask-for-approval',
+      'never',
+      'exec',
+      '--sandbox',
+      'read-only',
+      '--skip-git-repo-check',
+      '--ephemeral',
+      '--json',
+      '--output-last-message',
+      jsonOutputPath,
+      '--output-schema',
+      untrustedSchemaPath,
+      '-'
+    ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[2]}\n`)).rejects.toThrow(
+      'Unexpected Codex execution arguments'
     );
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
@@ -452,6 +530,7 @@ async function writePlanningFakeCodex(root: string): Promise<{ codexBin: string 
     'projects',
     'desktop-planning-e2e'
   );
+  const expectedSchemaRoot = path.join(repositoryRoot, 'schemas', 'codex-output');
   const script = `#!/usr/bin/env node
 const fs = require('node:fs');
 const path = require('node:path');
@@ -460,6 +539,7 @@ const expectedPromptIds = ${JSON.stringify(PLANNING_PROMPT_IDS)};
 const callsLogPath = ${JSON.stringify(callsLogPath)};
 const statePath = ${JSON.stringify(statePath)};
 const expectedProjectRoot = path.resolve(${JSON.stringify(expectedProjectRoot)});
+const expectedSchemaRoot = path.resolve(${JSON.stringify(expectedSchemaRoot)});
 if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('codex-cli 9.9.9\\n');
   process.exit(0);
@@ -489,24 +569,10 @@ const unsafeArguments = [
   '--full-auto'
 ];
 const sandboxIndex = args.indexOf('--sandbox');
-const approvalIndex = args.indexOf('--ask-for-approval');
-const outputIndex = args.indexOf('--output-last-message');
-if (
-  args.filter((arg) => arg === 'exec').length !== 1
-  || unsafeArguments.some((arg) => args.includes(arg))
+if (unsafeArguments.some((arg) => args.includes(arg))
   || sandboxIndex === -1
-  || args[sandboxIndex + 1] !== 'read-only'
-  || approvalIndex === -1
-  || args[approvalIndex + 1] !== 'never'
-  || outputIndex === -1
-  || !args[outputIndex + 1]
-) {
+  || args[sandboxIndex + 1] !== 'read-only') {
   process.stderr.write('Unsafe Codex execution arguments');
-  process.exit(2);
-}
-const outputPath = path.resolve(args[outputIndex + 1]);
-if (outputPath !== expectedProjectRoot && !outputPath.startsWith(expectedProjectRoot + path.sep)) {
-  process.stderr.write('Codex output artifact path is outside the temporary project');
   process.exit(2);
 }
 const stdin = fs.readFileSync(0, 'utf8');
@@ -514,6 +580,53 @@ const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || '';
 const completedPromptIds = readCompletedPromptIds();
 if (promptId !== expectedPromptIds[completedPromptIds.length]) {
   process.stderr.write('Unknown planning prompt ID or unexpected planning prompt order');
+  process.exit(2);
+}
+const jsonSchemaNames = {
+  'planning.generate_arc_map_minimal_json': 'planning.arc_map.slim.schema.json',
+  'planning.generate_chapter_queue_minimal_json': 'planning.chapter_queue.slim.schema.json'
+};
+const schemaName = jsonSchemaNames[promptId];
+const expectedLength = schemaName === undefined ? 11 : 13;
+const commonArgumentsAreExact = (
+  args.length === expectedLength
+  && args[0] === '--ask-for-approval'
+  && args[1] === 'never'
+  && args[2] === 'exec'
+  && args[3] === '--sandbox'
+  && args[4] === 'read-only'
+  && args[5] === '--skip-git-repo-check'
+  && args[6] === '--ephemeral'
+  && args[7] === '--json'
+  && args[8] === '--output-last-message'
+  && typeof args[9] === 'string'
+);
+const textArgumentsAreExact = schemaName === undefined && args[10] === '-';
+const schemaPath = schemaName === undefined ? '' : path.resolve(args[11] || '');
+const jsonArgumentsAreExact = schemaName !== undefined
+  && args[10] === '--output-schema'
+  && schemaPath === path.join(expectedSchemaRoot, 'slim', schemaName)
+  && args[12] === '-';
+if (!commonArgumentsAreExact || (!textArgumentsAreExact && !jsonArgumentsAreExact)) {
+  process.stderr.write('Unexpected Codex execution arguments');
+  process.exit(2);
+}
+const outputIndex = 8;
+const outputPath = path.resolve(args[outputIndex + 1]);
+if (outputPath !== expectedProjectRoot && !outputPath.startsWith(expectedProjectRoot + path.sep)) {
+  process.stderr.write('Codex output artifact path is outside the temporary project');
+  process.exit(2);
+}
+const outputParts = path.relative(expectedProjectRoot, outputPath).split(path.sep);
+const expectedOutputName = schemaName === undefined ? 'final_output.md' : 'final_output.json';
+if (
+  outputParts.length !== 4
+  || outputParts[0] !== 'codex'
+  || outputParts[1] !== 'runs'
+  || outputParts[2].length === 0
+  || outputParts[3] !== expectedOutputName
+) {
+  process.stderr.write('Unexpected Codex output artifact path');
   process.exit(2);
 }
 const outputs = {

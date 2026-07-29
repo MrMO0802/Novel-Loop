@@ -6,12 +6,15 @@ import { afterEach, describe, expect, test } from 'vitest';
 
 import { buildBible } from '../../../../src/app/buildBible.js';
 import { initProjectFromBriefText } from '../../../../src/app/initProject.js';
+import { ArcMapSchema } from '../../../../src/schemas/index.js';
+import { FileStore } from '../../../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../../../src/storage/ProjectPaths.js';
 import { writeFakeCodex } from '../../../../tests/helpers/fakeCodex.js';
 import { EnginePlanningGateway } from '../../src/main/planning/EnginePlanningGateway';
 
 const projectId = 'planning-state-protection';
 const temporaryDirectories: string[] = [];
+const fileStore = new FileStore();
 
 afterEach(async () => {
   await Promise.all(temporaryDirectories.splice(0).map((directory) => (
@@ -53,6 +56,45 @@ describe('global planning Story State protection', () => {
         shouldStop: () => false
       })).rejects.toBeDefined();
 
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
+  test('preserves Story State while replacing an invalid complete planning review', async () => {
+    const context = await createPlanningProject('valid');
+    const before = await sha256(context.paths.storyState());
+
+    try {
+      await context.gateway.build({
+        projectRoot: context.paths.projectRoot,
+        resumeIncomplete: true,
+        replaceInvalidComplete: false,
+        onProgress: () => undefined,
+        shouldStop: () => false
+      });
+      const arcMapPath = context.paths.projectArtifact('planning/arc_map.json');
+      const arcMap = await fileStore.readJson(arcMapPath, ArcMapSchema);
+      const arc = arcMap.arcs[0];
+      if (arc === undefined) throw new Error('Expected an arc fixture.');
+      await fileStore.writeJson(arcMapPath, {
+        ...arcMap,
+        arcs: [arc, arc]
+      }, ArcMapSchema);
+      await expect(context.gateway.read(context.paths.projectRoot)).rejects.toBeDefined();
+
+      await expect(context.gateway.build({
+        projectRoot: context.paths.projectRoot,
+        resumeIncomplete: true,
+        replaceInvalidComplete: true,
+        onProgress: () => undefined,
+        shouldStop: () => false
+      })).resolves.toBeUndefined();
+
+      await expect(context.gateway.read(context.paths.projectRoot)).resolves.toMatchObject({
+        available: true
+      });
       expect(await sha256(context.paths.storyState())).toBe(before);
     } finally {
       context.restoreCodexBin();

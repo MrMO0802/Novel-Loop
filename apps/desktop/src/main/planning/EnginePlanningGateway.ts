@@ -13,6 +13,7 @@ export interface PlanningEngineGateway {
   build(input: {
     projectRoot: string;
     resumeIncomplete: boolean;
+    replaceInvalidComplete?: boolean;
     onProgress(event: PlanningEngineProgressEvent): void;
     shouldStop(): boolean;
   }): Promise<void>;
@@ -23,6 +24,7 @@ export class EnginePlanningGateway implements PlanningEngineGateway {
   async build(input: {
     projectRoot: string;
     resumeIncomplete: boolean;
+    replaceInvalidComplete?: boolean;
     onProgress(event: PlanningEngineProgressEvent): void;
     shouldStop(): boolean;
   }): Promise<void> {
@@ -30,6 +32,7 @@ export class EnginePlanningGateway implements PlanningEngineGateway {
     await planDesktopGlobal({
       projectRoot: input.projectRoot,
       resumeIncomplete: input.resumeIncomplete,
+      replaceInvalidComplete: input.replaceInvalidComplete === true,
       onProgress: input.onProgress,
       shouldStop: input.shouldStop
     });

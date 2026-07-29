@@ -556,4 +556,3 @@ feature files are modified.
 git add apps/desktop/tests/e2e/electron-smoke.test.ts README.md
 git commit -m "test(desktop): verify global planning author flow"
 ```
-

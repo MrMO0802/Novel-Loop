@@ -73,6 +73,65 @@ describe('desktop global planning', () => {
     expect(JSON.stringify(review)).not.toMatch(/artifactPath|latestRunId|runId|projectsRoot/i);
   });
 
+  test('replaces an invalid complete plan but refuses valid complete and partial plans', async () => {
+    const originalCodexBin = process.env.NLE_CODEX_BIN;
+    const fake = await writeFakeCodex(projectsRoot);
+    try {
+      process.env.NLE_CODEX_BIN = fake.codexBin;
+      await buildBible({ projectId, projectsRoot, provider: 'mock', runId: 'desktop_plan_replace_bible' });
+      await seedPlanningArtifacts();
+
+      await expect(planDesktopGlobal({
+        projectRoot: paths.projectRoot,
+        replaceInvalidComplete: true
+      })).rejects.toMatchObject({ code: 'ARTIFACT_ALREADY_EXISTS' });
+      expect(await fileStore.exists(fake.argsLogPath)).toBe(false);
+
+      const arcMapPath = path.join(paths.planningDir(), 'arc_map.json');
+      await fileStore.writeText(arcMapPath, JSON.stringify({
+        schemaVersion: '1.0',
+        projectId,
+        arcs: [
+          {
+            id: 'arc_duplicate',
+            name: 'Duplicate',
+            type: 'plot',
+            summary: 'First duplicate.',
+            relatedCharacters: [],
+            relatedThreads: []
+          },
+          {
+            id: 'arc_duplicate',
+            name: 'Duplicate',
+            type: 'plot',
+            summary: 'Second duplicate.',
+            relatedCharacters: [],
+            relatedThreads: []
+          }
+        ]
+      }));
+
+      await expect(planDesktopGlobal({
+        projectRoot: paths.projectRoot,
+        replaceInvalidComplete: true
+      })).resolves.toEqual({ artifactCount: 4, completed: true });
+      const repaired = await readDesktopGlobalPlanning({ projectRoot: paths.projectRoot });
+      expect(repaired.available).toBe(true);
+      if (!repaired.available) throw new Error('Expected repaired planning review.');
+      expect(new Set(repaired.arcs.map((arc) => arc.id)).size).toBe(repaired.arcs.length);
+
+      await rm(paths.planningDir(), { recursive: true, force: true });
+      await fileStore.writeText(path.join(paths.planningDir(), 'global_outline.md'), '# Partial\n');
+      await expect(planDesktopGlobal({
+        projectRoot: paths.projectRoot,
+        replaceInvalidComplete: true
+      })).rejects.toMatchObject({ code: 'PLAN_GLOBAL_REPLACE_REQUIRES_COMPLETE' });
+    } finally {
+      if (originalCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
+      else process.env.NLE_CODEX_BIN = originalCodexBin;
+    }
+  }, 30_000);
+
   test('rejects a non-file, oversized Markdown, and invalid JSON before returning review content', async () => {
     await seedPlanningArtifacts();
     const globalOutlinePath = path.join(paths.planningDir(), 'global_outline.md');

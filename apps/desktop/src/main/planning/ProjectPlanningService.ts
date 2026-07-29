@@ -104,10 +104,17 @@ export class ProjectPlanningService implements PlanningApplicationService {
     if (projectRoot === null) return this.createFailedTask(projectKey, 'project_unavailable');
 
     let review: PlanningReviewResult;
+    let replaceInvalidComplete = false;
     try {
       review = PlanningReviewResultSchema.parse(await this.dependencies.gateway.read(projectRoot));
     } catch (error) {
-      return this.createFailedTask(projectKey, toPlanningErrorKind(error));
+      const kind = toPlanningErrorKind(error);
+      if (kind !== 'invalid_output') return this.createFailedTask(projectKey, kind);
+      replaceInvalidComplete = true;
+      review = PlanningReviewResultSchema.parse({
+        available: false,
+        reason: 'not_ready'
+      });
     }
     if (review.available) return this.createFailedTask(projectKey, 'already_complete');
 
@@ -118,14 +125,15 @@ export class ProjectPlanningService implements PlanningApplicationService {
     this.tasks.set(internal.task.taskId, internal);
     this.activeByProject.set(projectKey, internal.task.taskId);
     const task = this.copyTask(internal);
-    void this.run(internal, projectRoot, true).catch(() => undefined);
+    void this.run(internal, projectRoot, true, replaceInvalidComplete).catch(() => undefined);
     return task;
   }
 
   private async run(
     internal: InternalPlanningTask,
     projectRoot: string,
-    resumeIncomplete: boolean
+    resumeIncomplete: boolean,
+    replaceInvalidComplete: boolean
   ): Promise<void> {
     try {
       this.updateTask(internal, {
@@ -137,9 +145,19 @@ export class ProjectPlanningService implements PlanningApplicationService {
       await this.dependencies.gateway.build({
         projectRoot,
         resumeIncomplete,
+        replaceInvalidComplete,
         onProgress: (event) => this.reportProgress(internal, event),
         shouldStop: () => internal.stopRequested
       });
+      const review = PlanningReviewResultSchema.parse(
+        await this.dependencies.gateway.read(projectRoot)
+      );
+      if (!review.available) {
+        throw Object.assign(
+          new Error('Global planning completed without a readable review.'),
+          { code: 'DESKTOP_GLOBAL_PLANNING_INVALID_OUTPUT' }
+        );
+      }
       this.finishSucceeded(internal);
     } catch (error) {
       if (isCancellation(error)) this.finishCancelled(internal);
@@ -284,6 +302,10 @@ function toPlanningErrorKind(error: unknown): PlanningErrorKind {
   if (code === 'BUILD_BIBLE_LOCKED' || code.includes('PLAN_GLOBAL_LOCK')) return 'generation_busy';
   if (code === 'STORY_BIBLE_NOT_FOUND'
     || code === 'STORY_BIBLE_MISSING'
+    || code === 'BRIEF_NOT_FOUND'
+    || code === 'GENRE_CONTRACT_NOT_FOUND'
+    || code === 'READER_PROMISE_NOT_FOUND'
+    || code === 'STYLE_GUIDE_NOT_FOUND'
     || code.includes('FOUNDATION_MISSING')) return 'foundation_missing';
   if (code.includes('LOGIN') || code.includes('AUTH')) return 'login_required';
   if (code.includes('USAGE_LIMIT') || code.includes('RATE_LIMIT')) return 'usage_limit';
@@ -305,7 +327,6 @@ function toPlanningErrorKind(error: unknown): PlanningErrorKind {
     return 'codex_unavailable';
   }
   if (code === 'PROJECT_NOT_FOUND'
-    || code === 'BRIEF_NOT_FOUND'
     || code.includes('PROJECT_UNAVAILABLE')
     || code.includes('PROJECT_DATA_INVALID')) {
     return 'project_unavailable';

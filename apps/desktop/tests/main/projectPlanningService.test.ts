@@ -35,26 +35,42 @@ class FakeProjectRootResolver implements ProjectRootResolver {
 
 class DeferredPlanningGateway implements PlanningEngineGateway {
   reviewResult: PlanningReviewResult = { available: false, reason: 'not_ready' };
+  reviewError: unknown = null;
   autoComplete = false;
   readonly builds: DeferredBuild[] = [];
   readonly build = vi.fn(async (input: {
     projectRoot: string;
     resumeIncomplete: boolean;
+    replaceInvalidComplete: boolean;
     onProgress(event: PlanningEngineProgressEvent): void;
     shouldStop(): boolean;
   }): Promise<void> => {
     const build = new DeferredBuild(input);
     this.builds.push(build);
-    if (this.autoComplete) build.resolve();
+    if (this.autoComplete) this.complete(this.builds.length - 1);
     await build.promise;
   });
-  readonly read = vi.fn(async (_projectRoot: string): Promise<PlanningReviewResult> => this.reviewResult);
+  readonly read = vi.fn(async (_projectRoot: string): Promise<PlanningReviewResult> => {
+    if (this.reviewError !== null) throw this.reviewError;
+    return this.reviewResult;
+  });
 
   emit(event: PlanningEngineProgressEvent, index = 0): void {
     this.buildAt(index).input.onProgress(event);
   }
 
   complete(index = 0): void {
+    this.reviewError = null;
+    this.reviewResult = completedReview;
+    this.buildAt(index).resolve();
+  }
+
+  completeWithInvalidReview(error: unknown, index = 0): void {
+    this.reviewError = error;
+    this.buildAt(index).resolve();
+  }
+
+  completeWithoutReview(index = 0): void {
     this.buildAt(index).resolve();
   }
 
@@ -83,6 +99,7 @@ class DeferredBuild {
   constructor(readonly input: {
     projectRoot: string;
     resumeIncomplete: boolean;
+    replaceInvalidComplete: boolean;
     onProgress(event: PlanningEngineProgressEvent): void;
     shouldStop(): boolean;
   }) {
@@ -198,7 +215,55 @@ describe('ProjectPlanningService', () => {
     await eventually(() => expect(gateway.builds).toHaveLength(2));
     expect(retry.taskId).not.toBe(first.taskId);
     expect(gateway.builds[1]?.input.resumeIncomplete).toBe(true);
+    expect(gateway.builds[1]?.input.replaceInvalidComplete).toBe(false);
     gateway.complete(1);
+  });
+
+  test('fails before success when complete output is unreadable, then retries with internal replacement', async () => {
+    const { gateway, service } = createService();
+    const first = await service.start(projectKey);
+    await eventually(() => expect(gateway.builds).toHaveLength(1));
+    gateway.completeWithInvalidReview(withCode(
+      'DESKTOP_GLOBAL_PLANNING_INVALID_OUTPUT',
+      'duplicate arc IDs'
+    ));
+
+    await eventually(async () => {
+      await expect(service.get(first.taskId)).resolves.toMatchObject({
+        status: 'failed',
+        canRetry: true,
+        error: { kind: 'invalid_output' }
+      });
+    });
+
+    const retry = await service.start(projectKey);
+    await eventually(() => expect(gateway.builds).toHaveLength(2));
+    expect(gateway.builds[1]?.input).toMatchObject({
+      resumeIncomplete: true,
+      replaceInvalidComplete: true
+    });
+    gateway.complete(1);
+    await eventually(async () => {
+      await expect(service.get(retry.taskId)).resolves.toMatchObject({
+        status: 'succeeded',
+        canRetry: false
+      });
+    });
+  });
+
+  test('does not report success when a completed build still has no readable review', async () => {
+    const { gateway, service } = createService();
+    const task = await service.start(projectKey);
+    await eventually(() => expect(gateway.builds).toHaveLength(1));
+    gateway.completeWithoutReview();
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'failed',
+        canRetry: true,
+        error: { kind: 'invalid_output' }
+      });
+    });
   });
 
   test('does not start when complete planning is already available', async () => {
@@ -231,6 +296,10 @@ describe('ProjectPlanningService', () => {
     ['CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', 'invalid_output'],
     ['CODEX_REPAIR_FAILED', 'invalid_output'],
     ['DESKTOP_GLOBAL_PLANNING_INCOMPLETE', 'invalid_output'],
+    ['BRIEF_NOT_FOUND', 'foundation_missing'],
+    ['GENRE_CONTRACT_NOT_FOUND', 'foundation_missing'],
+    ['READER_PROMISE_NOT_FOUND', 'foundation_missing'],
+    ['STYLE_GUIDE_NOT_FOUND', 'foundation_missing'],
     ['STORY_BIBLE_MISSING', 'foundation_missing'],
     ['PROJECT_NOT_FOUND', 'project_unavailable'],
     ['ARTIFACT_ALREADY_EXISTS', 'already_complete'],

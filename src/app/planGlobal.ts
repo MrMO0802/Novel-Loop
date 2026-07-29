@@ -53,6 +53,7 @@ export interface PlanGlobalInput {
   onProgress?: (event: PlanGlobalProgressEvent) => void | Promise<void>;
   shouldStop?: () => boolean | Promise<boolean>;
   resumeIncomplete?: boolean;
+  replaceInvalidComplete?: boolean;
 }
 
 export interface PlanGlobalResult {
@@ -119,7 +120,12 @@ export async function planGlobal(input: PlanGlobalInput, fileStore = new FileSto
   try {
     buildLock = await acquireProjectBuildLock(paths.projectRoot);
     await reportProgress(input, { stage: 'preparing', state: 'started' });
-    await ensureCanWriteOutputs(paths, fileStore, input.resumeIncomplete);
+    await ensureCanWriteOutputs(
+      paths,
+      fileStore,
+      input.resumeIncomplete,
+      input.replaceInvalidComplete
+    );
     await reportProgress(input, { stage: 'preparing', state: 'completed' });
 
     if (provider === 'codex-text') {
@@ -359,7 +365,9 @@ async function planGlobalWithCodexText(context: PlanningLifecycleContext): Promi
 
 async function runPlanningStage<T>(context: PlanningLifecycleContext, stage: PlanningStage<T>): Promise<T> {
   await reportProgress(context.input, { stage: stage.stage, state: 'started' });
-  if (context.input.resumeIncomplete === true && await context.fileStore.exists(stage.outputPath)) {
+  if (context.input.resumeIncomplete === true
+    && context.input.replaceInvalidComplete !== true
+    && await context.fileStore.exists(stage.outputPath)) {
     const reused = await stage.readExisting();
     await context.runLogger.recordArtifact(context.runId, stage.relativePath, {
       action: 'reused', stage: 'planning', provenanceNote: 'resumed desktop global planning stage'
@@ -387,13 +395,58 @@ async function ensureProjectReady(paths: ProjectPaths, fileStore: FileStore): Pr
   if (!(await fileStore.exists(paths.projectRoot))) {
     throw new AppError('PROJECT_NOT_FOUND', `Project not found: ${paths.projectRoot}`, 2);
   }
-  if (!(await fileStore.exists(path.join(paths.strategyDir(), 'story_bible.md')))) {
-    throw new AppError('STORY_BIBLE_NOT_FOUND', `Story Bible not found for project: ${paths.projectId}`, 2);
+
+  const requiredFoundation = [
+    { code: 'BRIEF_NOT_FOUND', label: 'Project brief', artifactPath: paths.brief() },
+    {
+      code: 'STORY_BIBLE_NOT_FOUND',
+      label: 'Story Bible',
+      artifactPath: path.join(paths.strategyDir(), 'story_bible.md')
+    },
+    {
+      code: 'GENRE_CONTRACT_NOT_FOUND',
+      label: 'Genre contract',
+      artifactPath: path.join(paths.strategyDir(), 'genre_contract.md')
+    },
+    {
+      code: 'READER_PROMISE_NOT_FOUND',
+      label: 'Reader promise',
+      artifactPath: path.join(paths.strategyDir(), 'reader_promise.md')
+    },
+    {
+      code: 'STYLE_GUIDE_NOT_FOUND',
+      label: 'Style guide',
+      artifactPath: path.join(paths.strategyDir(), 'style_guide.md')
+    }
+  ] as const;
+  for (const requirement of requiredFoundation) {
+    if (!(await fileStore.exists(requirement.artifactPath))) {
+      throw new AppError(
+        requirement.code,
+        `${requirement.label} not found for project: ${paths.projectId}`,
+        2
+      );
+    }
   }
 }
 
-async function ensureCanWriteOutputs(paths: ProjectPaths, fileStore: FileStore, resumeIncomplete: boolean | undefined): Promise<void> {
+async function ensureCanWriteOutputs(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  resumeIncomplete: boolean | undefined,
+  replaceInvalidComplete: boolean | undefined
+): Promise<void> {
   const existingCount = (await Promise.all(PLANNING_OUTPUTS.map((artifact) => fileStore.exists(paths.projectArtifact(artifact))))).filter(Boolean).length;
+  if (replaceInvalidComplete === true) {
+    if (existingCount !== PLANNING_OUTPUTS.length) {
+      throw new AppError(
+        'PLAN_GLOBAL_REPLACE_REQUIRES_COMPLETE',
+        'Invalid planning replacement requires all four existing planning artifacts.',
+        2
+      );
+    }
+    return;
+  }
   if (existingCount === PLANNING_OUTPUTS.length || (existingCount > 0 && resumeIncomplete !== true)) {
     throw new AppError('ARTIFACT_ALREADY_EXISTS', `Global planning artifacts already exist: ${paths.planningDir()}`, 2);
   }

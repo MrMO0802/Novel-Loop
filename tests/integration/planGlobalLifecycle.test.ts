@@ -9,6 +9,7 @@ import { planGlobal, type PlanGlobalProgressEvent } from '../../src/app/planGlob
 import { ArcMapSchema, RunManifestSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { writeFakeCodex } from '../helpers/fakeCodex.js';
 
 const projectId = 'plan-global-lifecycle';
 const promptRoot = path.resolve('tests/fixtures/prompts');
@@ -116,6 +117,62 @@ describe('planGlobal lifecycle', () => {
     expect(JSON.stringify(manifest.artifacts)).toContain('resumed desktop global planning stage');
   });
 
+  test('replaces only an explicitly invalid complete planning set and leaves Story State unchanged', async () => {
+    await planGlobal({
+      projectId,
+      projectsRoot,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_plan_lifecycle_invalid_complete'
+    });
+    const stateBefore = await fileStore.readText(paths.storyState());
+    const globalOutlinePath = path.join(paths.planningDir(), 'global_outline.md');
+    const arcMapPath = path.join(paths.planningDir(), 'arc_map.json');
+    const arcMap = await fileStore.readJson(arcMapPath, ArcMapSchema);
+    const duplicateArc = arcMap.arcs[0];
+    if (duplicateArc === undefined) throw new Error('Expected an arc fixture.');
+    await fileStore.writeText(globalOutlinePath, '# Invalid complete outline\n');
+    await fileStore.writeJson(arcMapPath, {
+      ...arcMap,
+      arcs: [duplicateArc, duplicateArc]
+    }, ArcMapSchema);
+
+    await planGlobal({
+      projectId,
+      projectsRoot,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_plan_lifecycle_replace_invalid_complete',
+      resumeIncomplete: true,
+      replaceInvalidComplete: true
+    });
+
+    expect(await fileStore.readText(globalOutlinePath)).not.toContain('Invalid complete outline');
+    const repairedArcMap = await fileStore.readJson(arcMapPath, ArcMapSchema);
+    expect(new Set(repairedArcMap.arcs.map((arc) => arc.id)).size).toBe(repairedArcMap.arcs.length);
+    expect(await fileStore.readText(paths.storyState())).toBe(stateBefore);
+  });
+
+  test('does not use replacement mode for a partial planning set', async () => {
+    const globalOutlinePath = path.join(paths.planningDir(), 'global_outline.md');
+    const partialOutline = '# Valid partial outline\n';
+    await fileStore.writeText(globalOutlinePath, partialOutline);
+
+    await expect(planGlobal({
+      projectId,
+      projectsRoot,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_plan_lifecycle_replace_partial',
+      resumeIncomplete: true,
+      replaceInvalidComplete: true
+    })).rejects.toMatchObject({ code: 'PLAN_GLOBAL_REPLACE_REQUIRES_COMPLETE' });
+    expect(await fileStore.readText(globalOutlinePath)).toBe(partialOutline);
+  });
+
   test('rejects a complete plan rerun and an invalid resumed JSON artifact', async () => {
     await planGlobal({
       projectId,
@@ -165,5 +222,37 @@ describe('planGlobal lifecycle', () => {
       runId: 'run_plan_lifecycle_locked'
     })).rejects.toMatchObject({ code: 'BUILD_BIBLE_LOCKED' });
     expect(await fileStore.exists(path.join(paths.planningDir(), 'global_outline.md'))).toBe(false);
+  });
+
+  test.each([
+    ['brief.md', 'BRIEF_NOT_FOUND'],
+    ['strategy/story_bible.md', 'STORY_BIBLE_NOT_FOUND'],
+    ['strategy/genre_contract.md', 'GENRE_CONTRACT_NOT_FOUND'],
+    ['strategy/reader_promise.md', 'READER_PROMISE_NOT_FOUND'],
+    ['strategy/style_guide.md', 'STYLE_GUIDE_NOT_FOUND']
+  ] as const)('requires %s before invoking the provider', async (artifact, code) => {
+    const fake = await writeFakeCodex(projectsRoot);
+    await rm(paths.projectArtifact(artifact), { force: true });
+
+    await expect(planGlobal({
+      projectId,
+      projectsRoot,
+      provider: 'codex-text',
+      codexBin: fake.codexBin,
+      runId: `run_plan_lifecycle_missing_${path.basename(artifact, path.extname(artifact))}`
+    })).rejects.toMatchObject({ code });
+
+    expect(await fileStore.exists(fake.argsLogPath)).toBe(false);
+    await expect(Promise.all([
+      'global_outline.md',
+      'volume_01_outline.md',
+      'arc_map.json',
+      'chapter_queue.json'
+    ].map((name) => fileStore.exists(path.join(paths.planningDir(), name))))).resolves.toEqual([
+      false,
+      false,
+      false,
+      false
+    ]);
   });
 });

@@ -23,3 +23,11 @@ export {
   type DesktopStoryBibleReview,
   type ReadDesktopStoryBibleInput
 } from './storyBible.js';
+
+export {
+  planDesktopGlobal,
+  readDesktopGlobalPlanning,
+  type DesktopGlobalPlanningInput,
+  type DesktopGlobalPlanningReview,
+  type ReadDesktopGlobalPlanningInput
+} from './globalPlanning.js';

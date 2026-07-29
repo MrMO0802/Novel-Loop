@@ -83,11 +83,15 @@ describe('global planning IPC handlers', () => {
   test('registers each fixed planning channel exactly once', () => {
     const { registrations } = register(createService());
 
+    expect(IPC_CHANNELS.planningStart).toBe('novel-loop:planning:start');
+    expect(IPC_CHANNELS.planningGet).toBe('novel-loop:planning:get');
+    expect(IPC_CHANNELS.planningCancel).toBe('novel-loop:planning:cancel');
+    expect(IPC_CHANNELS.planningRead).toBe('novel-loop:planning:read');
     expect(registrations.map(({ channel }) => channel)).toEqual([
-      IPC_CHANNELS.planningStart,
-      IPC_CHANNELS.planningGet,
-      IPC_CHANNELS.planningCancel,
-      IPC_CHANNELS.planningRead
+      'novel-loop:planning:start',
+      'novel-loop:planning:get',
+      'novel-loop:planning:cancel',
+      'novel-loop:planning:read'
     ]);
     expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(4);
   });
@@ -152,15 +156,40 @@ describe('global planning IPC handlers', () => {
     expect(service[serviceMethod]).not.toHaveBeenCalled();
   });
 
-  test('rejects an untrusted sender before parsing or calling the service', async () => {
+  test.each([
+    {
+      channel: IPC_CHANNELS.planningStart,
+      request: { projectKey: task.projectKey },
+      serviceMethod: 'start'
+    },
+    {
+      channel: IPC_CHANNELS.planningGet,
+      request: { taskId: task.taskId },
+      serviceMethod: 'get'
+    },
+    {
+      channel: IPC_CHANNELS.planningCancel,
+      request: { taskId: task.taskId },
+      serviceMethod: 'cancel'
+    },
+    {
+      channel: IPC_CHANNELS.planningRead,
+      request: { projectKey: task.projectKey },
+      serviceMethod: 'read'
+    }
+  ] as const)('rejects an untrusted sender before parsing or calling $serviceMethod', async ({
+    channel,
+    request,
+    serviceMethod
+  }) => {
     const service = createService();
     const { handlerFor } = register(service);
 
-    await expect(handlerFor(IPC_CHANNELS.planningStart)(
+    await expect(handlerFor(channel)(
       { senderFrame: { url: 'https://example.com' } },
-      { projectKey: task.projectKey, projectRoot: '/private/path' }
+      request
     )).rejects.toThrow('Untrusted renderer request.');
-    expect(service.start).not.toHaveBeenCalled();
+    expect(service[serviceMethod]).not.toHaveBeenCalled();
   });
 
   test.each([

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Added the desktop Story Foundation author workflow: explicit local-Codex
+  confirmation, four-stage background generation, cooperative stop requests,
+  retry for failed or cancelled incomplete work, and read-only review of four
+  strategy documents.
+- Kept the desktop milestone scoped to Story Foundation. It does not expose
+  global planning, chapter generation or commits, or Story State and
+  chapter-queue mutation; Story Foundation generation protects those artifacts.
+
 ## v2.5.0-rc.1
 
 Release candidate packaging for the accepted M26.5 / v2.4.0 Codex pilot baseline.

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { ProviderFactory, type ProviderName } from '../llm/ProviderFactory.js';
 import type { CodexProfile } from '../providers/providerTypes.js';
@@ -12,6 +13,24 @@ import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
 import { BuildBibleCacheReportSchema } from '../schemas/index.js';
 import type { BuildBibleCacheReport } from '../schemas/index.js';
+import {
+  acquireProjectBuildLock,
+  type ProjectBuildLock
+} from './projectBuildLock.js';
+
+export type BuildBibleStage =
+  | 'preparing'
+  | 'story_bible'
+  | 'genre_contract'
+  | 'reader_promise'
+  | 'style_guide'
+  | 'finalizing'
+  | 'completed';
+
+export interface BuildBibleProgressEvent {
+  stage: BuildBibleStage;
+  state: 'started' | 'completed';
+}
 
 export interface BuildBibleInput {
   projectId: string;
@@ -29,6 +48,9 @@ export interface BuildBibleInput {
   codexTimeoutMs?: number;
   useCache?: boolean;
   forceRegenerate?: boolean;
+  onProgress?: (event: BuildBibleProgressEvent) => void | Promise<void>;
+  shouldStop?: () => boolean | Promise<boolean>;
+  resumeIncomplete?: boolean;
 }
 
 export interface BuildBibleResult {
@@ -39,32 +61,39 @@ export interface BuildBibleResult {
 
 interface MarkdownPromptArtifact {
   promptId: string;
+  stage: Exclude<BuildBibleStage, 'preparing' | 'finalizing' | 'completed'>;
   outputPath: string;
   relativeOutputPath: string;
 }
 
 const DEFAULT_PROJECTS_ROOT = './projects';
-const DEFAULT_PROMPT_ROOT = './prompts';
-const DEFAULT_FIXTURES_ROOT = './fixtures/llm';
+const PACKAGE_ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const DEFAULT_PROMPT_ROOT = path.join(PACKAGE_ROOT, 'prompts');
+const DEFAULT_FIXTURES_ROOT = path.join(PACKAGE_ROOT, 'fixtures', 'llm');
+const MAX_BUILD_BIBLE_ARTIFACT_BYTES = 2 * 1024 * 1024;
 
 const BUILD_BIBLE_PROMPTS: MarkdownPromptArtifact[] = [
   {
     promptId: 'strategy.build_story_bible',
+    stage: 'story_bible',
     outputPath: 'story_bible.md',
     relativeOutputPath: 'strategy/story_bible.md'
   },
   {
     promptId: 'strategy.build_genre_contract',
+    stage: 'genre_contract',
     outputPath: 'genre_contract.md',
     relativeOutputPath: 'strategy/genre_contract.md'
   },
   {
     promptId: 'strategy.build_reader_promise',
+    stage: 'reader_promise',
     outputPath: 'reader_promise.md',
     relativeOutputPath: 'strategy/reader_promise.md'
   },
   {
     promptId: 'strategy.build_style_guide',
+    stage: 'style_guide',
     outputPath: 'style_guide.md',
     relativeOutputPath: 'strategy/style_guide.md'
   }
@@ -90,13 +119,18 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
     }
   });
 
+  let buildLock: ProjectBuildLock | undefined;
   try {
+    buildLock = await acquireProjectBuildLock(paths.projectRoot);
+    await reportProgress(input, { stage: 'preparing', state: 'started' });
     const brief = await fileStore.readText(paths.brief());
     const briefHash = sha256(brief);
     const cacheKey = buildBibleCacheKey(provider, briefHash);
     if (useCache && !forceRegenerate && (await strategyArtifactsExist(paths, fileStore))) {
       const latestCache = await readLatestCacheReport(paths, fileStore);
       if (latestCache?.cacheKey === cacheKey) {
+        await reportProgress(input, { stage: 'preparing', state: 'completed' });
+        await reportProgress(input, { stage: 'finalizing', state: 'started' });
         const artifacts = BUILD_BIBLE_PROMPTS.map((artifact) => artifact.relativeOutputPath);
         for (const artifact of artifacts) {
           await runLogger.recordArtifact(runId, artifact, {
@@ -125,6 +159,8 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
           derivedFrom: [cacheReport.relativeJsonPath],
           provenanceNote: 'build-bible cache markdown report'
         });
+        await reportProgress(input, { stage: 'finalizing', state: 'completed' });
+        await reportProgress(input, { stage: 'completed', state: 'completed' });
         await runLogger.endRun(runId, 'completed');
         return {
           projectId: paths.projectId,
@@ -134,7 +170,7 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
       }
     }
 
-    await ensureCanWriteOutputs(paths, fileStore, forceRegenerate);
+    await ensureCanWriteOutputs(paths, fileStore, forceRegenerate, input.resumeIncomplete);
     const promptService = new PromptService(input.promptRoot ?? DEFAULT_PROMPT_ROOT, fileStore);
     const llmClient = ProviderFactory.create({
       provider,
@@ -155,7 +191,17 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
     });
     const artifacts: string[] = [];
 
+    await reportProgress(input, { stage: 'preparing', state: 'completed' });
+
     for (const promptArtifact of BUILD_BIBLE_PROMPTS) {
+      if (await input.shouldStop?.()) {
+        throw new AppError(
+          'BUILD_BIBLE_CANCELLED',
+          'Story Bible generation stopped before the next stage.',
+          2
+        );
+      }
+      await reportProgress(input, { stage: promptArtifact.stage, state: 'started' });
       const renderedPrompt = await promptService.renderPrompt(promptArtifact.promptId, {
         BRIEF: brief
       });
@@ -165,14 +211,23 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
         user: renderedPrompt,
         responseFormat: 'markdown'
       });
+      if (Buffer.byteLength(response.text, 'utf8') > MAX_BUILD_BIBLE_ARTIFACT_BYTES) {
+        throw new AppError(
+          'BUILD_BIBLE_INVALID_OUTPUT',
+          'Generated Story Foundation output exceeds the 2 MiB document limit.',
+          2
+        );
+      }
       const outputPath = path.join(paths.strategyDir(), promptArtifact.outputPath);
 
       await writePromptRunArtifacts(fileStore, paths, runId, promptArtifact.promptId, renderedPrompt, response.text);
       await fileStore.writeText(outputPath, response.text);
       await runLogger.recordArtifact(runId, promptArtifact.relativeOutputPath);
       artifacts.push(promptArtifact.relativeOutputPath);
+      await reportProgress(input, { stage: promptArtifact.stage, state: 'completed' });
     }
 
+    await reportProgress(input, { stage: 'finalizing', state: 'started' });
     if (useCache) {
       const cacheReport = await writeCacheReport(paths, fileStore, {
         provider,
@@ -198,6 +253,8 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
       artifacts.push(cacheReport.relativeJsonPath, cacheReport.relativeMdPath);
     }
 
+    await reportProgress(input, { stage: 'finalizing', state: 'completed' });
+    await reportProgress(input, { stage: 'completed', state: 'completed' });
     await runLogger.endRun(runId, 'completed');
     return {
       projectId: paths.projectId,
@@ -205,6 +262,15 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
       artifacts
     };
   } catch (error) {
+    if (error instanceof AppError && error.code === 'BUILD_BIBLE_CANCELLED') {
+      await runLogger.recordError(runId, {
+        code: error.code,
+        message: error.message,
+        recoverable: true
+      });
+      await runLogger.endRun(runId, 'cancelled');
+      throw error;
+    }
     await runLogger.recordError(runId, {
       code: 'BUILD_BIBLE_FAILED',
       message: getErrorMessage(error),
@@ -212,6 +278,8 @@ export async function buildBible(input: BuildBibleInput, fileStore = new FileSto
     });
     await runLogger.endRun(runId, 'failed');
     throw error;
+  } finally {
+    await buildLock?.release();
   }
 }
 
@@ -224,17 +292,31 @@ async function ensureProjectReady(paths: ProjectPaths, fileStore: FileStore): Pr
   }
 }
 
-async function ensureCanWriteOutputs(paths: ProjectPaths, fileStore: FileStore, force: boolean): Promise<void> {
-  if (force) {
-    return;
-  }
+async function ensureCanWriteOutputs(
+  paths: ProjectPaths,
+  fileStore: FileStore,
+  force: boolean,
+  resumeIncomplete: boolean | undefined
+): Promise<void> {
+  const existingCount = (await Promise.all(BUILD_BIBLE_PROMPTS.map((promptArtifact) => (
+    fileStore.exists(path.join(paths.strategyDir(), promptArtifact.outputPath))
+  )))).filter(Boolean).length;
+  const artifactAlreadyExists = new AppError(
+    'ARTIFACT_ALREADY_EXISTS',
+    `Story Bible artifacts already exist: ${paths.strategyDir()}`,
+    2
+  );
 
-  for (const promptArtifact of BUILD_BIBLE_PROMPTS) {
-    const outputPath = path.join(paths.strategyDir(), promptArtifact.outputPath);
-    if (await fileStore.exists(outputPath)) {
-      throw new AppError('ARTIFACT_ALREADY_EXISTS', `Artifact already exists: ${outputPath}`, 2);
-    }
+  if (existingCount === BUILD_BIBLE_PROMPTS.length && !force) {
+    throw artifactAlreadyExists;
   }
+  if (existingCount > 0 && resumeIncomplete !== true && !force) {
+    throw artifactAlreadyExists;
+  }
+}
+
+async function reportProgress(input: BuildBibleInput, event: BuildBibleProgressEvent): Promise<void> {
+  await input.onProgress?.(event);
 }
 
 async function strategyArtifactsExist(paths: ProjectPaths, fileStore: FileStore): Promise<boolean> {

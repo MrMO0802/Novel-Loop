@@ -9,11 +9,15 @@ import { formatMessage, t } from '../../i18n/messages.zh-CN';
 
 interface ProjectOverviewProps {
   onBack: () => void;
+  onPrepareFoundation: () => void;
+  onReviewFoundation: () => void;
   project: ProjectSummary;
 }
 
 export function ProjectOverview({
   onBack,
+  onPrepareFoundation,
+  onReviewFoundation,
   project
 }: ProjectOverviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -106,16 +110,28 @@ export function ProjectOverview({
             <p className="nl-section-label">
               {t('overview.nextActionLabel')}
             </p>
-            <h2 id="next-action-title">{t('overview.nextActionTitle')}</h2>
-            <p id="next-stage-note">{t('overview.nextActionUnavailable')}</p>
+            <h2 id="next-action-title">
+              {project.storyBibleAvailable
+                ? t('overview.reviewActionTitle')
+                : t('overview.nextActionTitle')}
+            </h2>
+            <p id="next-stage-note">
+              {project.storyBibleAvailable
+                ? t('overview.reviewActionNote')
+                : t('overview.nextActionAvailable')}
+            </p>
           </div>
           <button
             aria-describedby="next-stage-note"
             className="nl-primary-action"
-            disabled
+            onClick={project.storyBibleAvailable
+              ? onReviewFoundation
+              : onPrepareFoundation}
             type="button"
           >
-            {t('overview.nextAction')}
+            {project.storyBibleAvailable
+              ? t('overview.reviewAction')
+              : t('overview.nextAction')}
           </button>
         </section>
       </div>

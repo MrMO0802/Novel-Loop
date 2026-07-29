@@ -176,6 +176,21 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
     }
   }
 
+  async resolveProjectRoot(projectKey: string): Promise<string | null> {
+    try {
+      const loaded = await this.dependencies.registry.load();
+      if (loaded.warning !== null) return null;
+      const project = loaded.registry.projects.find((candidate) => candidate.projectKey === projectKey);
+      if (project === undefined) return null;
+      const projectRoot = await canonicalProjectPath(project.projectRoot);
+      if (projectRoot === null) return null;
+      const inspection = await this.inspect(projectRoot);
+      return inspection?.valid === true ? projectRoot : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async resolveCreationRoot(
     input: CreateProjectRequest,
     registry: ProjectRegistry

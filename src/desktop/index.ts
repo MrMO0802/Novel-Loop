@@ -13,3 +13,13 @@ export {
   type DesktopProjectInspection,
   type InspectDesktopProjectInput
 } from './projectLibrary.js';
+
+export {
+  buildDesktopStoryBible,
+  readDesktopStoryBible,
+  type DesktopStoryBibleDocument,
+  type DesktopStoryBibleInput,
+  type DesktopStoryBibleResult,
+  type DesktopStoryBibleReview,
+  type ReadDesktopStoryBibleInput
+} from './storyBible.js';

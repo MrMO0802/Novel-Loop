@@ -7,7 +7,7 @@ const preloadPath = path.resolve('src/preload/index.ts');
 const apiPath = path.resolve('src/shared/desktopApi.ts');
 
 describe('typed preload boundary', () => {
-  test('exposes only named system and project methods', () => {
+  test('exposes only named system, project, and foundation methods', () => {
     const preload = readFileSync(preloadPath, 'utf8');
 
     expect(preload).toContain("contextBridge.exposeInMainWorld('novelLoop'");
@@ -27,6 +27,15 @@ describe('typed preload boundary', () => {
     expect(preload).toContain('IPC_CHANNELS.projectsOpenExisting');
     expect(preload).toContain('IPC_CHANNELS.projectsOpen');
     expect(preload).toContain('IPC_CHANNELS.projectsRemove');
+    expect(preload).toContain('foundation:');
+    expect(preload).toContain('start:');
+    expect(preload).toContain('get:');
+    expect(preload).toContain('cancel:');
+    expect(preload).toContain('read:');
+    expect(preload).toContain('IPC_CHANNELS.foundationStart');
+    expect(preload).toContain('IPC_CHANNELS.foundationGet');
+    expect(preload).toContain('IPC_CHANNELS.foundationCancel');
+    expect(preload).toContain('IPC_CHANNELS.foundationRead');
     expect(preload).not.toMatch(/ipcRenderer\.(send|sendSync|on|once|postMessage)/);
     expect(preload).not.toMatch(/invoke\s*\(\s*(channel|name|key|input)/);
   });
@@ -39,7 +48,7 @@ describe('typed preload boundary', () => {
 
     expect(source).not.toMatch(/node:fs|node:child_process|shell\.|execFile|spawn\(/);
     expect(source).not.toMatch(
-      /codex\s+exec|execCodex|runCodex|storyState|writeFile|project(Path|Root)|rawJsonl/i
+      /codex\s+exec|execCodex|runCodex|storyState|writeFile|project(Path|Root)|rawJsonl|runId|codexBin/i
     );
     expect(source).not.toMatch(/node:|electron\/main|electron\/renderer/);
     expect(source).not.toMatch(/\b(send|invoke|subscribe)\s*:\s*\(/);

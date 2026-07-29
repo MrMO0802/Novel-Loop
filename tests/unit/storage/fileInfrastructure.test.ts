@@ -148,4 +148,19 @@ describe('RunLogger', () => {
     expect(completed.errors[0]?.code).toBe('LLM_INVALID_JSON');
     expect(RunManifestSchema.parse(completed).status).toBe('failed');
   });
+
+  test('preserves a cancelled terminal status', async () => {
+    const paths = new ProjectPaths(tempRoot, 'demo-novel');
+    const logger = new RunLogger(paths, new FileStore(), {
+      now: () => new Date('2026-07-02T02:25:30.000Z')
+    });
+
+    const manifest = await logger.startRun({
+      runId: 'run_cancelled',
+      command: 'build-bible'
+    });
+    const cancelled = await logger.endRun(manifest.runId, 'cancelled');
+
+    expect(RunManifestSchema.parse(cancelled).status).toBe('cancelled');
+  });
 });

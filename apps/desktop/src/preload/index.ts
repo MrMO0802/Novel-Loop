@@ -3,6 +3,14 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { NovelLoopDesktopApi } from '../shared/desktopApi';
 import { IPC_CHANNELS } from '../shared/ipcChannels';
 import type {
+  FoundationCancelRequest,
+  FoundationGetRequest,
+  FoundationReadRequest,
+  FoundationReviewResult,
+  FoundationStartRequest,
+  FoundationTask
+} from '../shared/foundationContract';
+import type {
   CreateProjectRequest,
   LibraryLocationSelection,
   ProjectLibraryResult,
@@ -62,6 +70,36 @@ const novelLoopApi: NovelLoopDesktopApi = {
         { projectKey }
       );
       return response as ProjectLibraryResult;
+    }
+  },
+  foundation: {
+    start: async (request: FoundationStartRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.foundationStart,
+        request
+      );
+      return response as FoundationTask;
+    },
+    get: async (request: FoundationGetRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.foundationGet,
+        request
+      );
+      return response as FoundationTask;
+    },
+    cancel: async (request: FoundationCancelRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.foundationCancel,
+        request
+      );
+      return response as FoundationTask;
+    },
+    read: async (request: FoundationReadRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.foundationRead,
+        request
+      );
+      return response as FoundationReviewResult;
     }
   }
 };

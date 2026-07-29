@@ -669,15 +669,18 @@ function isDoctorHealthy(stdout: string): boolean {
 }
 
 function redactSensitive(text: string): string {
-  return text
+  const redacted = text
     .replace(/\bsk-(?:SECRET|[A-Za-z0-9_-]{16,})\b/g, '[REDACTED_TOKEN]')
     .replace(/CODEX_ACCESS_TOKEN\s*=\s*[^"'\s,}]+/g, '[REDACTED_ENV_TOKEN]')
     .replace(/OPENAI_API_KEY\s*=\s*[^"'\s,}]+/g, '[REDACTED_ENV_TOKEN]')
     .replace(/\bCODEX_ACCESS_TOKEN\b/g, '[REDACTED_ENV_TOKEN]')
     .replace(/\bOPENAI_API_KEY\b/g, '[REDACTED_ENV_TOKEN]')
-    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]')
-    .replace(/["']?[^"'\s,]*\.codex\/auth\.json["']?/g, '"[REDACTED_AUTH_FILE]"')
-    .replace(/["']?[^"'\s,]*auth\.json["']?/g, '"[REDACTED_AUTH_FILE]"');
+    .replace(/Bearer\s+[A-Za-z0-9._-]+/gi, 'Bearer [REDACTED]');
+  return redacted.replace(/[^\s"',}]+/g, (token) => (
+    /(?:^|[\\/])(?:\.codex[\\/])?auth\.json/i.test(token)
+      ? '[REDACTED_AUTH_FILE]'
+      : token
+  ));
 }
 
 function parseJsonSchema(schemaText: string, schemaPath: string): JsonSchemaNode {

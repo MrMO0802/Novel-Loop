@@ -90,6 +90,22 @@ describe('desktop project library', () => {
     expect(after).toBe(before);
   });
 
+  test('keeps Story Bible unavailable when only one foundation artifact exists', async () => {
+    const projectsRoot = await makeTempDir();
+    await createDesktopProject({
+      projectId,
+      projectsRoot,
+      brief: { title: projectTitle, coreIdea }
+    });
+    const paths = new ProjectPaths(projectsRoot, projectId);
+    await new FileStore().writeText(path.join(paths.strategyDir(), 'story_bible.md'), '# Partial Story Bible\n');
+
+    await expect(inspectDesktopProject({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      valid: true,
+      storyBibleAvailable: false
+    });
+  });
+
   test('rejects a selected directory whose folder does not match projectId', async () => {
     const projectsRoot = await makeTempDir();
     await createDesktopProject({

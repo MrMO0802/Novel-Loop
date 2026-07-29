@@ -58,7 +58,6 @@ export function PlanningReview({ onBack, project }: PlanningReviewProps) {
   }, [project.projectKey]);
 
   const availableReview = review?.available ? review : null;
-  const selectedTab = TABS[selectedIndex] ?? TABS[0];
 
   const selectTab = (index: number, focus = false) => {
     setSelectedIndex(index);
@@ -148,20 +147,24 @@ export function PlanningReview({ onBack, project }: PlanningReviewProps) {
                 </button>
               ))}
             </div>
-            <section
-              aria-labelledby={`planning-tab-${selectedTab.id}`}
-              className="nl-planning-panel"
-              id={`planning-panel-${selectedTab.id}`}
-              role="tabpanel"
-              tabIndex={0}
-            >
-              <PlanningTabContent
-                arcs={availableReview.arcs}
-                chapters={availableReview.chapters}
-                documents={availableReview.documents}
-                tab={selectedTab.id}
-              />
-            </section>
+            {TABS.map((tab, index) => (
+              <section
+                aria-labelledby={`planning-tab-${tab.id}`}
+                className="nl-planning-panel"
+                hidden={selectedIndex !== index}
+                id={`planning-panel-${tab.id}`}
+                key={tab.id}
+                role="tabpanel"
+                tabIndex={selectedIndex === index ? 0 : -1}
+              >
+                <PlanningTabContent
+                  arcs={availableReview.arcs}
+                  chapters={availableReview.chapters}
+                  documents={availableReview.documents}
+                  tab={tab.id}
+                />
+              </section>
+            ))}
             <footer className="nl-planning-review__footer">
               <div>
                 <h2>{t('planning.review.nextTitle')}</h2>

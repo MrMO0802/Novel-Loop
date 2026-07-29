@@ -120,6 +120,7 @@
 
 .nl-planning-arcs > li,
 .nl-planning-chapters > li {
+  min-width: 0;
   max-width: 840px;
   padding: 24px 0;
   border-bottom: 1px solid var(--nl-border);
@@ -168,11 +169,17 @@
 
 .nl-planning-arc__details > div {
   display: flex;
+  min-width: 0;
   gap: 7px;
 }
 
 .nl-planning-arc__details dt {
   font-weight: 700;
+}
+
+.nl-planning-arc__details dd {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .nl-planning-chapter__number {

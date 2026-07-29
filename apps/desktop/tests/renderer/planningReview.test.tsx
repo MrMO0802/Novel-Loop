@@ -2,6 +2,8 @@
 
 import '@testing-library/jest-dom/vitest';
 
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import {
   cleanup,
   fireEvent,
@@ -39,6 +41,10 @@ const project: ProjectSummary = {
   storyBibleAvailable: true,
   globalPlanAvailable: true
 };
+const planningStyles = readFileSync(
+  resolve(process.cwd(), 'src/renderer/src/styles/planning.css'),
+  'utf8'
+);
 const review: PlanningReviewResult = {
   available: true,
   documents: [
@@ -153,6 +159,12 @@ describe('global planning review', () => {
       '故事线',
       '章节计划'
     ]);
+    expect(document.querySelectorAll('[role="tabpanel"]')).toHaveLength(4);
+    for (const tab of tabs) {
+      const panelId = tab.getAttribute('aria-controls');
+      expect(panelId).toBeTruthy();
+      expect(document.getElementById(panelId ?? '')).not.toBeNull();
+    }
     expect(screen.getByRole('tabpanel')).toHaveTextContent(
       '雾港邮差追索未来退信的来源。'
     );
@@ -230,5 +242,17 @@ describe('global planning review', () => {
     expect(screen.getByRole('button', {
       name: '创建下一章（尚未开放）'
     })).toBeDisabled();
+  });
+
+  test('keeps long arc and chapter values inside narrow layouts', () => {
+    expect(planningStyles).toMatch(
+      /\.nl-planning-arcs > li,\s*\.nl-planning-chapters > li\s*\{[^}]*min-width:\s*0;/s
+    );
+    expect(planningStyles).toMatch(
+      /\.nl-planning-arc__details > div\s*\{[^}]*min-width:\s*0;/s
+    );
+    expect(planningStyles).toMatch(
+      /\.nl-planning-arc__details dd\s*\{[^}]*min-width:\s*0;[^}]*overflow-wrap:\s*anywhere;/s
+    );
   });
 });

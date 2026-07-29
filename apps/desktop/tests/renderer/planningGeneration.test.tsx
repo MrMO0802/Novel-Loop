@@ -124,6 +124,14 @@ async function confirmStart() {
   fireEvent.click(screen.getByRole('button', { name: '开始生成全局规划' }));
 }
 
+function deferred<T>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>((resolvePromise) => {
+    resolve = resolvePromise;
+  });
+  return { promise, resolve };
+}
+
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
@@ -188,6 +196,65 @@ describe('global planning generation', () => {
     expect(screen.getByText(
       '停止请求会在当前 Codex 步骤完成后生效，不会删除已经准备好的规划。'
     )).toBeVisible();
+  });
+
+  test('continues polling when a cooperative stop request fails', async () => {
+    const api = installApi();
+    const firstPoll = deferred<PlanningTask>();
+    api.planning.start.mockResolvedValue(planningTask());
+    api.planning.get
+      .mockReturnValueOnce(firstPoll.promise)
+      .mockResolvedValueOnce(planningTask({
+        status: 'succeeded',
+        stage: 'completed',
+        completedStages: [
+          'preparing',
+          'global_outline',
+          'volume_outline',
+          'arc_map',
+          'chapter_queue',
+          'finalizing',
+          'completed'
+        ],
+        canCancel: false
+      }));
+    api.planning.cancel.mockRejectedValue(new Error('temporary cancel failure'));
+    api.projects.open
+      .mockResolvedValueOnce({ outcome: 'opened', project })
+      .mockResolvedValueOnce({ outcome: 'opened', project: plannedProject });
+
+    render(<App />);
+    await openGeneration();
+    vi.useFakeTimers();
+    await confirmStart();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+      await Promise.resolve();
+    });
+    expect(api.planning.get).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '完成当前 Codex 步骤后停止'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+      firstPoll.resolve(planningTask({
+        stage: 'volume_outline',
+        completedStages: ['preparing', 'global_outline']
+      }));
+      await firstPoll.promise;
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(api.planning.get).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('heading', { name: '全局规划' })).toBeVisible();
   });
 
   test('retries a partial failure without claiming completed work will be replaced', async () => {
@@ -312,6 +379,51 @@ describe('global planning generation', () => {
     });
 
     expect(api.projects.open).toHaveBeenLastCalledWith(projectKey);
+    expect(screen.getByRole('heading', { name: '全局规划' })).toBeVisible();
+  });
+
+  test('shows a stable completed state while the project refresh is pending', async () => {
+    const api = installApi();
+    const projectRefresh = deferred<Awaited<ReturnType<
+      NovelLoopDesktopApi['projects']['open']
+    >>>();
+    api.planning.start.mockResolvedValue(planningTask());
+    api.planning.get.mockResolvedValue(planningTask({
+      status: 'succeeded',
+      stage: 'completed',
+      completedStages: [
+        'preparing',
+        'global_outline',
+        'volume_outline',
+        'arc_map',
+        'chapter_queue',
+        'finalizing',
+        'completed'
+      ],
+      canCancel: false
+    }));
+    api.projects.open
+      .mockResolvedValueOnce({ outcome: 'opened', project })
+      .mockReturnValueOnce(projectRefresh.promise);
+
+    render(<App />);
+    await openGeneration();
+    vi.useFakeTimers();
+    await confirmStart();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750);
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('全局规划已准备完成')).toBeVisible();
+
+    await act(async () => {
+      projectRefresh.resolve({ outcome: 'opened', project: plannedProject });
+      await projectRefresh.promise;
+    });
     expect(screen.getByRole('heading', { name: '全局规划' })).toBeVisible();
   });
 

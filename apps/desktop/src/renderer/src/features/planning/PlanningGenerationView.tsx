@@ -140,22 +140,20 @@ export function PlanningGenerationView({
 
   const requestStop = async () => {
     if (!task || isStopping) return;
-    const currentRequest = ++requestToken.current;
     setIsStopping(true);
     try {
       const nextTask = await window.novelLoop.planning.cancel({
         taskId: task.taskId
       });
-      if (mounted.current && currentRequest === requestToken.current) {
+      if (mounted.current) {
         receiveTask(nextTask);
       }
     } catch {
-      if (mounted.current && currentRequest === requestToken.current) {
+      if (mounted.current) {
         setStartError('unexpected');
       }
     } finally {
-      if (mounted.current && currentRequest === requestToken.current
-        && task.status !== 'stop_requested') {
+      if (mounted.current && task.status !== 'stop_requested') {
         setIsStopping(false);
       }
     }
@@ -272,6 +270,9 @@ export function PlanningGenerationView({
               )}
             </>
           )}
+          {task?.status === 'succeeded' && (
+            <PlanningCompleted />
+          )}
           {(task?.status === 'failed'
             || task?.status === 'cancelled'
             || errorKind) && (
@@ -287,6 +288,19 @@ export function PlanningGenerationView({
         </section>
       </div>
     </main>
+  );
+}
+
+function PlanningCompleted() {
+  return (
+    <div className="nl-foundation-progress" role="status">
+      <CheckCircle aria-hidden size={28} weight="fill" />
+      <div className="nl-foundation-progress__body">
+        <p className="nl-foundation-progress__stage">
+          {STAGE_LABELS.completed}
+        </p>
+      </div>
+    </div>
   );
 }
 

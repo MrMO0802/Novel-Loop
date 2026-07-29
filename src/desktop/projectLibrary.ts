@@ -48,6 +48,12 @@ const STORY_BIBLE_ARTIFACTS = [
   'reader_promise.md',
   'style_guide.md'
 ];
+const GLOBAL_PLANNING_ARTIFACTS = [
+  'global_outline.md',
+  'volume_01_outline.md',
+  'arc_map.json',
+  'chapter_queue.json'
+];
 
 export function createDesktopBriefMarkdown(input: DesktopProjectBriefInput): string {
   const title = requireBriefField(input.title);
@@ -117,7 +123,7 @@ export async function inspectDesktopProject(input: InspectDesktopProjectInput): 
       fileStore.readJson(paths.storyState(), StoryStateSchema),
       fileStore.readText(paths.brief()),
       hasCompleteStoryBible(paths, fileStore),
-      fileStore.exists(path.join(paths.planningDir(), 'global_outline.md'))
+      hasCompleteGlobalPlanning(paths, fileStore)
     ]);
     const { title, briefExcerpt } = extractBriefPreview(brief, paths.projectId);
 
@@ -138,6 +144,15 @@ export async function inspectDesktopProject(input: InspectDesktopProjectInput): 
 async function hasCompleteStoryBible(paths: ProjectPaths, fileStore: FileStore): Promise<boolean> {
   return (await Promise.all(STORY_BIBLE_ARTIFACTS.map((artifact) => (
     fileStore.exists(path.join(paths.strategyDir(), artifact))
+  )))).every(Boolean);
+}
+
+async function hasCompleteGlobalPlanning(
+  paths: ProjectPaths,
+  fileStore: FileStore
+): Promise<boolean> {
+  return (await Promise.all(GLOBAL_PLANNING_ARTIFACTS.map((artifact) => (
+    fileStore.exists(path.join(paths.planningDir(), artifact))
   )))).every(Boolean);
 }
 

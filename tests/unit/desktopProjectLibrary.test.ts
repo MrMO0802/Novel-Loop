@@ -106,6 +106,48 @@ describe('desktop project library', () => {
     });
   });
 
+  test('reports global planning available only when all four required artifacts exist', async () => {
+    const projectsRoot = await makeTempDir();
+    await createDesktopProject({
+      projectId,
+      projectsRoot,
+      brief: { title: projectTitle, coreIdea }
+    });
+    const paths = new ProjectPaths(projectsRoot, projectId);
+    const fileStore = new FileStore();
+
+    await fileStore.writeText(
+      path.join(paths.planningDir(), 'global_outline.md'),
+      '# Global Outline\n'
+    );
+    await expect(inspectDesktopProject({
+      projectRoot: paths.projectRoot
+    })).resolves.toMatchObject({
+      valid: true,
+      globalPlanAvailable: false
+    });
+
+    await fileStore.writeText(
+      path.join(paths.planningDir(), 'volume_01_outline.md'),
+      '# Volume 01 Outline\n'
+    );
+    await fileStore.writeText(
+      path.join(paths.planningDir(), 'arc_map.json'),
+      JSON.stringify({ schemaVersion: '1.0', projectId, arcs: [] })
+    );
+    await fileStore.writeText(
+      path.join(paths.planningDir(), 'chapter_queue.json'),
+      JSON.stringify({ schemaVersion: '1.0', projectId, chapters: [] })
+    );
+
+    await expect(inspectDesktopProject({
+      projectRoot: paths.projectRoot
+    })).resolves.toMatchObject({
+      valid: true,
+      globalPlanAvailable: true
+    });
+  });
+
   test('rejects a selected directory whose folder does not match projectId', async () => {
     const projectsRoot = await makeTempDir();
     await createDesktopProject({

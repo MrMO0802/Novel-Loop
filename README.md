@@ -37,6 +37,12 @@ corepack pnpm novel-loop inspect demo-novel --debts --reader --characters
 corepack pnpm novel-loop validate demo-novel
 ```
 
+## Desktop Prototype Status
+
+The local Electron prototype now connects Story Foundation and global planning: an author can open a project, review the generated Story Foundation, confirm planning, follow its progress, and read the all-book direction, first-volume outline, story arcs, and chapter plan. Chapter creation remains the next desktop milestone; it is not exposed by this prototype yet.
+
+The desktop boundary remains local and narrow: the renderer uses a typed preload API, Electron main owns project access and invokes the local Codex provider, and Codex runs through the existing read-only execution policy. Story Foundation and global planning write their own reviewed artifacts only. They do not submit a chapter or mutate `state/story_state.json`.
+
 ## Quickstart: Mock Demo
 
 The mock demo does not require a real API key. It initializes a project from `examples/brief.md`, generates strategy and planning artifacts, produces chapter 1, runs diagnostics and revision, commits Story State through a canon patch, inspects the result, and validates the project.

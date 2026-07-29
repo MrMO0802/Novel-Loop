@@ -85,6 +85,12 @@ function installReadiness(
         get: vi.fn(),
         cancel: vi.fn(),
         read: vi.fn()
+      },
+      planning: {
+        start: vi.fn(),
+        get: vi.fn(),
+        cancel: vi.fn(),
+        read: vi.fn()
       }
     } satisfies NovelLoopDesktopApi
   });
@@ -181,6 +187,12 @@ describe('production first-launch readiness', () => {
         },
         foundation: {
           start: foundationStart,
+          get: vi.fn(),
+          cancel: vi.fn(),
+          read: vi.fn()
+        },
+        planning: {
+          start: vi.fn(),
           get: vi.fn(),
           cancel: vi.fn(),
           read: vi.fn()

@@ -80,7 +80,8 @@ function installApi() {
       open: vi.fn().mockResolvedValue({ outcome: 'opened', project: incompleteProject }),
       remove: vi.fn()
     },
-    foundation: { start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn() }
+    foundation: { start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn() },
+    planning: { start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn() }
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', { configurable: true, value: api });
   return api;

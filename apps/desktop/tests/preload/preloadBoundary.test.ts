@@ -7,7 +7,7 @@ const preloadPath = path.resolve('src/preload/index.ts');
 const apiPath = path.resolve('src/shared/desktopApi.ts');
 
 describe('typed preload boundary', () => {
-  test('exposes only named system, project, and foundation methods', () => {
+  test('exposes only named system, project, foundation, and planning methods', () => {
     const preload = readFileSync(preloadPath, 'utf8');
 
     expect(preload).toContain("contextBridge.exposeInMainWorld('novelLoop'");
@@ -36,6 +36,11 @@ describe('typed preload boundary', () => {
     expect(preload).toContain('IPC_CHANNELS.foundationGet');
     expect(preload).toContain('IPC_CHANNELS.foundationCancel');
     expect(preload).toContain('IPC_CHANNELS.foundationRead');
+    expect(preload).toContain('planning:');
+    expect(preload).toContain('IPC_CHANNELS.planningStart');
+    expect(preload).toContain('IPC_CHANNELS.planningGet');
+    expect(preload).toContain('IPC_CHANNELS.planningCancel');
+    expect(preload).toContain('IPC_CHANNELS.planningRead');
     expect(preload).not.toMatch(/ipcRenderer\.(send|sendSync|on|once|postMessage)/);
     expect(preload).not.toMatch(/invoke\s*\(\s*(channel|name|key|input)/);
   });

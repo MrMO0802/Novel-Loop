@@ -13,6 +13,14 @@ import type {
   FoundationStartRequest,
   FoundationTask
 } from './foundationContract';
+import type {
+  PlanningCancelRequest,
+  PlanningGetRequest,
+  PlanningReadRequest,
+  PlanningReviewResult,
+  PlanningStartRequest,
+  PlanningTask
+} from './planningContract';
 
 export interface NovelLoopDesktopApi {
   system: {
@@ -31,5 +39,11 @@ export interface NovelLoopDesktopApi {
     get(request: FoundationGetRequest): Promise<FoundationTask>;
     cancel(request: FoundationCancelRequest): Promise<FoundationTask>;
     read(request: FoundationReadRequest): Promise<FoundationReviewResult>;
+  };
+  planning: {
+    start(request: PlanningStartRequest): Promise<PlanningTask>;
+    get(request: PlanningGetRequest): Promise<PlanningTask>;
+    cancel(request: PlanningCancelRequest): Promise<PlanningTask>;
+    read(request: PlanningReadRequest): Promise<PlanningReviewResult>;
   };
 }

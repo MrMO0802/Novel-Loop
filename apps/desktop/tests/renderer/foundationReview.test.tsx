@@ -57,6 +57,9 @@ function installApi() {
         { kind: 'reader_promise', title: 'private promise', markdown: '# 读者期待\n\n每章都推进谜团。' },
         { kind: 'style_guide', title: 'private style', markdown: '# 写作风格\n\n克制而清晰。' }
       ] })
+    },
+    planning: {
+      start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn()
     }
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', { configurable: true, value: api });

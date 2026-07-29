@@ -104,12 +104,13 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
         ).state,
         projectLibrary: await window.novelLoop.projects.list(),
         foundationKeys: Object.keys(window.novelLoop.foundation),
+        planningKeys: Object.keys(window.novelLoop.planning),
         projectKeys: Object.keys(window.novelLoop.projects),
         systemKeys: Object.keys(window.novelLoop.system)
       }));
 
       expect(boundary).toEqual({
-        apiKeys: ['system', 'projects', 'foundation'],
+        apiKeys: ['system', 'projects', 'foundation', 'planning'],
         hasReadinessMethod: true,
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined',
@@ -131,6 +132,7 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
           'remove'
         ],
         foundationKeys: ['start', 'get', 'cancel', 'read'],
+        planningKeys: ['start', 'get', 'cancel', 'read'],
         systemKeys: ['getReadiness']
       });
 

@@ -10,5 +10,9 @@ export const IPC_CHANNELS = {
   foundationStart: 'novel-loop:foundation:start',
   foundationGet: 'novel-loop:foundation:get',
   foundationCancel: 'novel-loop:foundation:cancel',
-  foundationRead: 'novel-loop:foundation:read'
+  foundationRead: 'novel-loop:foundation:read',
+  planningStart: 'novel-loop:planning:start',
+  planningGet: 'novel-loop:planning:get',
+  planningCancel: 'novel-loop:planning:cancel',
+  planningRead: 'novel-loop:planning:read'
 } as const;

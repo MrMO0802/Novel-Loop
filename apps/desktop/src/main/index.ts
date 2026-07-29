@@ -6,9 +6,12 @@ import { NativeProjectDialog } from './dialogs/NativeProjectDialog';
 import { EngineFoundationGateway } from './foundation/EngineFoundationGateway';
 import { ProjectFoundationService } from './foundation/ProjectFoundationService';
 import { registerFoundationHandlers } from './ipc/registerFoundationHandlers';
+import { registerPlanningHandlers } from './ipc/registerPlanningHandlers';
 import { registerProjectHandlers } from './ipc/registerProjectHandlers';
 import { registerSystemHandlers } from './ipc/registerSystemHandlers';
 import { EngineProjectGateway } from './projects/EngineProjectGateway';
+import { EnginePlanningGateway } from './planning/EnginePlanningGateway';
+import { ProjectPlanningService } from './planning/ProjectPlanningService';
 import {
   ProjectLibraryService
 } from './projects/ProjectLibraryService';
@@ -50,6 +53,10 @@ void app.whenReady().then(() => {
     projects: projectService,
     gateway: new EngineFoundationGateway()
   });
+  const planningService = new ProjectPlanningService({
+    projects: projectService,
+    gateway: new EnginePlanningGateway()
+  });
 
   registerSystemHandlers(
     {
@@ -87,6 +94,19 @@ void app.whenReady().then(() => {
       }
     },
     foundationService,
+    rendererTarget.trustedRendererUrl
+  );
+
+  registerPlanningHandlers(
+    {
+      handle: (channel, handler) => {
+        ipcMain.handle(channel, (event, request) => handler(
+          { senderFrame: { url: event.senderFrame?.url ?? '' } },
+          request
+        ));
+      }
+    },
+    planningService,
     rendererTarget.trustedRendererUrl
   );
 

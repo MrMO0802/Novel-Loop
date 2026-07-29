@@ -11,6 +11,14 @@ import type {
   FoundationTask
 } from '../shared/foundationContract';
 import type {
+  PlanningCancelRequest,
+  PlanningGetRequest,
+  PlanningReadRequest,
+  PlanningReviewResult,
+  PlanningStartRequest,
+  PlanningTask
+} from '../shared/planningContract';
+import type {
   CreateProjectRequest,
   LibraryLocationSelection,
   ProjectLibraryResult,
@@ -100,6 +108,36 @@ const novelLoopApi: NovelLoopDesktopApi = {
         request
       );
       return response as FoundationReviewResult;
+    }
+  },
+  planning: {
+    start: async (request: PlanningStartRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.planningStart,
+        request
+      );
+      return response as PlanningTask;
+    },
+    get: async (request: PlanningGetRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.planningGet,
+        request
+      );
+      return response as PlanningTask;
+    },
+    cancel: async (request: PlanningCancelRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.planningCancel,
+        request
+      );
+      return response as PlanningTask;
+    },
+    read: async (request: PlanningReadRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.planningRead,
+        request
+      );
+      return response as PlanningReviewResult;
     }
   }
 };

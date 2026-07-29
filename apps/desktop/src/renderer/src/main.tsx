@@ -5,6 +5,7 @@ import './styles/tokens.css';
 import './styles/base.css';
 import './styles/project-library.css';
 import './styles/foundation.css';
+import './styles/planning.css';
 
 const root = document.getElementById('root');
 

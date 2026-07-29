@@ -10,14 +10,18 @@ import { formatMessage, t } from '../../i18n/messages.zh-CN';
 interface ProjectOverviewProps {
   onBack: () => void;
   onPrepareFoundation: () => void;
+  onPreparePlanning: () => void;
   onReviewFoundation: () => void;
+  onReviewPlanning: () => void;
   project: ProjectSummary;
 }
 
 export function ProjectOverview({
   onBack,
   onPrepareFoundation,
+  onPreparePlanning,
   onReviewFoundation,
+  onReviewPlanning,
   project
 }: ProjectOverviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -25,6 +29,27 @@ export function ProjectOverview({
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
+
+  const nextAction = project.globalPlanAvailable
+    ? {
+      action: t('overview.planningReviewAction'),
+      note: t('overview.planningReviewActionNote'),
+      onClick: onReviewPlanning,
+      title: t('overview.planningReviewActionTitle')
+    }
+    : project.storyBibleAvailable
+      ? {
+        action: t('overview.planningAction'),
+        note: t('overview.planningActionNote'),
+        onClick: onPreparePlanning,
+        title: t('overview.planningActionTitle')
+      }
+      : {
+        action: t('overview.nextAction'),
+        note: t('overview.nextActionAvailable'),
+        onClick: onPrepareFoundation,
+        title: t('overview.nextActionTitle')
+      };
 
   return (
     <main className="nl-project-shell">
@@ -110,30 +135,27 @@ export function ProjectOverview({
             <p className="nl-section-label">
               {t('overview.nextActionLabel')}
             </p>
-            <h2 id="next-action-title">
-              {project.storyBibleAvailable
-                ? t('overview.reviewActionTitle')
-                : t('overview.nextActionTitle')}
-            </h2>
-            <p id="next-stage-note">
-              {project.storyBibleAvailable
-                ? t('overview.reviewActionNote')
-                : t('overview.nextActionAvailable')}
-            </p>
+            <h2 id="next-action-title">{nextAction.title}</h2>
+            <p id="next-stage-note">{nextAction.note}</p>
           </div>
           <button
             aria-describedby="next-stage-note"
             className="nl-primary-action"
-            onClick={project.storyBibleAvailable
-              ? onReviewFoundation
-              : onPrepareFoundation}
+            onClick={nextAction.onClick}
             type="button"
           >
-            {project.storyBibleAvailable
-              ? t('overview.reviewAction')
-              : t('overview.nextAction')}
+            {nextAction.action}
           </button>
         </section>
+        {project.storyBibleAvailable && (
+          <button
+            className="nl-tertiary-action nl-overview__foundation-link"
+            onClick={onReviewFoundation}
+            type="button"
+          >
+            {t('overview.reviewAction')}
+          </button>
+        )}
       </div>
     </main>
   );

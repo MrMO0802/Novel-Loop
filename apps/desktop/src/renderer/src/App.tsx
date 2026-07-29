@@ -20,6 +20,8 @@ import type { ProjectSummary } from '../../shared/projectContract';
 import type { SystemReadiness } from '../../shared/systemContract';
 import { FoundationGenerationView } from './features/foundation/FoundationGenerationView';
 import { FoundationReview } from './features/foundation/FoundationReview';
+import { PlanningGenerationView } from './features/planning/PlanningGenerationView';
+import { PlanningReview } from './features/planning/PlanningReview';
 import { CreateProjectView } from './features/projects/CreateProjectView';
 import { ProjectLibrary } from './features/projects/ProjectLibrary';
 import { ProjectOverview } from './features/projects/ProjectOverview';
@@ -36,7 +38,9 @@ type AppRoute =
   | { kind: 'create' }
   | { kind: 'overview'; project: ProjectSummary }
   | { kind: 'foundation-generation'; project: ProjectSummary }
-  | { kind: 'foundation-review'; project: ProjectSummary };
+  | { kind: 'foundation-review'; project: ProjectSummary }
+  | { kind: 'planning-generation'; project: ProjectSummary }
+  | { kind: 'planning-review'; project: ProjectSummary };
 
 const READINESS_UI_TIMEOUT_MS = 20_000;
 
@@ -129,6 +133,14 @@ export function App() {
           kind: 'foundation-review',
           project: route.project
         })}
+        onPreparePlanning={() => setRoute({
+          kind: 'planning-generation',
+          project: route.project
+        })}
+        onReviewPlanning={() => setRoute({
+          kind: 'planning-review',
+          project: route.project
+        })}
         project={route.project}
       />
     );
@@ -150,6 +162,32 @@ export function App() {
   if (route.kind === 'foundation-review') {
     return (
       <FoundationReview
+        onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onPreparePlanning={() => setRoute({
+          kind: 'planning-generation',
+          project: route.project
+        })}
+        project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'planning-generation') {
+    return (
+      <PlanningGenerationView
+        onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onCompleted={(project) => setRoute({
+          kind: 'planning-review',
+          project
+        })}
+        project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'planning-review') {
+    return (
+      <PlanningReview
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
         project={route.project}
       />

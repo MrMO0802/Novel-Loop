@@ -17,10 +17,15 @@ const DOCUMENTS = [
 
 interface FoundationReviewProps {
   onBack: () => void;
+  onPreparePlanning: () => void;
   project: ProjectSummary;
 }
 
-export function FoundationReview({ onBack, project }: FoundationReviewProps) {
+export function FoundationReview({
+  onBack,
+  onPreparePlanning,
+  project
+}: FoundationReviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const navRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const requestToken = useRef(0);
@@ -102,25 +107,40 @@ export function FoundationReview({ onBack, project }: FoundationReviewProps) {
           </p>
         )}
         {orderedDocuments && selectedDocument && (
-          <div className="nl-foundation-reading-layout">
-            <nav aria-label={t('foundation.review.documentNavigation')} className="nl-foundation-document-nav">
-              {DOCUMENTS.map(({ label }, index) => (
-                <button
-                  aria-current={selectedIndex === index ? 'page' : undefined}
-                  key={label}
-                  onClick={() => selectDocument(index)}
-                  onKeyDown={(event) => handleDocumentKeyDown(event, index)}
-                  ref={(element) => { navRefs.current[index] = element; }}
-                  type="button"
-                >
-                  {label}
-                </button>
-              ))}
-            </nav>
-            <article aria-live="polite" className="nl-foundation-document" tabIndex={-1}>
-              <SafeMarkdown markdown={selectedDocument.markdown} />
-            </article>
-          </div>
+          <>
+            <div className="nl-foundation-reading-layout">
+              <nav aria-label={t('foundation.review.documentNavigation')} className="nl-foundation-document-nav">
+                {DOCUMENTS.map(({ label }, index) => (
+                  <button
+                    aria-current={selectedIndex === index ? 'page' : undefined}
+                    key={label}
+                    onClick={() => selectDocument(index)}
+                    onKeyDown={(event) => handleDocumentKeyDown(event, index)}
+                    ref={(element) => { navRefs.current[index] = element; }}
+                    type="button"
+                  >
+                    {label}
+                  </button>
+                ))}
+              </nav>
+              <article aria-live="polite" className="nl-foundation-document" tabIndex={-1}>
+                <SafeMarkdown markdown={selectedDocument.markdown} />
+              </article>
+            </div>
+            <footer className="nl-foundation-review__footer">
+              <div>
+                <h2>{t('foundation.review.planningTitle')}</h2>
+                <p>{t('foundation.review.planningNote')}</p>
+              </div>
+              <button
+                className="nl-primary-action"
+                onClick={onPreparePlanning}
+                type="button"
+              >
+                {t('foundation.review.preparePlanning')}
+              </button>
+            </footer>
+          </>
         )}
       </div>
     </main>

@@ -89,6 +89,25 @@ test('reads all four foundation documents without technical metadata', async () 
   expect(document.body).not.toHaveTextContent(/run_|strategy\/|schema|jsonl|private/i);
 });
 
+test('requires a second confirmation before global planning starts', async () => {
+  const api = installApi();
+  render(<App />);
+  await openCompleteProject();
+  fireEvent.click(screen.getByRole('button', { name: '查看故事基础' }));
+
+  const preparePlanning = await screen.findByRole('button', {
+    name: '确认故事基础并生成全局规划'
+  });
+  expect(api.planning.start).not.toHaveBeenCalled();
+  fireEvent.click(preparePlanning);
+
+  expect(screen.getByRole('heading', { name: '生成全局规划' })).toBeVisible();
+  expect(api.planning.start).not.toHaveBeenCalled();
+  fireEvent.click(screen.getByRole('button', { name: '开始生成全局规划' }));
+
+  expect(api.planning.start).toHaveBeenCalledWith({ projectKey });
+});
+
 test('moves focus to the route heading and supports keyboard document navigation', async () => {
   installApi();
   render(<App />);

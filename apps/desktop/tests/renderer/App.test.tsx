@@ -97,6 +97,49 @@ function installReadiness(
   return getReadiness;
 }
 
+function installProjectApi(project: ProjectSummary) {
+  const api = {
+    system: { getReadiness: vi.fn().mockResolvedValue(baseReadiness) },
+    projects: {
+      list: vi.fn().mockResolvedValue({
+        projects: [project],
+        defaultLocation: { configured: true, locationLabel: '测试作品库' },
+        warning: null
+      }),
+      chooseDefaultLibrary: vi.fn(),
+      create: vi.fn(),
+      openExisting: vi.fn(),
+      open: vi.fn().mockResolvedValue({ outcome: 'opened', project }),
+      remove: vi.fn()
+    },
+    foundation: {
+      start: vi.fn(),
+      get: vi.fn(),
+      cancel: vi.fn(),
+      read: vi.fn()
+    },
+    planning: {
+      start: vi.fn(),
+      get: vi.fn(),
+      cancel: vi.fn(),
+      read: vi.fn()
+    }
+  } satisfies NovelLoopDesktopApi;
+  Object.defineProperty(window, 'novelLoop', {
+    configurable: true,
+    value: api
+  });
+  return api;
+}
+
+async function openProjectFromLibrary(project: ProjectSummary) {
+  fireEvent.click(await screen.findByRole('button', { name: '进入作品库' }));
+  fireEvent.click(await screen.findByRole('button', {
+    name: `打开《${project.title}》`
+  }));
+  await screen.findByRole('heading', { name: project.title });
+}
+
 describe('production first-launch readiness', () => {
   test('announces loading while the local check is running', () => {
     installReadiness(new Promise(() => {}));
@@ -210,6 +253,57 @@ describe('production first-launch readiness', () => {
     expect(screen.getByText('生成通常需要几分钟，期间不会写入正式故事状态。'))
       .toBeVisible();
     expect(foundationStart).not.toHaveBeenCalled();
+  });
+
+  test('routes a complete Story Foundation with incomplete planning to preparation', async () => {
+    const project = { ...incompleteProject, storyBibleAvailable: true };
+    const api = installProjectApi(project);
+
+    render(<App />);
+    await openProjectFromLibrary(project);
+
+    expect(screen.getByRole('heading', { name: '准备全局规划' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '准备生成全局规划' }));
+
+    expect(screen.getByRole('heading', { name: '生成全局规划' })).toBeVisible();
+    expect(api.planning.start).not.toHaveBeenCalled();
+  });
+
+  test('routes a complete global plan to its author-facing review', async () => {
+    const project = {
+      ...incompleteProject,
+      storyBibleAvailable: true,
+      globalPlanAvailable: true
+    };
+    const api = installProjectApi(project);
+    api.planning.read.mockResolvedValue({
+      available: true,
+      documents: [
+        {
+          kind: 'global_outline',
+          title: '全书方向',
+          markdown: '# 全书方向\n\n追索一封来自未来的退信。'
+        },
+        {
+          kind: 'volume_outline',
+          title: '第一卷',
+          markdown: '# 第一卷\n\n从雾港失踪案开始。'
+        }
+      ],
+      arcs: [],
+      chapters: []
+    });
+
+    render(<App />);
+    await openProjectFromLibrary(project);
+
+    expect(screen.getByRole('heading', { name: '阅读全局规划' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '查看全局规划' }));
+
+    expect(await screen.findByRole('heading', { name: '全局规划' })).toBeVisible();
+    expect(api.planning.read).toHaveBeenCalledWith({
+      projectKey: project.projectKey
+    });
   });
 
   test.each([

@@ -1,0 +1,255 @@
+.nl-planning-generation {
+  max-width: 900px;
+}
+
+.nl-planning-generation > section {
+  max-width: 680px;
+}
+
+.nl-planning-review__header {
+  padding-bottom: 28px;
+}
+
+.nl-planning-review__header p,
+.nl-planning-review__state p,
+.nl-planning-review__footer h2,
+.nl-planning-review__footer p,
+.nl-planning-document h2,
+.nl-planning-document p,
+.nl-planning-arcs h2,
+.nl-planning-arcs p,
+.nl-planning-arcs dl,
+.nl-planning-arcs dd,
+.nl-planning-chapters h2,
+.nl-planning-chapters p {
+  margin-top: 0;
+  margin-bottom: 0;
+  letter-spacing: 0;
+}
+
+.nl-planning-review__header > p:last-child {
+  max-width: 58ch;
+  margin-top: 14px;
+  color: var(--nl-muted);
+  line-height: 1.75;
+}
+
+.nl-planning-review__state {
+  display: grid;
+  justify-items: start;
+  gap: 12px;
+  padding: 36px 0;
+  border-top: 1px solid var(--nl-border);
+  color: var(--nl-muted);
+}
+
+.nl-planning-tabs {
+  display: flex;
+  overflow-x: auto;
+  border-top: 1px solid var(--nl-border);
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-planning-tabs button {
+  flex: 0 0 auto;
+  min-height: 48px;
+  padding: 0 18px;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  background: transparent;
+  color: var(--nl-muted);
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.nl-planning-tabs button:hover,
+.nl-planning-tabs button[aria-selected="true"] {
+  border-bottom-color: var(--nl-accent);
+  color: var(--nl-text);
+}
+
+.nl-planning-tabs button:focus-visible {
+  border-radius: 3px;
+  outline: 3px solid var(--nl-accent-strong);
+  outline-offset: -4px;
+}
+
+.nl-planning-panel {
+  min-height: 360px;
+  padding: 36px 0 48px;
+  outline: none;
+}
+
+.nl-planning-panel:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid var(--nl-accent-strong);
+  outline-offset: 4px;
+}
+
+.nl-planning-document {
+  max-width: 76ch;
+}
+
+.nl-planning-document h2 {
+  margin-bottom: 18px;
+  font-size: 24px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.nl-planning-document p {
+  white-space: pre-wrap;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+}
+
+.nl-planning-document p + p,
+.nl-planning-document h2 + p,
+.nl-planning-document p + h2 {
+  margin-top: 24px;
+}
+
+.nl-planning-arcs,
+.nl-planning-chapters {
+  display: grid;
+  gap: 0;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nl-planning-arcs > li,
+.nl-planning-chapters > li {
+  max-width: 840px;
+  padding: 24px 0;
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-planning-arcs > li:first-child,
+.nl-planning-chapters > li:first-child {
+  padding-top: 0;
+}
+
+.nl-planning-arc__heading {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+}
+
+.nl-planning-arc__heading > span {
+  flex: 0 0 auto;
+  color: var(--nl-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.nl-planning-arc__title,
+.nl-planning-chapter__title {
+  font-size: 19px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.nl-planning-arcs > li > p,
+.nl-planning-chapters > li > p {
+  margin-top: 10px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+}
+
+.nl-planning-arc__details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 28px;
+  margin-top: 16px !important;
+  color: var(--nl-muted);
+  font-size: 13px;
+}
+
+.nl-planning-arc__details > div {
+  display: flex;
+  gap: 7px;
+}
+
+.nl-planning-arc__details dt {
+  font-weight: 700;
+}
+
+.nl-planning-chapter__number {
+  color: var(--nl-muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.nl-planning-chapter__function {
+  color: var(--nl-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.nl-planning-empty {
+  margin: 0;
+  color: var(--nl-muted);
+}
+
+.nl-planning-review__footer,
+.nl-foundation-review__footer {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 28px;
+  padding-top: 28px;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-planning-review__footer h2,
+.nl-foundation-review__footer h2 {
+  font-size: 19px;
+}
+
+.nl-planning-review__footer p,
+.nl-foundation-review__footer p {
+  max-width: 58ch;
+  margin-top: 8px;
+  color: var(--nl-muted);
+  line-height: 1.7;
+}
+
+.nl-foundation-review__footer {
+  margin-top: 42px;
+}
+
+.nl-overview__foundation-link {
+  margin-top: 18px;
+}
+
+@media (max-width: 760px) {
+  .nl-planning-tabs button {
+    padding: 0 14px;
+  }
+
+  .nl-planning-panel {
+    min-height: 280px;
+    padding: 28px 0 36px;
+  }
+
+  .nl-planning-review__footer,
+  .nl-foundation-review__footer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-planning-review__footer button,
+  .nl-foundation-review__footer button {
+    width: 100%;
+  }
+
+  .nl-planning-arc__heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .nl-planning-arc__details {
+    display: grid;
+  }
+}

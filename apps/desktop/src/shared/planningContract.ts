@@ -1,7 +1,7 @@
 import { z } from 'zod';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
-const MAX_REVIEW_MARKDOWN_BYTES = 4 * 1024 * 1024;
+const MAX_REVIEW_PAYLOAD_BYTES = 4 * 1024 * 1024;
 const PLANNING_DOCUMENT_KINDS = ['global_outline', 'volume_outline'] as const;
 
 export const PlanningProjectKeySchema = z.string()
@@ -130,15 +130,11 @@ export const PlanningReviewResultSchema = z.discriminatedUnion('available', [
         message: 'Review must not contain duplicate chapters.'
       })
   }).strict().superRefine((review, context) => {
-    const totalBytes = review.documents.reduce(
-      (total, document) => total + new TextEncoder().encode(document.markdown).byteLength,
-      0
-    );
-    if (totalBytes > MAX_REVIEW_MARKDOWN_BYTES) {
+    const payloadBytes = new TextEncoder().encode(JSON.stringify(review)).byteLength;
+    if (payloadBytes > MAX_REVIEW_PAYLOAD_BYTES) {
       context.addIssue({
         code: 'custom',
-        message: 'Review Markdown exceeds the 4 MiB total limit.',
-        path: ['documents']
+        message: 'Review payload exceeds the 4 MiB total limit.'
       });
     }
   })

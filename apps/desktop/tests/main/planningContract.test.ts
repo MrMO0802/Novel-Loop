@@ -118,6 +118,23 @@ describe('global planning contract', () => {
     })).toThrow();
   });
 
+  test('bounds the complete serialized available review payload including structure records', () => {
+    const structureHeavyChapters = Array.from({ length: 2_000 }, (_, index) => ({
+      chapterNumber: index + 1,
+      title: `Chapter ${index + 1}`,
+      status: 'planned',
+      summary: 'x'.repeat(3_000),
+      primaryFunction: 'Advance the story.'
+    }));
+
+    expect(() => PlanningReviewResultSchema.parse({
+      available: true,
+      documents,
+      arcs,
+      chapters: structureHeavyChapters
+    })).toThrow('Review payload exceeds the 4 MiB total limit.');
+  });
+
   test('requires two distinct documents and rejects duplicate arcs and chapters', () => {
     expect(PlanningReviewResultSchema.parse({
       available: true,

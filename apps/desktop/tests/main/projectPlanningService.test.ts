@@ -229,6 +229,7 @@ describe('ProjectPlanningService', () => {
     ['CODEX_BINARY_NOT_FOUND', 'codex_unavailable'],
     ['CODEX_OUTPUT_MISSING', 'invalid_output'],
     ['CODEX_OUTPUT_SCHEMA_VALIDATION_FAILED', 'invalid_output'],
+    ['CODEX_REPAIR_FAILED', 'invalid_output'],
     ['DESKTOP_GLOBAL_PLANNING_INCOMPLETE', 'invalid_output'],
     ['STORY_BIBLE_MISSING', 'foundation_missing'],
     ['PROJECT_NOT_FOUND', 'project_unavailable'],

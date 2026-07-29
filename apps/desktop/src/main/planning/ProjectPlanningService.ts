@@ -289,6 +289,7 @@ function toPlanningErrorKind(error: unknown): PlanningErrorKind {
   if (code.includes('USAGE_LIMIT') || code.includes('RATE_LIMIT')) return 'usage_limit';
   if (code.includes('TIMEOUT')) return 'timeout';
   if (code === 'CODEX_OUTPUT_MISSING'
+    || code === 'CODEX_REPAIR_FAILED'
     || code === 'DESKTOP_GLOBAL_PLANNING_INCOMPLETE'
     || code === 'DESKTOP_GLOBAL_PLANNING_INVALID_OUTPUT'
     || code.includes('SCHEMA')

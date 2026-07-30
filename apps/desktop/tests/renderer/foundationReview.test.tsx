@@ -11,6 +11,7 @@ import { App } from '../../src/renderer/src/App';
 import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import type { ProjectSummary } from '../../src/shared/projectContract';
 import type { SystemReadiness } from '../../src/shared/systemContract';
+import { createInertChapterApi } from './desktopApiFixtures';
 
 const projectKey = 'project_0123456789abcdef01234567';
 const readiness: SystemReadiness = {
@@ -60,7 +61,8 @@ function installApi() {
     },
     planning: {
       start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn()
-    }
+    },
+    chapter: createInertChapterApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', { configurable: true, value: api });
   return api;

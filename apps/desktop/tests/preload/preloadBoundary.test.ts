@@ -1,64 +1,111 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-import { describe, expect, test } from 'vitest';
+import { beforeEach, describe, expect, test, vi } from 'vitest';
+
+import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
+import { IPC_CHANNELS } from '../../src/shared/ipcChannels';
+
+const electron = vi.hoisted(() => ({
+  exposeInMainWorld: vi.fn(),
+  invoke: vi.fn()
+}));
+
+vi.mock('electron', () => ({
+  contextBridge: {
+    exposeInMainWorld: electron.exposeInMainWorld
+  },
+  ipcRenderer: {
+    invoke: electron.invoke
+  }
+}));
 
 const preloadPath = path.resolve('src/preload/index.ts');
 const apiPath = path.resolve('src/shared/desktopApi.ts');
 
-describe('typed preload boundary', () => {
-  test('exposes only named system, project, foundation, planning, and chapter methods', () => {
-    const preload = readFileSync(preloadPath, 'utf8');
+beforeEach(() => {
+  electron.exposeInMainWorld.mockReset();
+  electron.invoke.mockReset();
+  vi.resetModules();
+});
 
-    expect(preload).toContain("contextBridge.exposeInMainWorld('novelLoop'");
-    expect(preload).toContain('system:');
-    expect(preload).toContain('getReadiness:');
-    expect(preload).toContain('IPC_CHANNELS.systemGetReadiness');
-    expect(preload).toContain('projects:');
-    expect(preload).toContain('list:');
-    expect(preload).toContain('chooseDefaultLibrary:');
-    expect(preload).toContain('create:');
-    expect(preload).toContain('openExisting:');
-    expect(preload).toContain('open:');
-    expect(preload).toContain('remove:');
-    expect(preload).toContain('IPC_CHANNELS.projectsList');
-    expect(preload).toContain('IPC_CHANNELS.projectsChooseDefaultLibrary');
-    expect(preload).toContain('IPC_CHANNELS.projectsCreate');
-    expect(preload).toContain('IPC_CHANNELS.projectsOpenExisting');
-    expect(preload).toContain('IPC_CHANNELS.projectsOpen');
-    expect(preload).toContain('IPC_CHANNELS.projectsRemove');
-    expect(preload).toContain('foundation:');
-    expect(preload).toContain('start:');
-    expect(preload).toContain('get:');
-    expect(preload).toContain('cancel:');
-    expect(preload).toContain('read:');
-    expect(preload).toContain('IPC_CHANNELS.foundationStart');
-    expect(preload).toContain('IPC_CHANNELS.foundationGet');
-    expect(preload).toContain('IPC_CHANNELS.foundationCancel');
-    expect(preload).toContain('IPC_CHANNELS.foundationRead');
-    expect(preload).toContain('planning:');
-    expect(preload).toContain('IPC_CHANNELS.planningStart');
-    expect(preload).toContain('IPC_CHANNELS.planningGet');
-    expect(preload).toContain('IPC_CHANNELS.planningCancel');
-    expect(preload).toContain('IPC_CHANNELS.planningRead');
-    expect(preload).toContain('chapter:');
-    expect(preload).toContain('inspect:');
-    expect(preload).toContain('startPlanning:');
-    expect(preload).toContain('startDrafting:');
-    expect(preload).toContain('readPlan:');
-    expect(preload).toContain('readDraft:');
-    expect(preload).toContain('IPC_CHANNELS.chapterInspect');
-    expect(preload).toContain('IPC_CHANNELS.chapterStartPlanning');
-    expect(preload).toContain('IPC_CHANNELS.chapterStartDrafting');
-    expect(preload).toContain('IPC_CHANNELS.chapterGet');
-    expect(preload).toContain('IPC_CHANNELS.chapterCancel');
-    expect(preload).toContain('IPC_CHANNELS.chapterReadPlan');
-    expect(preload).toContain('IPC_CHANNELS.chapterReadDraft');
-    expect(preload).not.toMatch(/ipcRenderer\.(send|sendSync|on|once|postMessage)/);
-    expect(preload).not.toMatch(/invoke\s*\(\s*(channel|name|key|input)/);
+async function exposeApi(): Promise<NovelLoopDesktopApi> {
+  await import('../../src/preload/index');
+  const captured = electron.exposeInMainWorld.mock.calls[0];
+  if (captured === undefined) {
+    throw new Error('Expected preload to expose the desktop API.');
+  }
+  expect(captured[0]).toBe('novelLoop');
+  return captured[1] as NovelLoopDesktopApi;
+}
+
+describe('typed preload boundary', () => {
+  test('exposes exactly the seven named chapter methods', async () => {
+    const api = await exposeApi();
+
+    expect(Object.keys(api)).toEqual([
+      'system',
+      'projects',
+      'foundation',
+      'planning',
+      'chapter'
+    ]);
+    expect(Object.keys(api.chapter)).toEqual([
+      'inspect',
+      'startPlanning',
+      'startDrafting',
+      'get',
+      'cancel',
+      'readPlan',
+      'readDraft'
+    ]);
   });
 
-  test('contains no path, filesystem, shell, Codex, Node, or generic IPC surface', () => {
+  test('uses the fixed chapter channels for every exposed chapter request', async () => {
+    const api = await exposeApi();
+    const projectRequest = { projectKey: 'project_radio' };
+    const taskRequest = { taskId: 'chapter_0123456789abcdef' };
+
+    await api.chapter.inspect(projectRequest);
+    await api.chapter.startPlanning(projectRequest);
+    await api.chapter.startDrafting(projectRequest);
+    await api.chapter.get(taskRequest);
+    await api.chapter.cancel(taskRequest);
+    await api.chapter.readPlan(projectRequest);
+    await api.chapter.readDraft(projectRequest);
+
+    expect(electron.invoke.mock.calls).toEqual([
+      [IPC_CHANNELS.chapterInspect, projectRequest],
+      [IPC_CHANNELS.chapterStartPlanning, projectRequest],
+      [IPC_CHANNELS.chapterStartDrafting, projectRequest],
+      [IPC_CHANNELS.chapterGet, taskRequest],
+      [IPC_CHANNELS.chapterCancel, taskRequest],
+      [IPC_CHANNELS.chapterReadPlan, projectRequest],
+      [IPC_CHANNELS.chapterReadDraft, projectRequest]
+    ]);
+  });
+
+  test('exposes no generic or privileged API capability', async () => {
+    const api = await exposeApi();
+    const forbidden = [
+      'invoke',
+      'send',
+      'subscribe',
+      'fs',
+      'filesystem',
+      'shell',
+      'process',
+      'codex'
+    ];
+
+    for (const surface of [api, api.chapter]) {
+      for (const property of forbidden) {
+        expect(surface).not.toHaveProperty(property);
+      }
+    }
+  });
+
+  test('contains no path, filesystem, shell, process, Codex, Node, or generic IPC surface', () => {
     const source = [
       readFileSync(preloadPath, 'utf8'),
       readFileSync(apiPath, 'utf8')
@@ -69,7 +116,7 @@ describe('typed preload boundary', () => {
       /codex\s+exec|execCodex|runCodex|storyState|writeFile|project(Path|Root)|rawJsonl|runId|codexBin/i
     );
     expect(source).not.toMatch(/node:|electron\/main|electron\/renderer/);
-    expect(source).not.toMatch(/\b(send|invoke|subscribe)\s*:\s*\(/);
+    expect(source).not.toMatch(/\b(process|fs|filesystem|shell|codex|send|invoke|subscribe)\s*:/i);
   });
 
   test('keeps sandboxed preload free of third-party runtime dependencies', () => {

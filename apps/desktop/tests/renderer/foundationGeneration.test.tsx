@@ -17,6 +17,7 @@ import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import type { FoundationTask } from '../../src/shared/foundationContract';
 import type { ProjectSummary } from '../../src/shared/projectContract';
 import type { SystemReadiness } from '../../src/shared/systemContract';
+import { createInertChapterApi } from './desktopApiFixtures';
 
 const projectKey = 'project_0123456789abcdef01234567';
 const readiness: SystemReadiness = {
@@ -81,7 +82,8 @@ function installApi() {
       remove: vi.fn()
     },
     foundation: { start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn() },
-    planning: { start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn() }
+    planning: { start: vi.fn(), get: vi.fn(), cancel: vi.fn(), read: vi.fn() },
+    chapter: createInertChapterApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', { configurable: true, value: api });
   return api;

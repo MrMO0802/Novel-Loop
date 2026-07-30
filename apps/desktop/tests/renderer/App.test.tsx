@@ -15,6 +15,7 @@ import { App } from '../../src/renderer/src/App';
 import type {
   NovelLoopDesktopApi
 } from '../../src/shared/desktopApi';
+import { createInertChapterApi } from './desktopApiFixtures';
 import type {
   ProjectSummary
 } from '../../src/shared/projectContract';
@@ -91,7 +92,8 @@ function installReadiness(
         get: vi.fn(),
         cancel: vi.fn(),
         read: vi.fn()
-      }
+      },
+      chapter: createInertChapterApi()
     } satisfies NovelLoopDesktopApi
   });
   return getReadiness;
@@ -123,7 +125,8 @@ function installProjectApi(project: ProjectSummary) {
       get: vi.fn(),
       cancel: vi.fn(),
       read: vi.fn()
-    }
+    },
+    chapter: createInertChapterApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,
@@ -239,7 +242,8 @@ describe('production first-launch readiness', () => {
           get: vi.fn(),
           cancel: vi.fn(),
           read: vi.fn()
-        }
+        },
+        chapter: createInertChapterApi()
       } satisfies NovelLoopDesktopApi
     });
 

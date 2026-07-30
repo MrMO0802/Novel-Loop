@@ -18,6 +18,7 @@ import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import type { PlanningReviewResult } from '../../src/shared/planningContract';
 import type { ProjectSummary } from '../../src/shared/projectContract';
 import type { SystemReadiness } from '../../src/shared/systemContract';
+import { createInertChapterApi } from './desktopApiFixtures';
 
 const projectKey = 'project_0123456789abcdef01234567';
 const readiness: SystemReadiness = {
@@ -121,7 +122,8 @@ function installApi(result: PlanningReviewResult = review) {
       get: vi.fn(),
       cancel: vi.fn(),
       read: vi.fn().mockResolvedValue(result)
-    }
+    },
+    chapter: createInertChapterApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,

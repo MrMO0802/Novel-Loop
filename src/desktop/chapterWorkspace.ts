@@ -94,8 +94,14 @@ export async function inspectDesktopNextChapter(
 ): Promise<DesktopNextChapterInspection> {
   const context = createContext(input.projectRoot);
   const storyState = await readRequiredJson(context.paths.storyState(), StoryStateSchema);
+  if (storyState.projectId !== context.projectId) {
+    throw invalidChapterOutput('Story State project identity does not match the project root.');
+  }
   const queue = await readOptionalJson(context.paths.chapterQueue(), ChapterQueueSchema);
   if (queue === undefined) return { available: false, reason: 'global_plan_missing' };
+  if (queue.projectId !== context.projectId) {
+    throw invalidChapterOutput('Chapter queue project identity does not match the project root.');
+  }
 
   const chapterNumber = storyState.latestCommittedChapter + 1;
   validateQueueForNextChapter(queue.chapters, storyState.latestCommittedChapter, chapterNumber);
@@ -260,26 +266,36 @@ async function inspectPhase(
   const candidateDir = paths.chapterArtifact(chapterNumber, 'plan_candidates');
   const rankingPath = paths.chapterArtifact(chapterNumber, 'ranking.json');
   const selectedPlanPath = paths.chapterArtifact(chapterNumber, 'selected_plan.md');
-  const [missionPresent, candidatesPresent, rankingPresent, selectedPlanPresent] = await Promise.all([
-    pathExists(missionPath), pathExists(candidateDir), pathExists(rankingPath), pathExists(selectedPlanPath)
+  const sceneCardsPath = paths.chapterArtifact(chapterNumber, 'scene_cards.json');
+  const scenesDir = paths.chapterArtifact(chapterNumber, 'scenes');
+  const draftPath = paths.chapterArtifact(chapterNumber, 'draft_v1.md');
+  const [missionPresent, candidatesPresent, rankingPresent, selectedPlanPresent, sceneCardsPresent, scenesPresent, draftPresent] = await Promise.all([
+    pathExists(missionPath),
+    pathExists(candidateDir),
+    pathExists(rankingPath),
+    pathExists(selectedPlanPath),
+    pathExists(sceneCardsPath),
+    pathExists(scenesDir),
+    pathExists(draftPath)
   ]);
-  if (!missionPresent && !candidatesPresent && !rankingPresent && !selectedPlanPresent) return 'not_started';
+  const laterPlanningPresent = rankingPresent || selectedPlanPresent || sceneCardsPresent || scenesPresent || draftPresent;
+  const laterDraftingPresent = sceneCardsPresent || scenesPresent || draftPresent;
   if (!missionPresent) {
-    if (candidatesPresent || rankingPresent || selectedPlanPresent) {
+    if (candidatesPresent || laterPlanningPresent) {
       throw invalidChapterOutput('The planning artifact set is incomplete.');
     }
     return 'not_started';
   }
   await readRequiredJson(missionPath, ChapterMissionSchema);
   if (!candidatesPresent) {
-    if (rankingPresent || selectedPlanPresent) {
+    if (laterPlanningPresent) {
       throw invalidChapterOutput('The planning artifact set is incomplete.');
     }
     return 'planning_partial';
   }
   await requireDirectory(candidateDir);
   if (!rankingPresent) {
-    if (selectedPlanPresent) {
+    if (selectedPlanPresent || laterDraftingPresent) {
       throw invalidChapterOutput('The planning artifact set is incomplete.');
     }
     await validateCandidateDirectory(candidateDir);
@@ -287,16 +303,12 @@ async function inspectPhase(
   }
   await readPlanRankingArtifacts(paths, chapterNumber);
   if (!selectedPlanPresent) {
+    if (laterDraftingPresent) {
+      throw invalidChapterOutput('The planning artifact set is incomplete.');
+    }
     return 'planning_partial';
   }
   await readPlanArtifacts(paths, chapterNumber);
-
-  const sceneCardsPath = paths.chapterArtifact(chapterNumber, 'scene_cards.json');
-  const scenesDir = paths.chapterArtifact(chapterNumber, 'scenes');
-  const draftPath = paths.chapterArtifact(chapterNumber, 'draft_v1.md');
-  const [sceneCardsPresent, scenesPresent, draftPresent] = await Promise.all([
-    pathExists(sceneCardsPath), pathExists(scenesDir), pathExists(draftPath)
-  ]);
   if (!sceneCardsPresent) {
     if (scenesPresent || draftPresent) {
       throw invalidChapterOutput('The drafting artifact set is incomplete.');
@@ -305,12 +317,20 @@ async function inspectPhase(
   }
   const sceneCards = await readRequiredJson(sceneCardsPath, SceneCardsSchema);
   if (!scenesPresent) {
+    if (draftPresent) {
+      throw invalidChapterOutput('The drafting artifact set is incomplete.');
+    }
     return 'drafting_partial';
   }
   await requireDirectory(scenesDir);
   for (const scene of sceneCards) {
     const scenePath = paths.chapterArtifact(chapterNumber, 'scenes', `${scene.sceneId}.md`);
-    if (!(await pathExists(scenePath))) return 'drafting_partial';
+    if (!(await pathExists(scenePath))) {
+      if (draftPresent) {
+        throw invalidChapterOutput('The drafting artifact set is incomplete.');
+      }
+      return 'drafting_partial';
+    }
     await readRequiredMarkdown(scenePath);
   }
   if (!draftPresent) return 'drafting_partial';
@@ -344,15 +364,50 @@ async function readPlanRankingArtifacts(paths: ProjectPaths, chapterNumber: numb
       throw invalidChapterOutput('The chapter plan ranking contains an invalid candidate.');
     }
     candidateIds.add(candidate.candidateId);
-    candidates.set(
-      candidate.candidateId,
-      await readRequiredMarkdown(paths.chapterArtifact(chapterNumber, 'plan_candidates', `${candidate.candidateId}.md`))
-    );
   }
   if (!candidateIds.has(ranking.selectedCandidateId)) {
     throw invalidChapterOutput('The selected chapter plan is not ranked.');
   }
+  await validateRankedCandidateDirectory(paths, chapterNumber, candidateIds);
+  for (const candidateId of candidateIds) {
+    candidates.set(
+      candidateId,
+      await readRequiredMarkdown(paths.chapterArtifact(chapterNumber, 'plan_candidates', `${candidateId}.md`))
+    );
+  }
   return { mission, ranking, candidates };
+}
+
+async function validateRankedCandidateDirectory(
+  paths: ProjectPaths,
+  chapterNumber: number,
+  candidateIds: Set<string>
+): Promise<void> {
+  const directoryPath = paths.chapterArtifact(chapterNumber, 'plan_candidates');
+  await requireDirectory(directoryPath);
+  const entries = await readdir(directoryPath);
+  const expectedFileNames = new Set([...candidateIds].map((candidateId) => `${candidateId}.md`));
+  if (entries.length !== expectedFileNames.size) {
+    throw invalidChapterOutput('The plan candidate directory does not match the ranking.');
+  }
+  for (const entry of entries) {
+    const entryPath = path.join(directoryPath, entry);
+    let stat;
+    try {
+      stat = await lstat(entryPath);
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        throw invalidChapterOutput('A plan candidate changed while it was being validated.');
+      }
+      throw error;
+    }
+    if (!stat.isFile() || !entry.endsWith('.md') || !expectedFileNames.delete(entry)) {
+      throw invalidChapterOutput('The plan candidate directory does not match the ranking.');
+    }
+  }
+  if (expectedFileNames.size !== 0) {
+    throw invalidChapterOutput('A ranked plan candidate is missing.');
+  }
 }
 
 async function validateCandidateDirectory(directoryPath: string): Promise<void> {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -126,6 +126,71 @@ describe('desktop chapter workspace', () => {
     }
   }, 30_000);
 
+  test.each([
+    ['planning artifacts exist without the mission', async () => {
+      await rm(paths.chapterArtifact(1, 'mission.json'));
+    }],
+    ['drafting artifacts exist without the selected plan', async () => {
+      await rm(paths.chapterArtifact(1, 'selected_plan.md'));
+    }],
+    ['the draft exists without the scenes directory', async () => {
+      await rm(paths.chapterArtifact(1, 'scenes'), { recursive: true, force: true });
+    }],
+    ['the draft exists with a missing scene file', async () => {
+      await rm(paths.chapterArtifact(1, 'scenes', 'scene_001.md'));
+    }]
+  ])('rejects later artifacts when %s', async (_label, mutate) => {
+    await prepareGeneratedChapter();
+    await mutate();
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  }, 30_000);
+
+  test.each([
+    ['an unranked Markdown file', async () => {
+      await store.writeText(paths.chapterArtifact(1, 'plan_candidates', 'unranked.md'), '# Unranked\n\nNot ranked.\n');
+    }],
+    ['a nested directory', async () => {
+      await mkdir(paths.chapterArtifact(1, 'plan_candidates', 'nested'));
+    }],
+    ['a symlink', async () => {
+      await symlink(
+        paths.chapterArtifact(1, 'plan_candidates', 'plan_001.md'),
+        paths.chapterArtifact(1, 'plan_candidates', 'linked.md')
+      );
+    }]
+  ])('rejects a complete plan candidate directory containing %s', async (_label, mutate) => {
+    await prepareGeneratedChapter();
+    await mutate();
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  }, 30_000);
+
+  test('rejects a Story State copied from a different project identity', async () => {
+    await prepareGlobalPlan();
+    await store.writeJson(paths.storyState(), {
+      ...(await store.readJson(paths.storyState(), StoryStateSchema)),
+      projectId: 'another-project'
+    }, StoryStateSchema);
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  });
+
+  test('rejects a chapter queue copied from a different project identity', async () => {
+    await prepareGlobalPlan();
+    await updateQueue((queue) => {
+      queue.projectId = 'another-project';
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  });
+
   test('returns bounded author-facing plan and draft reviews without internal artifacts or identifiers', async () => {
     await prepareGeneratedChapter();
     const chapterTitle = (await readQueue()).chapters[0].title;
@@ -221,6 +286,9 @@ describe('desktop chapter workspace', () => {
 async function prepareGlobalPlan(): Promise<void> {
   await buildBible({ projectId, projectsRoot, provider: 'mock', promptRoot, runId: 'desktop_chapter_bible' });
   await planGlobal({ projectId, projectsRoot, provider: 'mock', promptRoot, runId: 'desktop_chapter_global_plan' });
+  await updateQueue((queue) => {
+    queue.projectId = projectId;
+  });
 }
 
 async function prepareGeneratedChapter(): Promise<void> {

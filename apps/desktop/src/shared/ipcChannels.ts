@@ -14,5 +14,12 @@ export const IPC_CHANNELS = {
   planningStart: 'novel-loop:planning:start',
   planningGet: 'novel-loop:planning:get',
   planningCancel: 'novel-loop:planning:cancel',
-  planningRead: 'novel-loop:planning:read'
+  planningRead: 'novel-loop:planning:read',
+  chapterInspect: 'novel-loop:chapter:inspect',
+  chapterStartPlanning: 'novel-loop:chapter:start-planning',
+  chapterStartDrafting: 'novel-loop:chapter:start-drafting',
+  chapterGet: 'novel-loop:chapter:get',
+  chapterCancel: 'novel-loop:chapter:cancel',
+  chapterReadPlan: 'novel-loop:chapter:read-plan',
+  chapterReadDraft: 'novel-loop:chapter:read-draft'
 } as const;

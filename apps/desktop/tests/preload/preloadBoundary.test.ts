@@ -7,7 +7,7 @@ const preloadPath = path.resolve('src/preload/index.ts');
 const apiPath = path.resolve('src/shared/desktopApi.ts');
 
 describe('typed preload boundary', () => {
-  test('exposes only named system, project, foundation, and planning methods', () => {
+  test('exposes only named system, project, foundation, planning, and chapter methods', () => {
     const preload = readFileSync(preloadPath, 'utf8');
 
     expect(preload).toContain("contextBridge.exposeInMainWorld('novelLoop'");
@@ -41,6 +41,19 @@ describe('typed preload boundary', () => {
     expect(preload).toContain('IPC_CHANNELS.planningGet');
     expect(preload).toContain('IPC_CHANNELS.planningCancel');
     expect(preload).toContain('IPC_CHANNELS.planningRead');
+    expect(preload).toContain('chapter:');
+    expect(preload).toContain('inspect:');
+    expect(preload).toContain('startPlanning:');
+    expect(preload).toContain('startDrafting:');
+    expect(preload).toContain('readPlan:');
+    expect(preload).toContain('readDraft:');
+    expect(preload).toContain('IPC_CHANNELS.chapterInspect');
+    expect(preload).toContain('IPC_CHANNELS.chapterStartPlanning');
+    expect(preload).toContain('IPC_CHANNELS.chapterStartDrafting');
+    expect(preload).toContain('IPC_CHANNELS.chapterGet');
+    expect(preload).toContain('IPC_CHANNELS.chapterCancel');
+    expect(preload).toContain('IPC_CHANNELS.chapterReadPlan');
+    expect(preload).toContain('IPC_CHANNELS.chapterReadDraft');
     expect(preload).not.toMatch(/ipcRenderer\.(send|sendSync|on|once|postMessage)/);
     expect(preload).not.toMatch(/invoke\s*\(\s*(channel|name|key|input)/);
   });

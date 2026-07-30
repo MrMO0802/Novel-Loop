@@ -3,8 +3,11 @@ import path from 'node:path';
 
 import { createMainWindow } from './createMainWindow';
 import { NativeProjectDialog } from './dialogs/NativeProjectDialog';
+import { EngineChapterGateway } from './chapter/EngineChapterGateway';
+import { ProjectChapterService } from './chapter/ProjectChapterService';
 import { EngineFoundationGateway } from './foundation/EngineFoundationGateway';
 import { ProjectFoundationService } from './foundation/ProjectFoundationService';
+import { registerChapterHandlers } from './ipc/registerChapterHandlers';
 import { registerFoundationHandlers } from './ipc/registerFoundationHandlers';
 import { registerPlanningHandlers } from './ipc/registerPlanningHandlers';
 import { registerProjectHandlers } from './ipc/registerProjectHandlers';
@@ -57,6 +60,10 @@ void app.whenReady().then(() => {
     projects: projectService,
     gateway: new EnginePlanningGateway()
   });
+  const chapterService = new ProjectChapterService({
+    projects: projectService,
+    gateway: new EngineChapterGateway()
+  });
 
   registerSystemHandlers(
     {
@@ -107,6 +114,19 @@ void app.whenReady().then(() => {
       }
     },
     planningService,
+    rendererTarget.trustedRendererUrl
+  );
+
+  registerChapterHandlers(
+    {
+      handle: (channel, handler) => {
+        ipcMain.handle(channel, (event, request) => handler(
+          { senderFrame: { url: event.senderFrame?.url ?? '' } },
+          request
+        ));
+      }
+    },
+    chapterService,
     rendererTarget.trustedRendererUrl
   );
 

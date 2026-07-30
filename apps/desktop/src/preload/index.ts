@@ -19,6 +19,19 @@ import type {
   PlanningTask
 } from '../shared/planningContract';
 import type {
+  ChapterCancelRequest,
+  ChapterDraftReviewResult,
+  ChapterGetRequest,
+  ChapterInspectRequest,
+  ChapterInspection,
+  ChapterPlanReviewResult,
+  ChapterReadDraftRequest,
+  ChapterReadPlanRequest,
+  ChapterStartDraftingRequest,
+  ChapterStartPlanningRequest,
+  ChapterTask
+} from '../shared/chapterContract';
+import type {
   CreateProjectRequest,
   LibraryLocationSelection,
   ProjectLibraryResult,
@@ -138,6 +151,57 @@ const novelLoopApi: NovelLoopDesktopApi = {
         request
       );
       return response as PlanningReviewResult;
+    }
+  },
+  chapter: {
+    inspect: async (request: ChapterInspectRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterInspect,
+        request
+      );
+      return response as ChapterInspection;
+    },
+    startPlanning: async (request: ChapterStartPlanningRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterStartPlanning,
+        request
+      );
+      return response as ChapterTask;
+    },
+    startDrafting: async (request: ChapterStartDraftingRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterStartDrafting,
+        request
+      );
+      return response as ChapterTask;
+    },
+    get: async (request: ChapterGetRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterGet,
+        request
+      );
+      return response as ChapterTask;
+    },
+    cancel: async (request: ChapterCancelRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterCancel,
+        request
+      );
+      return response as ChapterTask;
+    },
+    readPlan: async (request: ChapterReadPlanRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterReadPlan,
+        request
+      );
+      return response as ChapterPlanReviewResult;
+    },
+    readDraft: async (request: ChapterReadDraftRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterReadDraft,
+        request
+      );
+      return response as ChapterDraftReviewResult;
     }
   }
 };

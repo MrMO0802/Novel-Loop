@@ -21,6 +21,19 @@ import type {
   PlanningStartRequest,
   PlanningTask
 } from './planningContract';
+import type {
+  ChapterCancelRequest,
+  ChapterDraftReviewResult,
+  ChapterGetRequest,
+  ChapterInspectRequest,
+  ChapterInspection,
+  ChapterPlanReviewResult,
+  ChapterReadDraftRequest,
+  ChapterReadPlanRequest,
+  ChapterStartDraftingRequest,
+  ChapterStartPlanningRequest,
+  ChapterTask
+} from './chapterContract';
 
 export interface NovelLoopDesktopApi {
   system: {
@@ -45,5 +58,14 @@ export interface NovelLoopDesktopApi {
     get(request: PlanningGetRequest): Promise<PlanningTask>;
     cancel(request: PlanningCancelRequest): Promise<PlanningTask>;
     read(request: PlanningReadRequest): Promise<PlanningReviewResult>;
+  };
+  chapter: {
+    inspect(request: ChapterInspectRequest): Promise<ChapterInspection>;
+    startPlanning(request: ChapterStartPlanningRequest): Promise<ChapterTask>;
+    startDrafting(request: ChapterStartDraftingRequest): Promise<ChapterTask>;
+    get(request: ChapterGetRequest): Promise<ChapterTask>;
+    cancel(request: ChapterCancelRequest): Promise<ChapterTask>;
+    readPlan(request: ChapterReadPlanRequest): Promise<ChapterPlanReviewResult>;
+    readDraft(request: ChapterReadDraftRequest): Promise<ChapterDraftReviewResult>;
   };
 }

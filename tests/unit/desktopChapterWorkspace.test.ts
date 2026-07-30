@@ -1,0 +1,266 @@
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+
+import { buildBible } from '../../src/app/buildBible.js';
+import { initProjectFromBriefText } from '../../src/app/initProject.js';
+import { planGlobal } from '../../src/app/planGlobal.js';
+import {
+  draftDesktopNextChapter,
+  inspectDesktopNextChapter,
+  planDesktopNextChapter,
+  readDesktopChapterDraft,
+  readDesktopChapterPlan
+} from '../../src/desktop/chapterWorkspace.js';
+import { ChapterQueueSchema, RunManifestV2Schema, StoryStateSchema } from '../../src/schemas/index.js';
+import { FileStore } from '../../src/storage/FileStore.js';
+import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { writeFakeCodex } from '../helpers/fakeCodex.js';
+
+const projectId = 'desktop-chapter-workspace';
+const promptRoot = path.resolve('prompts');
+const MAX_REVIEW_MARKDOWN_BYTES = 2 * 1024 * 1024;
+const store = new FileStore();
+let projectsRoot: string;
+let paths: ProjectPaths;
+
+beforeEach(async () => {
+  projectsRoot = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-desktop-chapter-workspace-'));
+  paths = new ProjectPaths(projectsRoot, projectId);
+  await initProjectFromBriefText({
+    projectId,
+    projectsRoot,
+    brief: '# Desktop Chapter Workspace\n\n## Core Idea\n\nA filtered next chapter boundary.\n'
+  });
+});
+
+afterEach(async () => {
+  await rm(projectsRoot, { recursive: true, force: true });
+});
+
+describe('desktop chapter workspace', () => {
+  test('inspects only the Story State next chapter and derives public phases from valid artifacts', async () => {
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toEqual({
+      available: false,
+      reason: 'global_plan_missing'
+    });
+
+    await prepareGlobalPlan();
+    const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
+    const inspection = await inspectDesktopNextChapter({ projectRoot: paths.projectRoot });
+    expect(inspection).toMatchObject({ available: true, phase: 'not_started' });
+    if (!inspection.available) throw new Error('Next chapter unexpectedly unavailable.');
+    expect(inspection.chapterNumber).toBe(storyState.latestCommittedChapter + 1);
+
+    await store.writeText(paths.chapterArtifact(1, 'mission.json'), '{"invalid":true}\n');
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  });
+
+  test('pins planning and drafting to codex-text while preserving Story State bytes', async () => {
+    await prepareGlobalPlan();
+    const fake = await writeFakeCodex(projectsRoot);
+    const previousCodexBin = process.env.NLE_CODEX_BIN;
+    process.env.NLE_CODEX_BIN = fake.codexBin;
+    const beforeStateHash = await sha256(paths.storyState());
+
+    try {
+      await expect(planDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toEqual({
+        chapterNumber: 1,
+        completed: true
+      });
+      const planningManifest = await store.readJson(await findChapterRunManifest(), RunManifestV2Schema);
+      const capturedProvider = planningManifest.provider;
+      expect(capturedProvider).toBe('codex-text');
+
+      await expect(draftDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toEqual({
+        chapterNumber: 1,
+        completed: true
+      });
+      expect(await sha256(paths.storyState())).toBe(beforeStateHash);
+    } finally {
+      if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
+      else process.env.NLE_CODEX_BIN = previousCodexBin;
+    }
+  }, 30_000);
+
+  test('recovers the last valid public phase after interrupted planning and drafting', async () => {
+    await prepareGlobalPlan();
+    const fake = await writeFakeCodex(projectsRoot);
+    const previousCodexBin = process.env.NLE_CODEX_BIN;
+    process.env.NLE_CODEX_BIN = fake.codexBin;
+    let stopPlanning = false;
+
+    try {
+      await expect(planDesktopNextChapter({
+        projectRoot: paths.projectRoot,
+        shouldStop: () => stopPlanning,
+        onProgress: (event) => {
+          if (event.stage === 'mission' && event.state === 'completed') stopPlanning = true;
+        }
+      })).rejects.toMatchObject({ code: 'CHAPTER_PLANNING_CANCELLED' });
+      await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+        available: true,
+        phase: 'planning_partial'
+      });
+
+      await planDesktopNextChapter({ projectRoot: paths.projectRoot });
+      let stopDrafting = false;
+      await expect(draftDesktopNextChapter({
+        projectRoot: paths.projectRoot,
+        shouldStop: () => stopDrafting,
+        onProgress: (event) => {
+          if (event.stage === 'scene_cards' && event.state === 'completed') stopDrafting = true;
+        }
+      })).rejects.toMatchObject({ code: 'CHAPTER_DRAFT_CANCELLED' });
+      await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+        available: true,
+        phase: 'drafting_partial'
+      });
+    } finally {
+      if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
+      else process.env.NLE_CODEX_BIN = previousCodexBin;
+    }
+  }, 30_000);
+
+  test('returns bounded author-facing plan and draft reviews without internal artifacts or identifiers', async () => {
+    await prepareGeneratedChapter();
+    const chapterTitle = (await readQueue()).chapters[0].title;
+
+    const planReview = await readDesktopChapterPlan({ projectRoot: paths.projectRoot });
+    expect(planReview).toMatchObject({
+      available: true,
+      chapterNumber: 1,
+      title: chapterTitle,
+      selectedPlan: { title: 'Plan 001' },
+      alternatives: expect.arrayContaining([
+        { title: 'Plan 001', excerpt: expect.any(String), strengths: expect.any(Array), risks: expect.any(Array) }
+      ])
+    });
+    expect(JSON.stringify(planReview)).not.toMatch(
+      /artifactPath|runId|latestRunId|selectedPlanPath|plan_candidates|story_state|candidateId|totalScore|scores/i
+    );
+
+    const draftReview = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    expect(draftReview).toMatchObject({
+      available: true,
+      chapterNumber: 1,
+      title: chapterTitle,
+      markdown: expect.any(String),
+      scenes: expect.arrayContaining([{ summary: expect.any(String) }])
+    });
+    expect(JSON.stringify(draftReview)).not.toMatch(
+      /artifactPath|runId|contextManifest|scene_cards\.json|draft_v1\.md|story_state/i
+    );
+  }, 30_000);
+
+  test('fails closed for stale, already committed, sequence-gap, and missing target queue states', async () => {
+    await prepareGlobalPlan();
+
+    await updateQueue((queue) => {
+      queue.chapters[0].status = 'stale_due_to_history_edit';
+    });
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_STALE'
+    });
+
+    await updateQueue((queue) => {
+      queue.chapters[0].status = 'committed';
+    });
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: expect.stringMatching(/^DESKTOP_CHAPTER_/)
+    });
+
+    await updateQueue((queue) => {
+      queue.chapters = queue.chapters.filter((chapter) => chapter.chapterNumber !== 1);
+    });
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: expect.stringMatching(/^DESKTOP_CHAPTER_/)
+    });
+
+    await updateQueue((queue) => {
+      queue.chapters = [];
+    });
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toEqual({
+      available: false,
+      reason: 'chapter_missing'
+    });
+  });
+
+  test('fails closed for non-file, oversized Markdown, and invalid JSON review artifacts', async () => {
+    await prepareGeneratedChapter();
+    const selectedPlanPath = paths.chapterArtifact(1, 'selected_plan.md');
+    await rm(selectedPlanPath);
+    await mkdir(selectedPlanPath);
+    await expect(readDesktopChapterPlan({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+
+    await rm(selectedPlanPath, { recursive: true, force: true });
+    await store.writeText(selectedPlanPath, 'x'.repeat(MAX_REVIEW_MARKDOWN_BYTES + 1));
+    await expect(readDesktopChapterPlan({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+
+    await store.writeText(selectedPlanPath, '# Selected\n\nA valid selected plan.\n');
+    await store.writeText(paths.chapterArtifact(1, 'ranking.json'), '{"invalid":true}\n');
+    await expect(readDesktopChapterPlan({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+
+    await store.writeText(paths.chapterArtifact(1, 'scene_cards.json'), '{"invalid":true}\n');
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  }, 30_000);
+});
+
+async function prepareGlobalPlan(): Promise<void> {
+  await buildBible({ projectId, projectsRoot, provider: 'mock', promptRoot, runId: 'desktop_chapter_bible' });
+  await planGlobal({ projectId, projectsRoot, provider: 'mock', promptRoot, runId: 'desktop_chapter_global_plan' });
+}
+
+async function prepareGeneratedChapter(): Promise<void> {
+  await prepareGlobalPlan();
+  const fake = await writeFakeCodex(projectsRoot);
+  const previousCodexBin = process.env.NLE_CODEX_BIN;
+  process.env.NLE_CODEX_BIN = fake.codexBin;
+  try {
+    await planDesktopNextChapter({ projectRoot: paths.projectRoot });
+    await draftDesktopNextChapter({ projectRoot: paths.projectRoot });
+  } finally {
+    if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
+    else process.env.NLE_CODEX_BIN = previousCodexBin;
+  }
+}
+
+async function updateQueue(mutator: (queue: Awaited<ReturnType<typeof readQueue>>) => void): Promise<void> {
+  const queue = await readQueue();
+  mutator(queue);
+  await store.writeJson(paths.chapterQueue(), queue, ChapterQueueSchema);
+}
+
+async function readQueue() {
+  return store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+}
+
+async function findChapterRunManifest(): Promise<string> {
+  const runIds = await readdir(paths.runsDir());
+  for (const runId of runIds) {
+    const manifestPath = paths.runManifest(runId);
+    try {
+      const manifest = await store.readJson(manifestPath, RunManifestV2Schema);
+      if (manifest.command === 'chapter') return manifestPath;
+    } catch {
+      // Ignore unrelated or incomplete run directories.
+    }
+  }
+  throw new Error('Expected a chapter run manifest.');
+}
+
+async function sha256(filePath: string): Promise<string> {
+  return createHash('sha256').update(await readFile(filePath)).digest('hex');
+}

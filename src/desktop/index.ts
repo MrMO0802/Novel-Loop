@@ -31,3 +31,16 @@ export {
   type DesktopGlobalPlanningReview,
   type ReadDesktopGlobalPlanningInput
 } from './globalPlanning.js';
+
+export {
+  draftDesktopNextChapter,
+  inspectDesktopNextChapter,
+  planDesktopNextChapter,
+  readDesktopChapterDraft,
+  readDesktopChapterPlan,
+  type DesktopChapterDraftingInput,
+  type DesktopChapterDraftReview,
+  type DesktopChapterPlanReview,
+  type DesktopChapterPlanningInput,
+  type DesktopNextChapterInspection
+} from './chapterWorkspace.js';

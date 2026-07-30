@@ -2,12 +2,50 @@
 
 ## Purpose
 
-Run five invited-author sessions against the fixture-driven desktop prototype. The facilitator evaluates whether authors understand the manuscript workflow, evidence, non-canonical revision states, formal commit preview, and safe recovery without being taught internal system terminology.
+Verify the integrated Electron chapter milestone and run invited-author sessions against clearly identified current or forward-looking prototype surfaces. The facilitator evaluates whether authors understand the manuscript workflow and the difference between a non-canonical draft and formally committed story state without being taught internal system terminology.
+
+## Integrated Electron Chapter Milestone
+
+### Requirements And Launch
+
+- Ubuntu 24.04 with Node.js 20 or newer and Corepack.
+- A local Codex CLI installation that is already logged in and passes the application's environment check.
+- The repository dependencies installed with `corepack pnpm install`.
+
+Launch the source build:
+
+```bash
+corepack pnpm desktop:dev
+```
+
+The Vite URL printed by the development command serves only the Electron
+renderer. Use the Electron window, not a separate browser tab.
+
+### Current Manual Flow
+
+1. Open an initialized Novel Loop project whose Story Foundation and global planning are available.
+2. Open the global planning review and choose `创建第 1 章`.
+3. Confirm preparation of the chapter direction. Check that progress covers mission, alternatives, ranking, and review preparation.
+4. Review the complete chapter mission, selected direction, and collapsed alternatives.
+5. Choose `确认方向并生成草稿`, then make the second explicit confirmation.
+6. Wait for scene planning, per-scene drafting, and initial-draft assembly.
+7. Confirm the Chapter Workspace labels the result `初稿` and states that it has not been written to formal Story State.
+
+Acceptance evidence:
+
+- `mission.json`, three plan candidates, `ranking.json`, `selected_plan.md`, `scene_cards.json`, individual scene files, and `draft_v1.md` exist for the chapter.
+- `state/story_state.json` is byte-for-byte unchanged and `latestCommittedChapter` has not advanced.
+- No diagnostics, revision plan, `final.md`, canon patch, commit report, or commit snapshot is created.
+- Renderer access remains limited to the typed preload API; it has no Node.js, filesystem, shell, provider-selection, or Codex-command capability.
+
+This milestone uses real local Codex when run manually. The required Electron
+regression test uses an exact allowlisted fake Codex so it is deterministic and
+does not consume local Codex quota.
 
 ## Facilitator Preparation
 
-- Use the current fixture build at 1440 x 900 or 1024 x 720 and confirm the browser zoom is 100 percent.
-- Prepare a separate fresh browser context for each participant so draft and decision fixtures begin in their default state.
+- Use the current Electron build at 1440 x 900 or 1024 x 720 and confirm zoom is 100 percent.
+- Prepare a separate fresh local project for each integrated-flow participant. Use a separate fixture context only for the forward-looking research tasks that are not implemented in Electron yet.
 - Confirm the timeout and crash routes open their recovery guidance.
 - Record screen and audio only after consent. Keep notes under a participant code, not a real name.
 - Do not expose source code, test output, technical details, or engine terminology during the session.
@@ -53,7 +91,13 @@ Stop a task after five minutes, after two unsuccessful attempts at the same acti
 
 ## Prototype Limitations
 
-All content and task results are controlled fixtures. The prototype has no engine, Codex, Electron, provider, filesystem, project-file, persistence, or real Story Record integration. Formal commit, recovery, and saved draft outcomes are visual simulations. Do not draw conclusions about performance, model quality, or real data safety from these sessions.
+The integrated Electron path uses the local Novel Loop Engine, project files,
+and read-only `codex-text` provider through initial draft. It does not yet
+support manual draft editing, diagnostics, revision comparison, `final.md`,
+canon patch review, formal commit, or automatic recovery. Tasks in this script
+that exercise those later surfaces remain forward-looking fixture research and
+must be introduced to participants as simulations. Do not infer production
+model quality, commit safety, or recovery guarantees from fixture-only tasks.
 
 ## Post-Session Synthesis Checklist
 

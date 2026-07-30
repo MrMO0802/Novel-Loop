@@ -39,9 +39,20 @@ corepack pnpm novel-loop validate demo-novel
 
 ## Desktop Prototype Status
 
-The local Electron prototype now connects Story Foundation and global planning: an author can open a project, review the generated Story Foundation, confirm planning, follow its progress, and read the all-book direction, first-volume outline, story arcs, and chapter plan. Chapter creation remains the next desktop milestone; it is not exposed by this prototype yet.
+The local Electron prototype now connects Story Foundation, global planning, and the first chapter workflow through `draft_v1.md`. An author can open a project, review the generated Story Foundation, confirm global planning, create the next chapter, review its mission and selected direction, explicitly confirm drafting, and read the resulting initial draft with its scene summary.
 
-The desktop boundary remains local and narrow: the renderer uses a typed preload API, Electron main owns project access and invokes the local Codex provider, and Codex runs through the existing read-only execution policy. Story Foundation and global planning may write generated strategy or planning artifacts together with local run, provenance, and supporting artifacts. They do not submit a chapter or mutate `state/story_state.json`.
+Run the current source build as an Electron desktop application:
+
+```bash
+corepack pnpm install
+corepack pnpm desktop:dev
+```
+
+The chapter workflow requires a locally installed and logged-in Codex CLI. Novel Loop checks the local binary and invokes it through the existing `codex-text` read-only boundary. The Vite renderer URL printed during development is an internal Electron development server; the author-facing product opens in the Electron window.
+
+The desktop boundary remains local and narrow: the renderer uses a typed preload API, Electron main owns project access and invokes the local Codex provider, and Codex runs with sandbox `read-only`, approval policy `never`, and no workspace-write capability. Story Foundation, global planning, chapter planning, scenes, and `draft_v1.md` may write generated non-canonical artifacts together with local run and provenance records. They do not submit a chapter or mutate `state/story_state.json`.
+
+This milestone stops at a read-only initial draft. Manual editing and autosave, diagnostics, revision candidates, `final.md`, canon patch generation, state diff, approval, snapshots, and chapter commit are not available in the desktop application yet.
 
 ## Quickstart: Mock Demo
 

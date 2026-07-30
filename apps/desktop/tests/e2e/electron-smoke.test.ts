@@ -17,6 +17,32 @@ const PLANNING_PROMPT_IDS = [
   'planning.generate_arc_map_minimal_json',
   'planning.generate_chapter_queue_minimal_json'
 ] as const;
+const CHAPTER_PROMPT_IDS = [
+  'planning.plan_chapter_mission_slim',
+  'planning.generate_plan_candidates_slim',
+  'planning.rank_plan_candidates_slim',
+  'planning.generate_scene_cards_slim',
+  'production.write_scene',
+  'production.write_scene'
+] as const;
+const FULL_DRAFT_PROMPT_IDS = [
+  ...PLANNING_PROMPT_IDS,
+  ...CHAPTER_PROMPT_IDS
+] as const;
+const JSON_SCHEMA_BY_PROMPT = {
+  'planning.generate_arc_map_minimal_json':
+    'planning.arc_map.slim.schema.json',
+  'planning.generate_chapter_queue_minimal_json':
+    'planning.chapter_queue.slim.schema.json',
+  'planning.plan_chapter_mission_slim':
+    'planning.chapter_mission.slim.schema.json',
+  'planning.generate_plan_candidates_slim':
+    'planning.plan_candidates.slim.schema.json',
+  'planning.rank_plan_candidates_slim':
+    'planning.ranking.slim.schema.json',
+  'planning.generate_scene_cards_slim':
+    'drafting.scene_cards.slim.schema.json'
+} as const;
 
 function readKernelSetting(settingPath: string): string | null {
   try {
@@ -114,6 +140,7 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
           await navigator.permissions.query({ name: 'notifications' })
         ).state,
         projectLibrary: await window.novelLoop.projects.list(),
+        chapterKeys: Object.keys(window.novelLoop.chapter),
         foundationKeys: Object.keys(window.novelLoop.foundation),
         planningKeys: Object.keys(window.novelLoop.planning),
         projectKeys: Object.keys(window.novelLoop.projects),
@@ -121,7 +148,16 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
       }));
 
       expect(boundary).toEqual({
-        apiKeys: ['system', 'projects', 'foundation', 'planning'],
+        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter'],
+        chapterKeys: [
+          'inspect',
+          'startPlanning',
+          'startDrafting',
+          'get',
+          'cancel',
+          'readPlan',
+          'readDraft'
+        ],
         hasReadinessMethod: true,
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined',
@@ -169,8 +205,8 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
   }
 });
 
-test('authors can complete global planning from Story Foundation without changing Story State', async () => {
-  test.setTimeout(60_000);
+test('authors can create chapter one through planning review and initial draft without changing Story State', async () => {
+  test.setTimeout(120_000);
   const blocker = secureSandboxBlocker();
   if (
     blocker !== null
@@ -274,11 +310,67 @@ test('authors can complete global planning from Story Foundation without changin
       await page.getByRole('tab', { name: '章节计划' }).click();
       await expect(page.getByText('第 1 章 The Radio Wakes')).toBeVisible();
 
-      await page.getByRole('button', { name: '返回项目概览' }).click();
-      const globalPlanStatus = page.locator('dt', { hasText: '全局规划' })
-        .locator('xpath=following-sibling::dd');
-      await expect(globalPlanStatus).toHaveText('已准备');
-      await expect(page.getByRole('button', { name: '查看全局规划' })).toBeVisible();
+      await page.getByRole('button', { name: '创建第 1 章' }).click();
+      await expect(page.getByRole('heading', {
+        name: '准备第 1 章方向'
+      })).toBeVisible();
+      await page.getByRole('button', {
+        name: '开始准备章节方向'
+      }).click();
+
+      await expect(page.getByRole('heading', {
+        name: '审阅第 1 章方向'
+      })).toBeVisible({
+        timeout: 45_000
+      });
+      await expect(page.getByRole('heading', { name: '本章任务' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '必须完成' })).toBeVisible();
+      await expect(page.getByRole('heading', {
+        name: '推进的悬念与承诺'
+      })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '人物变化' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '读者会知道' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: '本章不能做' })).toBeVisible();
+      await expect(page.getByText('选定方向：Plan 001')).toBeVisible();
+
+      await page.getByRole('button', {
+        name: '确认方向并生成草稿'
+      }).click();
+      await expect(page.getByRole('heading', {
+        name: '确认开始生成初稿'
+      })).toBeFocused();
+      await page.getByRole('button', { name: '开始生成草稿' }).click();
+
+      await expect(page.getByText('初稿', { exact: true })).toBeVisible({
+        timeout: 45_000
+      });
+      await expect(page.getByRole('heading', {
+        name: '第 1 章 The Radio Wakes'
+      })).toBeVisible();
+      await expect(page.getByText(
+        '当前只是初稿，尚未写入正式故事状态。'
+      )).toBeVisible();
+
+      const boundary = await page.evaluate(() => ({
+        apiKeys: Object.keys(window.novelLoop),
+        chapterKeys: Object.keys(window.novelLoop.chapter),
+        nodeProcessType: typeof globalThis.process,
+        nodeRequireType: typeof globalThis.require
+      }));
+      expect(boundary).toEqual({
+        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter'],
+        chapterKeys: [
+          'inspect',
+          'startPlanning',
+          'startDrafting',
+          'get',
+          'cancel',
+          'readPlan',
+          'readDraft'
+        ],
+        nodeProcessType: 'undefined',
+        nodeRequireType: 'undefined'
+      });
     } finally {
       await application.close();
     }
@@ -286,8 +378,8 @@ test('authors can complete global planning from Story Foundation without changin
     const calls = await readPlanningFakeCalls(
       path.join(temporaryRoot, 'planning-codex-calls.ndjson')
     );
-    expect(calls.map((call) => call.promptId)).toEqual(PLANNING_PROMPT_IDS);
-    expect(calls).toHaveLength(PLANNING_PROMPT_IDS.length);
+    expect(calls.map((call) => call.promptId)).toEqual(FULL_DRAFT_PROMPT_IDS);
+    expect(calls).toHaveLength(FULL_DRAFT_PROMPT_IDS.length);
     for (const call of calls) {
       expect(call.outputPath.startsWith(`${projectRoot}${path.sep}`)).toBe(true);
       expect(call.args).toContain('--sandbox');
@@ -301,15 +393,93 @@ test('authors can complete global planning from Story Foundation without changin
         '--bypass-approvals-and-sandbox',
         '--no-sandbox'
       ]));
+      const schemaName = JSON_SCHEMA_BY_PROMPT[
+        call.promptId as keyof typeof JSON_SCHEMA_BY_PROMPT
+      ];
+      if (schemaName === undefined) {
+        expect(call.args).not.toContain('--output-schema');
+      } else {
+        const schemaIndex = call.args.indexOf('--output-schema');
+        expect(schemaIndex).toBeGreaterThan(-1);
+        expect(call.args[schemaIndex + 1]).toBe(
+          path.join(
+            repositoryRoot,
+            'schemas',
+            'codex-output',
+            'slim',
+            schemaName
+          )
+        );
+      }
+    }
+    for (const expectedPlanningArtifact of [
+      'mission.json',
+      path.join('plan_candidates', 'plan_001.md'),
+      path.join('plan_candidates', 'plan_002.md'),
+      path.join('plan_candidates', 'plan_003.md'),
+      'ranking.json',
+      'selected_plan.md',
+      'scene_cards.json'
+    ]) {
+      await expect(readFile(
+        path.join(
+          projectRoot,
+          'chapters',
+          'chapter_001',
+          expectedPlanningArtifact
+        ),
+        'utf8'
+      )).resolves.not.toHaveLength(0);
+    }
+    const sceneCards = JSON.parse(
+      await readFile(
+        path.join(projectRoot, 'chapters', 'chapter_001', 'scene_cards.json'),
+        'utf8'
+      )
+    ) as Array<{ sceneId: string }>;
+    expect(sceneCards.map((scene) => scene.sceneId)).toEqual([
+      'scene_001',
+      'scene_002'
+    ]);
+    await expect(readFile(
+      path.join(projectRoot, 'chapters', 'chapter_001', 'draft_v1.md'),
+      'utf8'
+    )).resolves.toContain('# Chapter 001 Draft');
+    await expect(readFile(
+      path.join(projectRoot, 'chapters', 'chapter_001', 'scenes', 'scene_001.md'),
+      'utf8'
+    )).resolves.toContain('Codex scene 1');
+    await expect(readFile(
+      path.join(projectRoot, 'chapters', 'chapter_001', 'scenes', 'scene_002.md'),
+      'utf8'
+    )).resolves.toContain('Codex scene 2');
+    for (const forbiddenArtifact of [
+      'diagnostics_v1.json',
+      'revision_plan_v1.json',
+      'final.md',
+      'canon_patch.json',
+      'commit_report.json'
+    ]) {
+      await expect(readFile(
+        path.join(projectRoot, 'chapters', 'chapter_001', forbiddenArtifact),
+        'utf8'
+      )).rejects.toMatchObject({ code: 'ENOENT' });
     }
     await expect(sha256(path.join(projectRoot, 'state', 'story_state.json')))
       .resolves.toBe(storyStateHashBefore);
+    const storyState = JSON.parse(
+      await readFile(
+        path.join(projectRoot, 'state', 'story_state.json'),
+        'utf8'
+      )
+    ) as { latestCommittedChapter: number };
+    expect(storyState.latestCommittedChapter).toBe(0);
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
   }
 });
 
-test('planning fake Codex rejects unknown commands, prompts, and unsafe execution flags', async () => {
+test('chapter-flow fake Codex rejects unknown commands, prompts, schemas, operations, and unsafe execution flags', async () => {
   const temporaryRoot = await mkdtemp(
     path.join(tmpdir(), 'novel-loop-electron-fake-codex-')
   );
@@ -344,9 +514,35 @@ test('planning fake Codex rejects unknown commands, prompts, and unsafe executio
       '--output-last-message',
       outputPath,
       '-'
-    ], 'PROMPT_ID: planning.unknown_stage\n')).rejects.toThrow(
-      'Unknown planning prompt ID'
+    ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[1]}\n`)).rejects.toThrow(
+      'Unknown or out-of-order fake Codex prompt'
     );
+    for (const forbiddenPromptId of [
+      'planning.unknown_stage',
+      'revision.final_chapter',
+      'memory.extract_canon_patch_proposal_slim',
+      'chapter.commit',
+      'chapter.recommit',
+      'chapter.regenerate_stale',
+      'provider.openai',
+      'shell.exec'
+    ]) {
+      await expect(runFakeCodex(fake.codexBin, [
+        '--ask-for-approval',
+        'never',
+        'exec',
+        '--sandbox',
+        'read-only',
+        '--skip-git-repo-check',
+        '--ephemeral',
+        '--json',
+        '--output-last-message',
+        outputPath,
+        '-'
+      ], `PROMPT_ID: ${forbiddenPromptId}\n`)).rejects.toThrow(
+        'Unknown or out-of-order fake Codex prompt'
+      );
+    }
     await expect(runFakeCodex(fake.codexBin, [
       '--ask-for-approval',
       'never',
@@ -379,6 +575,32 @@ test('planning fake Codex rejects unknown commands, prompts, and unsafe executio
     ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[0]}\n`)).rejects.toThrow(
       'Unexpected Codex execution arguments'
     );
+    for (const forbiddenArguments of [
+      ['--provider', 'mock'],
+      ['--shell', 'bash'],
+      ['--commit'],
+      ['--final'],
+      ['--patch'],
+      ['--recommit'],
+      ['--regenerate-stale']
+    ]) {
+      await expect(runFakeCodex(fake.codexBin, [
+        '--ask-for-approval',
+        'never',
+        'exec',
+        '--sandbox',
+        'read-only',
+        '--skip-git-repo-check',
+        '--ephemeral',
+        '--json',
+        '--output-last-message',
+        outputPath,
+        '-',
+        ...forbiddenArguments
+      ], `PROMPT_ID: ${PLANNING_PROMPT_IDS[0]}\n`)).rejects.toThrow(
+        'Unexpected Codex execution arguments'
+      );
+    }
     await expect(runFakeCodex(fake.codexBin, [
       '--ask-for-approval',
       'never',
@@ -535,7 +757,7 @@ async function writePlanningFakeCodex(root: string): Promise<{ codexBin: string 
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
-const expectedPromptIds = ${JSON.stringify(PLANNING_PROMPT_IDS)};
+const expectedPromptIds = ${JSON.stringify(FULL_DRAFT_PROMPT_IDS)};
 const callsLogPath = ${JSON.stringify(callsLogPath)};
 const statePath = ${JSON.stringify(statePath)};
 const expectedProjectRoot = path.resolve(${JSON.stringify(expectedProjectRoot)});
@@ -579,12 +801,16 @@ const stdin = fs.readFileSync(0, 'utf8');
 const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || '';
 const completedPromptIds = readCompletedPromptIds();
 if (promptId !== expectedPromptIds[completedPromptIds.length]) {
-  process.stderr.write('Unknown planning prompt ID or unexpected planning prompt order');
+  process.stderr.write('Unknown or out-of-order fake Codex prompt');
   process.exit(2);
 }
 const jsonSchemaNames = {
   'planning.generate_arc_map_minimal_json': 'planning.arc_map.slim.schema.json',
-  'planning.generate_chapter_queue_minimal_json': 'planning.chapter_queue.slim.schema.json'
+  'planning.generate_chapter_queue_minimal_json': 'planning.chapter_queue.slim.schema.json',
+  'planning.plan_chapter_mission_slim': 'planning.chapter_mission.slim.schema.json',
+  'planning.generate_plan_candidates_slim': 'planning.plan_candidates.slim.schema.json',
+  'planning.rank_plan_candidates_slim': 'planning.ranking.slim.schema.json',
+  'planning.generate_scene_cards_slim': 'drafting.scene_cards.slim.schema.json'
 };
 const schemaName = jsonSchemaNames[promptId];
 const expectedLength = schemaName === undefined ? 11 : 13;
@@ -633,11 +859,93 @@ const outputs = {
   'planning.generate_global_outline_text': '# Codex Global Outline\\n\\nA three chapter opening arc around the radio signal.\\n',
   'planning.generate_volume_outline_text': '# Codex Volume 01 Outline\\n\\nThe radio mystery escalates through the first volume.\\n',
   'planning.generate_arc_map_minimal_json': JSON.stringify({ arcs: [{ id: 'arc_radio', name: 'Radio Signal', type: 'plot', summary: 'The signal pulls Lin Cheng toward the old building.' }] }),
-  'planning.generate_chapter_queue_minimal_json': JSON.stringify({ chapters: [{ chapterNumber: 1, title: 'The Radio Wakes', summary: 'The radio speaks without power.', primaryFunction: 'Open the impossible broadcast.', targetDebts: [] }, { chapterNumber: 2, title: 'The Elevator Log', summary: 'The elevator records an impossible stop.', primaryFunction: 'Escalate the building mystery.', targetDebts: [] }, { chapterNumber: 3, title: 'The Missing Floor', summary: 'Lin Cheng finds signs of a hidden floor.', primaryFunction: 'Create a strong midpoint hook.', targetDebts: [] }] })
+  'planning.generate_chapter_queue_minimal_json': JSON.stringify({ chapters: [{ chapterNumber: 1, title: 'The Radio Wakes', summary: 'The radio speaks without power.', primaryFunction: 'Open the impossible broadcast.', targetDebts: [] }, { chapterNumber: 2, title: 'The Elevator Log', summary: 'The elevator records an impossible stop.', primaryFunction: 'Escalate the building mystery.', targetDebts: [] }, { chapterNumber: 3, title: 'The Missing Floor', summary: 'Lin Cheng finds signs of a hidden floor.', primaryFunction: 'Create a strong midpoint hook.', targetDebts: [] }] }),
+  'planning.plan_chapter_mission_slim': JSON.stringify({
+    chapterNumber: 1,
+    chapterFunction: 'Open the impossible broadcast without resolving its source.',
+    objectives: [
+      'Show the powerless radio speaking.',
+      'Give Lin Cheng a concrete reason to investigate the old building.'
+    ],
+    debtsToPayOrAdvance: [],
+    debtsToIntroduce: [{
+      type: 'mystery',
+      promise: 'Why does the radio speak without power?',
+      importance: 8
+    }],
+    characterDeltas: [],
+    readerKnowledge: ['The radio speaks while disconnected from power.'],
+    readerQuestions: ['Who is sending the old building address?'],
+    forbiddenMoves: ['Do not reveal the final caller identity.']
+  }),
+  'planning.generate_plan_candidates_slim': JSON.stringify({
+    chapterNumber: 1,
+    candidates: [
+      {
+        id: 'plan_001',
+        title: 'Signal First',
+        summary: 'Open on the impossible signal and end on the address.',
+        markdown: '# Plan 001\\n\\nThe powerless radio interrupts Lin Cheng and repeats the address of the old building.'
+      },
+      {
+        id: 'plan_002',
+        title: 'Building First',
+        summary: 'Frame the building before introducing the radio.',
+        markdown: '# Plan 002\\n\\nA memory of the old building frames the first impossible broadcast.'
+      },
+      {
+        id: 'plan_003',
+        title: 'Quiet Discovery',
+        summary: 'Let Lin Cheng discover the radio gradually.',
+        markdown: '# Plan 003\\n\\nA quiet apartment scene slowly exposes the radio signal.'
+      }
+    ]
+  }),
+  'planning.rank_plan_candidates_slim': JSON.stringify({
+    chapterNumber: 1,
+    selectedCandidateId: 'plan_001',
+    rationale: 'The direct impossible signal creates the clearest hook.'
+  }),
+  'planning.generate_scene_cards_slim': JSON.stringify({
+    scenes: [
+      {
+        purpose: 'Establish the impossible broadcast.',
+        conflict: 'Lin Cheng tests every rational explanation while the voice continues.',
+        entryPoint: 'Lin Cheng sets the powerless radio on his desk.',
+        exitPoint: 'The radio says the old building address.',
+        location: 'Lin Cheng apartment',
+        characters: ['Lin Cheng']
+      },
+      {
+        purpose: 'Turn the broadcast into a decision.',
+        conflict: 'Lin Cheng must choose whether to ignore the warning.',
+        entryPoint: 'The address repeats after the room falls silent.',
+        exitPoint: 'Lin Cheng writes down the address and leaves.',
+        location: 'Apartment stairwell',
+        characters: ['Lin Cheng']
+      }
+    ]
+  })
 };
-const finalText = outputs[promptId];
+const expectedSceneId = promptId === 'production.write_scene'
+  ? 'scene_' + String(
+      completedPromptIds.filter((item) => item === 'production.write_scene').length + 1
+    ).padStart(3, '0')
+  : null;
+const sceneId = (stdin.match(/"sceneId"\\s*:\\s*"(scene_[0-9]{3})"/) || [])[1] || null;
+if (expectedSceneId !== null && sceneId !== expectedSceneId) {
+  process.stderr.write('Unexpected production.write_scene order or scene card');
+  process.exit(2);
+}
+const finalText = promptId === 'production.write_scene'
+  ? (
+      expectedSceneId === 'scene_001'
+        ? 'Codex scene 1: The powerless radio clicked awake and spoke the old building address.\\n'
+        : 'Codex scene 2: Lin Cheng copied the address, left the apartment, and chose to investigate.\\n'
+    )
+  : outputs[promptId];
 if (typeof finalText !== 'string') {
-  process.stderr.write('Unknown planning prompt ID');
+  process.stderr.write('Unknown fake Codex prompt');
   process.exit(2);
 }
 fs.writeFileSync(outputPath, finalText);

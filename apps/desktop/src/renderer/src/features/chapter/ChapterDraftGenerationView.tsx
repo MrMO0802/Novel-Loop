@@ -20,6 +20,7 @@ import type {
 } from '../../../../shared/chapterContract';
 import type { ProjectSummary } from '../../../../shared/projectContract';
 import { formatMessage, t } from '../../i18n/messages.zh-CN';
+import { shouldAcceptChapterTask } from './chapterTaskOrdering';
 
 const POLL_INTERVAL_MS = 250;
 const ACTIVE_STATUSES = new Set<ChapterTaskStatus>([
@@ -64,6 +65,7 @@ export function ChapterDraftGenerationView({
   const mounted = useRef(true);
   const requestToken = useRef(0);
   const terminalAccepted = useRef(false);
+  const latestTask = useRef<ChapterTask | null>(null);
   const completionRefreshStarted = useRef(false);
   const startIssued = useRef(false);
   const [task, setTask] = useState<ChapterTask | null>(null);
@@ -94,6 +96,8 @@ export function ChapterDraftGenerationView({
 
   const receiveTask = useCallback((next: ChapterTask) => {
     if (terminalAccepted.current) return;
+    if (!shouldAcceptChapterTask(latestTask.current, next)) return;
+    latestTask.current = next;
     if (TERMINAL_STATUSES.has(next.status)) {
       terminalAccepted.current = true;
     }
@@ -187,6 +191,7 @@ export function ChapterDraftGenerationView({
   const retry = () => {
     requestToken.current += 1;
     terminalAccepted.current = false;
+    latestTask.current = null;
     completionRefreshStarted.current = false;
     setTask(null);
     setLocalError(null);

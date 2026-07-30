@@ -301,13 +301,60 @@ describe('production first-launch readiness', () => {
     render(<App />);
     await openProjectFromLibrary(project);
 
-    expect(screen.getByRole('heading', { name: '阅读全局规划' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '查看全局规划' }));
+    expect(await screen.findByRole('heading', {
+      name: '阅读全局规划'
+    })).toBeVisible();
+    fireEvent.click(await screen.findByRole('button', {
+      name: '查看全局规划'
+    }));
 
     expect(await screen.findByRole('heading', { name: '全局规划' })).toBeVisible();
     expect(api.planning.read).toHaveBeenCalledWith({
       projectKey: project.projectKey
     });
+  });
+
+  test('keeps the next chapter action disabled until inspection settles', async () => {
+    const project = {
+      ...incompleteProject,
+      storyBibleAvailable: true,
+      globalPlanAvailable: true
+    };
+    const api = installProjectApi(project);
+    let resolveInspection: ((value: {
+      available: true;
+      chapterNumber: number;
+      title: string;
+      phase: 'not_started';
+    }) => void) | undefined;
+    api.chapter.inspect.mockReturnValue(new Promise((resolve) => {
+      resolveInspection = resolve;
+    }));
+
+    render(<App />);
+    await openProjectFromLibrary(project);
+
+    expect(screen.getByRole('heading', {
+      name: '正在确认下一步'
+    })).toBeVisible();
+    expect(screen.getByRole('button', {
+      name: '正在检查章节进度'
+    })).toBeDisabled();
+    expect(screen.queryByRole('button', {
+      name: '查看全局规划'
+    })).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveInspection?.({
+        available: true,
+        chapterNumber: 1,
+        title: '第一章',
+        phase: 'not_started'
+      });
+      await Promise.resolve();
+    });
+
+    expect(screen.getByRole('button', { name: '创建第 1 章' })).toBeEnabled();
   });
 
   test.each([

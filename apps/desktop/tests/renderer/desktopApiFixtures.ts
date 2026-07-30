@@ -51,6 +51,14 @@ export const completeChapterPlan: ChapterPlanReviewResult = {
       '林夕是否仍在下一轮循环中',
       '谁在删除异常报告'
     ],
+    narrativePromises: [
+      '推进“谁在删除异常报告”的悬念',
+      '建立林夕可能仍在下一轮循环中的故事承诺'
+    ],
+    characterDeltas: [
+      '林默：从逃避妹妹失踪转为主动追查循环',
+      '林默对林夕的判断：从确认失踪转为怀疑她仍在等待'
+    ],
     forbiddenMoves: [
       '不得揭示循环的最终成因',
       '不得让林默获得超出本章范围的答案'
@@ -120,4 +128,14 @@ export function chapterTask(
     error: null,
     ...overrides
   };
+}
+
+export function deferred<T>() {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, reject, resolve };
 }

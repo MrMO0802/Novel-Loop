@@ -26,6 +26,12 @@ interface ProjectOverviewProps {
   project: ProjectSummary;
 }
 
+type ChapterInspectionState =
+  | { kind: 'not_needed' }
+  | { kind: 'loading' }
+  | { kind: 'loaded'; inspection: ChapterInspection }
+  | { kind: 'failed' };
+
 export function ProjectOverview({
   onBack,
   onOpenChapterDraft,
@@ -41,7 +47,9 @@ export function ProjectOverview({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const requestToken = useRef(0);
   const [chapterInspection, setChapterInspection] =
-    useState<ChapterInspection | null>(null);
+    useState<ChapterInspectionState>(
+      project.globalPlanAvailable ? { kind: 'loading' } : { kind: 'not_needed' }
+    );
 
   useEffect(() => {
     headingRef.current?.focus();
@@ -49,19 +57,21 @@ export function ProjectOverview({
 
   useEffect(() => {
     if (!project.globalPlanAvailable) {
-      setChapterInspection(null);
+      setChapterInspection({ kind: 'not_needed' });
       return;
     }
+    setChapterInspection({ kind: 'loading' });
     const currentRequest = ++requestToken.current;
     void window.novelLoop.chapter.inspect({ projectKey: project.projectKey })
       .then((inspection) => {
         if (currentRequest === requestToken.current) {
-          setChapterInspection(inspection);
+          setChapterInspection({ kind: 'loaded', inspection });
         }
       })
       .catch(() => {
-        // Keep the existing planning-review action available if inspection
-        // cannot be refreshed.
+        if (currentRequest === requestToken.current) {
+          setChapterInspection({ kind: 'failed' });
+        }
       });
     return () => {
       requestToken.current += 1;
@@ -69,17 +79,22 @@ export function ProjectOverview({
   }, [project.globalPlanAvailable, project.projectKey]);
 
   const nextAction = project.globalPlanAvailable
-    ? chapterAction(chapterInspection, {
-      onOpenChapterDraft,
-      onPrepareChapter,
-      onResumeChapterDraft,
-      onReviewChapterPlan
-    }) ?? {
-      action: t('overview.planningReviewAction'),
-      note: t('overview.planningReviewActionNote'),
-      onClick: onReviewPlanning,
-      title: t('overview.planningReviewActionTitle')
-    }
+    ? chapterInspection.kind === 'loading'
+      ? {
+        action: t('overview.chapter.inspectingAction'),
+        disabled: true,
+        note: t('overview.chapter.inspectingNote'),
+        onClick: () => undefined,
+        title: t('overview.chapter.inspectingTitle')
+      }
+      : chapterInspection.kind === 'loaded'
+        ? chapterAction(chapterInspection.inspection, {
+          onOpenChapterDraft,
+          onPrepareChapter,
+          onResumeChapterDraft,
+          onReviewChapterPlan
+        }) ?? planningReviewAction(onReviewPlanning)
+        : planningReviewAction(onReviewPlanning)
     : project.storyBibleAvailable
       ? {
         action: t('overview.planningAction'),
@@ -184,6 +199,7 @@ export function ProjectOverview({
           <button
             aria-describedby="next-stage-note"
             className="nl-primary-action"
+            disabled={'disabled' in nextAction && nextAction.disabled}
             onClick={nextAction.onClick}
             type="button"
           >
@@ -202,6 +218,15 @@ export function ProjectOverview({
       </div>
     </main>
   );
+}
+
+function planningReviewAction(onClick: () => void) {
+  return {
+    action: t('overview.planningReviewAction'),
+    note: t('overview.planningReviewActionNote'),
+    onClick,
+    title: t('overview.planningReviewActionTitle')
+  };
 }
 
 function chapterAction(

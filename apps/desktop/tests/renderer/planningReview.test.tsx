@@ -128,7 +128,9 @@ function installApi(result: PlanningReviewResult = review) {
     },
     chapter: {
       ...createInertChapterApi(),
-      inspect: vi.fn().mockResolvedValue(readyChapterInspection)
+      inspect: vi.fn()
+        .mockRejectedValueOnce(new Error('chapter inspection unavailable'))
+        .mockResolvedValue(readyChapterInspection)
     }
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
@@ -142,7 +144,9 @@ async function openPlanningReview() {
   fireEvent.click(await screen.findByRole('button', { name: '进入作品库' }));
   fireEvent.click(await screen.findByRole('button', { name: '打开《雾港来信》' }));
   await screen.findByRole('heading', { name: '雾港来信' });
-  fireEvent.click(screen.getByRole('button', { name: '查看全局规划' }));
+  fireEvent.click(await screen.findByRole('button', {
+    name: '查看全局规划'
+  }));
   await screen.findByRole('heading', { name: '全局规划' });
   await screen.findByRole('tablist', { name: '全局规划内容' });
 }

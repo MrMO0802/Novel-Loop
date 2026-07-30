@@ -33,8 +33,23 @@ describe('chapter workspace Story State protection', () => {
     try {
       await context.gateway.plan(runInput(context.paths.projectRoot));
       expect(await sha256(context.paths.storyState())).toBe(before);
-      await expect(context.gateway.readPlan(context.paths.projectRoot))
-        .resolves.toMatchObject({ available: true });
+      const planReview = await context.gateway.readPlan(
+        context.paths.projectRoot
+      );
+      expect(planReview).toMatchObject({
+        available: true,
+        mission: {
+          narrativePromises: [
+            'Why does the radio speak without power?'
+          ],
+          characterDeltas: [
+            expect.stringMatching(/skeptical.*alert/i)
+          ]
+        }
+      });
+      expect(JSON.stringify(planReview)).not.toMatch(
+        /char_lincheng|mission_ch001_codex|debt_[a-z0-9_-]+/i
+      );
 
       await context.gateway.draft(runInput(context.paths.projectRoot));
       expect(await sha256(context.paths.storyState())).toBe(before);

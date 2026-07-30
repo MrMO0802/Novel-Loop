@@ -21,6 +21,7 @@ import {
   chapterTask,
   completeChapterPlan,
   createInertChapterApi,
+  deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
 
@@ -99,6 +100,16 @@ async function openProject() {
 
 async function openPlanningGeneration() {
   await openProject();
+  fireEvent.click(await screen.findByRole('button', {
+    name: '创建第 1 章'
+  }));
+}
+
+async function openPlanningGenerationFromGlobalPlan() {
+  await openProject();
+  fireEvent.click(await screen.findByRole('button', {
+    name: '查看全局规划'
+  }));
   fireEvent.click(await screen.findByRole('button', {
     name: '创建第 1 章'
   }));
@@ -225,14 +236,176 @@ describe('chapter planning generation', () => {
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
+  test('keeps stop_requested monotonic when an older planning poll resolves late', async () => {
+    const api = installApi();
+    const oldPoll = deferred<ReturnType<typeof chapterTask>>();
+    api.chapter.startPlanning.mockResolvedValue(chapterTask({
+      stage: 'mission',
+      completedStages: ['preparing'],
+      updatedAt: '2026-07-30T01:00:01.000Z'
+    }));
+    api.chapter.get.mockReturnValue(oldPoll.promise);
+    api.chapter.cancel.mockResolvedValue(chapterTask({
+      status: 'stop_requested',
+      stage: 'mission',
+      completedStages: ['preparing'],
+      canCancel: false,
+      updatedAt: '2026-07-30T01:00:03.000Z'
+    }));
+
+    render(<App />);
+    await openPlanningGeneration();
+    await screen.findByRole('button', { name: '开始准备章节方向' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', {
+      name: '开始准备章节方向'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(api.chapter.get).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '完成当前安全步骤后停止'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(
+      '已请求停止，会在当前安全步骤完成后暂停；已完成的内容会保留。'
+    )).toBeVisible();
+
+    await act(async () => {
+      oldPoll.resolve(chapterTask({
+        stage: 'ranking',
+        completedStages: ['preparing', 'mission', 'plan_candidates'],
+        updatedAt: '2026-07-30T01:00:02.000Z'
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(
+      '已请求停止，会在当前安全步骤完成后暂停；已完成的内容会保留。'
+    )).toBeVisible();
+    expect(screen.queryByRole('button', {
+      name: '完成当前安全步骤后停止'
+    })).not.toBeInTheDocument();
+  });
+
+  test('continues planning polling after a temporary get failure', async () => {
+    const api = installApi();
+    api.chapter.startPlanning.mockResolvedValue(chapterTask({
+      stage: 'mission',
+      completedStages: ['preparing']
+    }));
+    api.chapter.get
+      .mockRejectedValueOnce(new Error('/private/get unavailable'))
+      .mockResolvedValue(chapterTask({
+        stage: 'plan_candidates',
+        completedStages: ['preparing', 'mission'],
+        updatedAt: '2026-07-30T01:00:02.000Z'
+      }));
+
+    render(<App />);
+    await openPlanningGeneration();
+    await screen.findByRole('button', { name: '开始准备章节方向' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', {
+      name: '开始准备章节方向'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.getByText(
+      '暂时无法刷新进度，正在继续尝试。'
+    )).toBeVisible();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.getByText('正在比较不同章节方案')).toBeVisible();
+    expect(screen.queryByText(
+      '暂时无法刷新进度，正在继续尝试。'
+    )).not.toBeInTheDocument();
+  });
+
+  test('ignores an in-flight planning response after unmount', async () => {
+    const api = installApi();
+    const oldPoll = deferred<ReturnType<typeof chapterTask>>();
+    api.chapter.startPlanning.mockResolvedValue(chapterTask());
+    api.chapter.get.mockReturnValue(oldPoll.promise);
+
+    const rendered = render(<App />);
+    await openPlanningGeneration();
+    await screen.findByRole('button', { name: '开始准备章节方向' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', {
+      name: '开始准备章节方向'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    const inspectionsBeforeUnmount = api.chapter.inspect.mock.calls.length;
+    rendered.unmount();
+
+    await act(async () => {
+      oldPoll.resolve(chapterTask({
+        status: 'succeeded',
+        stage: 'completed',
+        completedStages: ['preparing', 'mission', 'plan_candidates', 'ranking',
+          'finalizing', 'completed'],
+        canCancel: false,
+        updatedAt: '2026-07-30T01:00:02.000Z'
+      }));
+      await Promise.resolve();
+    });
+
+    expect(api.chapter.inspect).toHaveBeenCalledTimes(inspectionsBeforeUnmount);
+  });
+
   test.each([
+    ['not_started', '准备第 1 章方向'],
+    ['planning_partial', '准备第 1 章方向'],
     ['plan_ready', '审阅第 1 章方向'],
+    ['drafting_partial', '生成第 1 章初稿'],
     ['draft_ready', '第 1 章 凌晨三点十七分']
-  ] as const)('restores the %s phase from chapter inspection', async (
+  ] as const)('restores the %s phase from the global planning entry', async (
     phase,
     heading
   ) => {
-    const api = installApi({ ...readyChapterInspection, phase });
+    const api = installApi();
+    api.chapter.inspect
+      .mockResolvedValueOnce({
+        available: false,
+        reason: 'invalid_output'
+      })
+      .mockResolvedValue({ ...readyChapterInspection, phase });
+    api.planning.read.mockResolvedValue({
+      available: true,
+      documents: [
+        {
+          kind: 'global_outline',
+          title: '全书方向',
+          markdown: '# 全书方向\n\n林默追查循环城市。'
+        },
+        {
+          kind: 'volume_outline',
+          title: '第一卷',
+          markdown: '# 第一卷\n\n从异常报告开始。'
+        }
+      ],
+      arcs: [],
+      chapters: []
+    });
     api.chapter.readPlan.mockResolvedValue(completeChapterPlan);
     api.chapter.readDraft.mockResolvedValue({
       available: true,
@@ -241,14 +414,20 @@ describe('chapter planning generation', () => {
       markdown: '# 第 1 章 凌晨三点十七分\n\n正文',
       scenes: [{ summary: '发现异常报告。' }]
     });
-
-    render(<App />);
-    await openProject();
-    fireEvent.click(await screen.findByRole('button', {
-      name: phase === 'plan_ready' ? '审阅第 1 章方向' : '打开第 1 章初稿'
+    api.chapter.startDrafting.mockResolvedValue(chapterTask({
+      kind: 'drafting',
+      stage: 'scene_cards',
+      completedStages: ['preparing']
     }));
 
+    render(<App />);
+    await openPlanningGenerationFromGlobalPlan();
+
     expect(await screen.findByRole('heading', { name: heading })).toBeVisible();
-    expect(api.chapter.startPlanning).not.toHaveBeenCalled();
+    if (phase === 'drafting_partial') {
+      expect(api.chapter.startDrafting).toHaveBeenCalledWith({ projectKey });
+    } else {
+      expect(api.chapter.startPlanning).not.toHaveBeenCalled();
+    }
   });
 });

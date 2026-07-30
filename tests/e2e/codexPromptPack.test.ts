@@ -56,4 +56,23 @@ describe('M23 codex prompt pack and slim schemas', () => {
       expect(Array.isArray(schema.required)).toBe(true);
     }
   });
+
+  test('chapter mission schema retains bounded continuity promises and character changes', async () => {
+    const schema = JSON.parse(await readFile(
+      path.join(root, 'schemas/codex-output/slim/planning.chapter_mission.slim.schema.json'),
+      'utf8'
+    )) as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+
+    expect(schema.required).toEqual(expect.arrayContaining([
+      'debtsToPayOrAdvance',
+      'debtsToIntroduce',
+      'characterDeltas'
+    ]));
+    expect(schema.properties).toHaveProperty('debtsToPayOrAdvance');
+    expect(schema.properties).toHaveProperty('debtsToIntroduce');
+    expect(schema.properties).toHaveProperty('characterDeltas');
+  });
 });

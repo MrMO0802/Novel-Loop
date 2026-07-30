@@ -114,19 +114,27 @@ describe('chapter plan review', () => {
       : '')).toBeVisible();
     for (const heading of [
       '必须完成',
+      '推进的悬念与承诺',
+      '人物变化',
       '读者会知道',
       '读者会追问',
       '本章不能做'
     ]) {
       expect(screen.getByRole('heading', { name: heading })).toBeVisible();
     }
+    expect(screen.getByText(
+      '推进“谁在删除异常报告”的悬念'
+    )).toBeVisible();
+    expect(screen.getByText(
+      '林默：从逃避妹妹失踪转为主动追查循环'
+    )).toBeVisible();
     expect(screen.getByRole('heading', {
       name: '选定方向：遗物中的异常报告'
     })).toBeVisible();
     expect(screen.getByText('<img src=x onerror=alert(1)>')).toBeVisible();
     expect(document.querySelector('img')).toBeNull();
     expect(document.body).not.toHaveTextContent(
-      /projectKey|taskId|run_|jsonl|ranking|score|private\//i
+      /projectKey|taskId|run_|jsonl|ranking|score|private\/|char_[a-z0-9_-]+|debt_[a-z0-9_-]+/i
     );
   });
 
@@ -175,5 +183,26 @@ describe('chapter plan review', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '开始生成草稿' }));
     expect(api.chapter.startDrafting).toHaveBeenCalledWith({ projectKey });
+  });
+
+  test('moves focus into the second confirmation and restores it when cancelled', async () => {
+    installApi();
+    render(<App />);
+    await openReview();
+
+    const trigger = screen.getByRole('button', {
+      name: '确认方向并生成草稿'
+    });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole('heading', {
+      name: '确认开始生成初稿'
+    })).toHaveFocus();
+
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(screen.getByRole('button', {
+      name: '确认方向并生成草稿'
+    })).toHaveFocus();
   });
 });

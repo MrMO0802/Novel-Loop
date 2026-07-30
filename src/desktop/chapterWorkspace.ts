@@ -30,6 +30,16 @@ const MAX_CANDIDATE_EXCERPT_CHARS = 2_000;
 const MAX_ALTERNATIVES = 10;
 const MAX_MISSION_OBJECTIVES = 100;
 const MAX_SCENE_SUMMARIES = 100;
+const MAX_AUTHOR_MISSION_TEXT = 2_000;
+
+const AuthorMissionTextSchema = z.string()
+  .trim()
+  .min(1)
+  .max(MAX_AUTHOR_MISSION_TEXT)
+  .refine(
+    (text) => !/\b(?:char|debt|mission|obj)_[A-Za-z0-9_-]+\b|story_state|runId|taskId/u.test(text),
+    { message: 'Author-facing text contains an internal identifier.' }
+  );
 
 const DesktopChapterPlanReviewSchema = z.discriminatedUnion('available', [
   z.object({ available: z.literal(false) }).strict(),
@@ -42,6 +52,10 @@ const DesktopChapterPlanReviewSchema = z.discriminatedUnion('available', [
       objectives: z.array(z.string()).max(MAX_MISSION_OBJECTIVES),
       readerKnowledge: z.array(z.string()),
       readerQuestions: z.array(z.string()),
+      narrativePromises: z.array(AuthorMissionTextSchema)
+        .max(MAX_MISSION_OBJECTIVES),
+      characterDeltas: z.array(AuthorMissionTextSchema)
+        .max(MAX_MISSION_OBJECTIVES),
       forbiddenMoves: z.array(z.string())
     }).strict(),
     selectedPlan: z.object({ title: z.string().min(1), markdown: z.string() }).strict(),
@@ -154,6 +168,10 @@ export async function readDesktopChapterPlan(
   }
 
   const plan = await readPlanArtifacts(context.paths, inspection.chapterNumber);
+  const storyState = await readRequiredJson(
+    context.paths.storyState(),
+    StoryStateSchema
+  );
   return parseReview(DesktopChapterPlanReviewSchema, {
     available: true,
     chapterNumber: inspection.chapterNumber,
@@ -163,6 +181,14 @@ export async function readDesktopChapterPlan(
       objectives: plan.mission.requiredObjectives.slice(0, MAX_MISSION_OBJECTIVES).map((objective) => objective.text),
       readerKnowledge: plan.mission.readerInformationDelta.newKnowledge,
       readerQuestions: plan.mission.readerInformationDelta.questionsToMaintain,
+      narrativePromises: narrativePromisesForAuthor(
+        plan.mission,
+        storyState
+      ),
+      characterDeltas: characterDeltasForAuthor(
+        plan.mission,
+        storyState
+      ),
       forbiddenMoves: plan.mission.forbiddenMoves
     },
     selectedPlan: {
@@ -180,6 +206,44 @@ export async function readDesktopChapterPlan(
       };
     })
   });
+}
+
+function narrativePromisesForAuthor(
+  mission: ReturnType<typeof ChapterMissionSchema.parse>,
+  storyState: ReturnType<typeof StoryStateSchema.parse>
+): string[] {
+  const knownDebts = new Map(
+    storyState.narrativeDebts.map((debt) => [debt.id, debt.promise])
+  );
+  return uniqueAuthorText([
+    ...mission.debtsToPayOrAdvance.map((debtId) => (
+      knownDebts.get(debtId) ?? '推进一条既有悬念'
+    )),
+    ...mission.debtsToIntroduce.map((debt) => debt.promise)
+  ]);
+}
+
+function characterDeltasForAuthor(
+  mission: ReturnType<typeof ChapterMissionSchema.parse>,
+  storyState: ReturnType<typeof StoryStateSchema.parse>
+): string[] {
+  const characterNames = new Map(
+    storyState.characters.map((character) => [character.id, character.name])
+  );
+  return uniqueAuthorText(mission.characterDeltas.map((delta) => {
+    const name = characterNames.get(delta.characterId) ?? '相关人物';
+    return `${name}：从“${delta.from}”转向“${delta.to}”；通过${delta.evidenceRequired}体现。`;
+  }));
+}
+
+function uniqueAuthorText(items: string[]): string[] {
+  const unique = new Set<string>();
+  for (const item of items) {
+    const parsed = AuthorMissionTextSchema.parse(item);
+    unique.add(parsed);
+    if (unique.size === MAX_MISSION_OBJECTIVES) break;
+  }
+  return [...unique];
 }
 
 export async function draftDesktopNextChapter(

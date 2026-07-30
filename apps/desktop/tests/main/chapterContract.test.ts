@@ -17,6 +17,8 @@ const validPlanReview = {
     objectives: ['Introduce the powerless radio.'],
     readerKnowledge: ['The radio can speak without power.'],
     readerQuestions: ['Who is calling?'],
+    narrativePromises: ['Advance the mystery of the impossible signal.'],
+    characterDeltas: ['Lin Cheng moves from skeptical to alert.'],
     forbiddenMoves: ['Do not reveal the caller.']
   },
   selectedPlan: {
@@ -107,6 +109,36 @@ describe('chapter workspace contract', () => {
   test('parses valid plan and draft reviews', () => {
     expect(ChapterPlanReviewResultSchema.parse(validPlanReview)).toEqual(validPlanReview);
     expect(ChapterDraftReviewResultSchema.parse(validDraftReview)).toEqual(validDraftReview);
+  });
+
+  test('requires bounded natural-language mission promises and character deltas', () => {
+    const withoutPromises = {
+      ...validPlanReview,
+      mission: {
+        chapterFunction: validPlanReview.mission.chapterFunction,
+        objectives: validPlanReview.mission.objectives,
+        readerKnowledge: validPlanReview.mission.readerKnowledge,
+        readerQuestions: validPlanReview.mission.readerQuestions,
+        characterDeltas: validPlanReview.mission.characterDeltas,
+        forbiddenMoves: validPlanReview.mission.forbiddenMoves
+      }
+    };
+    expect(ChapterPlanReviewResultSchema.safeParse(withoutPromises).success)
+      .toBe(false);
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      mission: {
+        ...validPlanReview.mission,
+        characterDeltas: [{ characterId: 'char_secret', from: 'a', to: 'b' }]
+      }
+    }).success).toBe(false);
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      mission: {
+        ...validPlanReview.mission,
+        narrativePromises: Array.from({ length: 101 }, () => 'A promise.')
+      }
+    }).success).toBe(false);
   });
 
   test.each([

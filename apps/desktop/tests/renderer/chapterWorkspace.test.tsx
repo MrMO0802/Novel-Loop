@@ -151,6 +151,13 @@ describe('initial chapter workspace', () => {
       /\.nl-chapter-workspace\s*\{[^}]*display:\s*grid;[^}]*grid-template-columns:\s*minmax\(12rem,\s*15rem\)\s*minmax\(30rem,\s*1fr\)\s*minmax\(16rem,\s*20rem\);/s
     );
     expect(styles).toMatch(/@media\s*\(max-width:\s*1100px\)/);
+    expect(styles).toMatch(
+      /\.nl-chapter-manuscript h1\s*\{[^}]*font-size:\s*40px;/s
+    );
+    expect(styles).toMatch(
+      /@media\s*\(max-width:\s*760px\)\s*\{[\s\S]*?\.nl-chapter-manuscript h1\s*\{[^}]*font-size:\s*30px;/s
+    );
+    expect(styles).not.toContain('3vw');
     expect(styles).not.toMatch(/gradient\(/i);
     expect(styles).not.toMatch(/border-radius:\s*(?:9|[1-9][0-9]+)px/i);
   });

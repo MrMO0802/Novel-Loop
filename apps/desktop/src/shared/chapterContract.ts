@@ -138,6 +138,8 @@ const ChapterMissionReviewSchema = z.object({
   objectives: boundedTextArray(MAX_MISSION_ITEMS, 8_000),
   readerKnowledge: boundedTextArray(MAX_MISSION_ITEMS, 8_000),
   readerQuestions: boundedTextArray(MAX_MISSION_ITEMS, 8_000),
+  narrativePromises: authorTextArray(MAX_MISSION_ITEMS, 2_000),
+  characterDeltas: authorTextArray(MAX_MISSION_ITEMS, 2_000),
   forbiddenMoves: boundedTextArray(MAX_MISSION_ITEMS, 8_000)
 }).strict();
 
@@ -223,6 +225,19 @@ function boundedText(maxLength: number) {
 
 function boundedTextArray(maxItems: number, maxLength: number) {
   return z.array(z.string().trim().min(1).max(maxLength)).max(maxItems);
+}
+
+function authorTextArray(maxItems: number, maxLength: number) {
+  return z.array(
+    z.string()
+      .trim()
+      .min(1)
+      .max(maxLength)
+      .refine(
+        (text) => !/\b(?:char|debt|mission|obj)_[A-Za-z0-9_-]+\b|story_state|runId|taskId/u.test(text),
+        { message: 'Author-facing text contains an internal identifier.' }
+      )
+  ).max(maxItems);
 }
 
 function markdownSchema() {

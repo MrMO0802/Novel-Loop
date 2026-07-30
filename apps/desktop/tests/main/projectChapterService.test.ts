@@ -30,6 +30,8 @@ const planReview: Extract<ChapterPlanReviewResult, { available: true }> = {
     objectives: ['Introduce the powerless radio.'],
     readerKnowledge: ['The radio works without power.'],
     readerQuestions: ['Who is calling?'],
+    narrativePromises: ['Advance the mystery of the impossible signal.'],
+    characterDeltas: ['Lin Cheng moves from skeptical to alert.'],
     forbiddenMoves: ['Do not reveal the caller.']
   },
   selectedPlan: {

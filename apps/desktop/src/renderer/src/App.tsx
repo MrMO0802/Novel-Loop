@@ -226,6 +226,10 @@ export function App() {
     return (
       <ChapterPlanningGenerationView
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onDraftingPartial={() => setRoute({
+          kind: 'chapter-draft-generation',
+          project: route.project
+        })}
         onDraftReady={() => setRoute({
           kind: 'chapter-workspace',
           project: route.project

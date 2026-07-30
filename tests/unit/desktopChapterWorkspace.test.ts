@@ -200,13 +200,21 @@ describe('desktop chapter workspace', () => {
       available: true,
       chapterNumber: 1,
       title: chapterTitle,
+      mission: {
+        narrativePromises: expect.arrayContaining([
+          'Why does the radio speak without power?'
+        ]),
+        characterDeltas: expect.arrayContaining([
+          expect.stringMatching(/skeptical.*alert/i)
+        ])
+      },
       selectedPlan: { title: 'Plan 001' },
       alternatives: expect.arrayContaining([
         { title: 'Plan 001', excerpt: expect.any(String), strengths: expect.any(Array), risks: expect.any(Array) }
       ])
     });
     expect(JSON.stringify(planReview)).not.toMatch(
-      /artifactPath|runId|latestRunId|selectedPlanPath|plan_candidates|story_state|candidateId|totalScore|scores/i
+      /artifactPath|runId|latestRunId|selectedPlanPath|plan_candidates|story_state|candidateId|totalScore|scores|char_lincheng|mission_ch001_codex|debt_[a-z0-9_-]+/i
     );
 
     const draftReview = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });

@@ -28,6 +28,9 @@ export function ChapterPlanReview({
   project
 }: ChapterPlanReviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const confirmationHeadingRef = useRef<HTMLHeadingElement>(null);
+  const confirmationTriggerRef = useRef<HTMLButtonElement>(null);
+  const confirmationWasOpen = useRef(false);
   const requestToken = useRef(0);
   const [review, setReview] = useState<ChapterPlanReviewResult | null>(null);
   const [failed, setFailed] = useState(false);
@@ -49,6 +52,18 @@ export function ChapterPlanReview({
       requestToken.current += 1;
     };
   }, [project.projectKey]);
+
+  useEffect(() => {
+    if (confirming) {
+      confirmationWasOpen.current = true;
+      confirmationHeadingRef.current?.focus();
+      return;
+    }
+    if (confirmationWasOpen.current) {
+      confirmationWasOpen.current = false;
+      confirmationTriggerRef.current?.focus();
+    }
+  }, [confirming]);
 
   const available = review?.available ? review : null;
 
@@ -111,6 +126,14 @@ export function ChapterPlanReview({
                 <MissionList
                   items={available.mission.objectives}
                   title={t('chapter.review.objectives')}
+                />
+                <MissionList
+                  items={available.mission.narrativePromises}
+                  title={t('chapter.review.narrativePromises')}
+                />
+                <MissionList
+                  items={available.mission.characterDeltas}
+                  title={t('chapter.review.characterDeltas')}
                 />
                 <MissionList
                   items={available.mission.readerKnowledge}
@@ -184,6 +207,7 @@ export function ChapterPlanReview({
                     aria-describedby="chapter-draft-note"
                     className="nl-primary-action"
                     onClick={() => setConfirming(true)}
+                    ref={confirmationTriggerRef}
                     type="button"
                   >
                     <CheckCircle aria-hidden size={18} weight="fill" />
@@ -191,9 +215,19 @@ export function ChapterPlanReview({
                   </button>
                 </>
               ) : (
-                <div className="nl-chapter-draft-confirmation">
+                <div
+                  aria-labelledby="chapter-draft-confirmation-title"
+                  className="nl-chapter-draft-confirmation"
+                  role="region"
+                >
                   <div>
-                    <h2>{t('chapter.review.confirmationTitle')}</h2>
+                    <h2
+                      id="chapter-draft-confirmation-title"
+                      ref={confirmationHeadingRef}
+                      tabIndex={-1}
+                    >
+                      {t('chapter.review.confirmationTitle')}
+                    </h2>
                     <p id="chapter-draft-confirmation-note">
                       {t('chapter.review.confirmationNote')}
                     </p>

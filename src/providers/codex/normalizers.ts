@@ -53,11 +53,25 @@ const SlimChapterQueueSchema = z.object({
 
 const SlimMissionSchema = z.object({
   chapterNumber: z.number().int().positive(),
-  chapterFunction: z.string(),
-  objectives: z.array(z.string()).min(1),
-  readerKnowledge: z.array(z.string()).default([]),
-  readerQuestions: z.array(z.string()).default([]),
-  forbiddenMoves: z.array(z.string()).default([])
+  chapterFunction: z.string().trim().min(1).max(2_000),
+  objectives: z.array(z.string().trim().min(1).max(2_000)).min(1).max(100),
+  debtsToPayOrAdvance: z.array(
+    z.string().trim().min(1).max(200)
+  ).max(100).default([]),
+  debtsToIntroduce: z.array(z.object({
+    type: z.string().trim().min(1).max(100),
+    promise: z.string().trim().min(1).max(2_000),
+    importance: z.number().min(1).max(10)
+  }).strict()).max(100).default([]),
+  characterDeltas: z.array(z.object({
+    characterId: z.string().trim().min(1).max(200),
+    from: z.string().trim().min(1).max(1_000),
+    to: z.string().trim().min(1).max(1_000),
+    evidenceRequired: z.string().trim().min(1).max(2_000)
+  }).strict()).max(100).default([]),
+  readerKnowledge: z.array(z.string().trim().min(1).max(2_000)).max(100).default([]),
+  readerQuestions: z.array(z.string().trim().min(1).max(2_000)).max(100).default([]),
+  forbiddenMoves: z.array(z.string().trim().min(1).max(2_000)).max(100).default([])
 });
 
 const SlimPlanCandidatesSchema = z.object({
@@ -272,9 +286,9 @@ export function normalizeMission(value: unknown, context: CodexNormalizationCont
       type: index === 0 ? 'plot' : 'reader',
       priority: index === 0 ? 'must' : 'should'
     })),
-    debtsToPayOrAdvance: [],
-    debtsToIntroduce: [],
-    characterDeltas: [],
+    debtsToPayOrAdvance: slim.debtsToPayOrAdvance,
+    debtsToIntroduce: slim.debtsToIntroduce,
+    characterDeltas: slim.characterDeltas,
     readerInformationDelta: {
       newKnowledge: slim.readerKnowledge,
       newSuspicions: [],

@@ -21,6 +21,7 @@ import type {
 } from '../../../../shared/chapterContract';
 import type { ProjectSummary } from '../../../../shared/projectContract';
 import { formatMessage, t } from '../../i18n/messages.zh-CN';
+import { shouldAcceptChapterTask } from './chapterTaskOrdering';
 
 const POLL_INTERVAL_MS = 250;
 const ACTIVE_STATUSES = new Set<ChapterTaskStatus>([
@@ -60,6 +61,7 @@ const STAGE_LIST_LABELS: Partial<Record<ChapterTaskStage, string>> = {
 
 interface ChapterPlanningGenerationViewProps {
   onBack: () => void;
+  onDraftingPartial: () => void;
   onDraftReady: () => void;
   onPlanReady: () => void;
   project: ProjectSummary;
@@ -67,6 +69,7 @@ interface ChapterPlanningGenerationViewProps {
 
 export function ChapterPlanningGenerationView({
   onBack,
+  onDraftingPartial,
   onDraftReady,
   onPlanReady,
   project
@@ -75,6 +78,7 @@ export function ChapterPlanningGenerationView({
   const mounted = useRef(true);
   const requestToken = useRef(0);
   const terminalAccepted = useRef(false);
+  const latestTask = useRef<ChapterTask | null>(null);
   const inspectionRefreshStarted = useRef(false);
   const [inspection, setInspection] = useState<ChapterInspection | null>(null);
   const [task, setTask] = useState<ChapterTask | null>(null);
@@ -86,8 +90,12 @@ export function ChapterPlanningGenerationView({
 
   const routeFromInspection = useCallback((next: ChapterInspection) => {
     if (!next.available) return false;
-    if (next.phase === 'plan_ready' || next.phase === 'drafting_partial') {
+    if (next.phase === 'plan_ready') {
       onPlanReady();
+      return true;
+    }
+    if (next.phase === 'drafting_partial') {
+      onDraftingPartial();
       return true;
     }
     if (next.phase === 'draft_ready') {
@@ -96,7 +104,7 @@ export function ChapterPlanningGenerationView({
     }
     setInspection(next);
     return false;
-  }, [onDraftReady, onPlanReady]);
+  }, [onDraftingPartial, onDraftReady, onPlanReady]);
 
   const inspect = useCallback(async () => {
     const currentRequest = ++requestToken.current;
@@ -137,6 +145,8 @@ export function ChapterPlanningGenerationView({
 
   const receiveTask = useCallback((next: ChapterTask) => {
     if (terminalAccepted.current) return;
+    if (!shouldAcceptChapterTask(latestTask.current, next)) return;
+    latestTask.current = next;
     if (TERMINAL_STATUSES.has(next.status)) {
       terminalAccepted.current = true;
     }
@@ -224,6 +234,7 @@ export function ChapterPlanningGenerationView({
   const retry = () => {
     requestToken.current += 1;
     terminalAccepted.current = false;
+    latestTask.current = null;
     inspectionRefreshStarted.current = false;
     setTask(null);
     setLocalError(null);

@@ -230,6 +230,18 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       chapterNumber,
       chapterFunction: chapterNumber === 1 ? 'Open the mystery through the old radio.' : 'Advance the radio-building mystery using committed continuity.',
       objectives: ['Advance chapter ' + chapterNumber + ' using prior committed Story State.', chapterFact],
+      debtsToPayOrAdvance: [],
+      debtsToIntroduce: [{
+        type: 'mystery',
+        promise: 'Why does the radio speak without power?',
+        importance: 8
+      }],
+      characterDeltas: [{
+        characterId: 'char_lincheng',
+        from: 'skeptical',
+        to: 'alert',
+        evidenceRequired: 'He hears the broadcast without a power source.'
+      }],
       readerKnowledge: ['Chapter ' + chapterNumber + ' reveals: ' + chapterFact],
       readerQuestions: ['What does chapter ' + chapterNumber + ' imply for the building?'],
       forbiddenMoves: ['Do not reveal the final caller identity.']

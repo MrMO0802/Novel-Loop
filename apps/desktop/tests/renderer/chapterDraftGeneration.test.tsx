@@ -20,6 +20,7 @@ import {
   completeChapterDraft,
   completeChapterPlan,
   createInertChapterApi,
+  deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
 
@@ -197,6 +198,145 @@ describe('chapter draft generation', () => {
     expect(screen.getByText('正在安排本章场景')).toBeVisible();
     expect(screen.getByText('暂时无法刷新进度，正在继续尝试。')).toBeVisible();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  test('keeps stop_requested monotonic when an older draft poll resolves late', async () => {
+    const api = installApi();
+    const oldPoll = deferred<ReturnType<typeof chapterTask>>();
+    api.chapter.startDrafting.mockResolvedValue(chapterTask({
+      kind: 'drafting',
+      stage: 'scene_cards',
+      completedStages: ['preparing'],
+      updatedAt: '2026-07-30T01:00:01.000Z'
+    }));
+    api.chapter.get.mockReturnValue(oldPoll.promise);
+    api.chapter.cancel.mockResolvedValue(chapterTask({
+      kind: 'drafting',
+      status: 'stop_requested',
+      stage: 'scene_cards',
+      completedStages: ['preparing'],
+      canCancel: false,
+      updatedAt: '2026-07-30T01:00:03.000Z'
+    }));
+
+    render(<App />);
+    await approvePlan();
+    vi.useFakeTimers();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('正在安排本章场景')).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(api.chapter.get).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '完成当前安全步骤后停止'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText(
+      '已请求停止，会在当前安全步骤完成后暂停；已写好的场景会保留。'
+    )).toBeVisible();
+
+    await act(async () => {
+      oldPoll.resolve(chapterTask({
+        kind: 'drafting',
+        stage: 'scene_drafts',
+        completedStages: ['preparing', 'scene_cards'],
+        sceneProgress: { current: 1, total: 2 },
+        updatedAt: '2026-07-30T01:00:02.000Z'
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText(
+      '已请求停止，会在当前安全步骤完成后暂停；已写好的场景会保留。'
+    )).toBeVisible();
+    expect(screen.queryByRole('button', {
+      name: '完成当前安全步骤后停止'
+    })).not.toBeInTheDocument();
+  });
+
+  test('continues draft polling after a temporary get failure', async () => {
+    const api = installApi();
+    api.chapter.startDrafting.mockResolvedValue(chapterTask({
+      kind: 'drafting',
+      stage: 'scene_cards',
+      completedStages: ['preparing']
+    }));
+    api.chapter.get
+      .mockRejectedValueOnce(new Error('/private/get unavailable'))
+      .mockResolvedValue(chapterTask({
+        kind: 'drafting',
+        stage: 'scene_drafts',
+        completedStages: ['preparing', 'scene_cards'],
+        sceneProgress: { current: 1, total: 2 },
+        updatedAt: '2026-07-30T01:00:02.000Z'
+      }));
+
+    render(<App />);
+    await approvePlan();
+    vi.useFakeTimers();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('正在安排本章场景')).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.getByText(
+      '暂时无法刷新进度，正在继续尝试。'
+    )).toBeVisible();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(screen.getByText('正在写第 1 / 2 个场景')).toBeVisible();
+    expect(screen.queryByText(
+      '暂时无法刷新进度，正在继续尝试。'
+    )).not.toBeInTheDocument();
+  });
+
+  test('ignores an in-flight draft response after unmount', async () => {
+    const api = installApi();
+    const oldPoll = deferred<ReturnType<typeof chapterTask>>();
+    api.chapter.startDrafting.mockResolvedValue(chapterTask({
+      kind: 'drafting',
+      stage: 'scene_cards',
+      completedStages: ['preparing']
+    }));
+    api.chapter.get.mockReturnValue(oldPoll.promise);
+
+    const rendered = render(<App />);
+    await approvePlan();
+    vi.useFakeTimers();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('正在安排本章场景')).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    const inspectionsBeforeUnmount = api.chapter.inspect.mock.calls.length;
+    rendered.unmount();
+
+    await act(async () => {
+      oldPoll.resolve(chapterTask({
+        kind: 'drafting',
+        status: 'succeeded',
+        stage: 'completed',
+        completedStages: ['preparing', 'scene_cards', 'scene_drafts',
+          'draft_assembly', 'finalizing', 'completed'],
+        canCancel: false,
+        updatedAt: '2026-07-30T01:00:02.000Z'
+      }));
+      await Promise.resolve();
+    });
+
+    expect(api.chapter.inspect).toHaveBeenCalledTimes(inspectionsBeforeUnmount);
   });
 
   test('keeps success sticky and opens the initial draft after inspection', async () => {

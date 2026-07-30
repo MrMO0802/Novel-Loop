@@ -98,6 +98,12 @@ export interface ChapterDryRunResult {
 const DEFAULT_PROJECTS_ROOT = './projects';
 const DEFAULT_PROMPT_ROOT = './prompts';
 const DEFAULT_FIXTURES_ROOT = './fixtures/llm';
+const MAX_MISSION_CONTEXT_CHARACTERS = 6;
+const MAX_MISSION_CHARACTER_ID_LENGTH = 200;
+const MAX_MISSION_CHARACTER_NAME_LENGTH = 120;
+const MAX_MISSION_CHARACTER_STATE_LENGTH = 180;
+const MAX_MISSION_CHARACTER_GOAL_LENGTH = 180;
+const MAX_MISSION_STORY_STATE_SUMMARY_LENGTH = 3600;
 
 export async function planChapterMission(input: ChapterPlanningInput, fileStore = new FileStore()): Promise<ChapterPlanningStepResult<ChapterMission>> {
   const paths = createPaths(input);
@@ -120,10 +126,11 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
           CHAPTER_NUMBER: input.chapterNumber,
           STORY_STATE_SUMMARY: summarizeJson({
             latestCommittedChapter: storyState.latestCommittedChapter,
+            characters: summarizeMissionCharacters(storyState.characters),
             openDebts: storyState.narrativeDebts.filter((debt) => debt.status !== 'resolved').slice(0, 8),
             readerExpectations: storyState.readerState.readerExpectations.slice(0, 8),
             ...(previousChapterSummary === undefined ? {} : { previousChapterSummary })
-          }),
+          }, MAX_MISSION_STORY_STATE_SUMMARY_LENGTH),
           CHAPTER_QUEUE_ITEM: JSON.stringify(queueItem ?? {}, null, 2)
         })
       : await promptService.renderPrompt(promptId, {
@@ -155,7 +162,11 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
           normalize: () => normalizeMission(response.json, { projectId: paths.projectId, chapterNumber: input.chapterNumber })
         })
       : response.json;
-  const mission = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), missionJson, ChapterMissionSchema);
+  const parsedMission = ChapterMissionSchema.parse(missionJson);
+  if (input.provider === 'codex-text') {
+    validateMissionCharacterReferences(parsedMission, storyState.characters, input.chapterNumber);
+  }
+  const mission = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), parsedMission, ChapterMissionSchema);
   return {
     artifact: relativeChapterArtifact(input.chapterNumber, 'mission.json'),
     value: mission
@@ -595,6 +606,53 @@ function createLlmClient(
 function summarizeJson(value: unknown, maxLength = 1800): string {
   const text = JSON.stringify(value, null, 2);
   return text.length <= maxLength ? text : `${text.slice(0, maxLength)}...`;
+}
+
+function summarizeMissionCharacters(
+  characters: z.infer<typeof StoryStateSchema>['characters']
+): Array<{ id: string; name: string; currentState: string; currentGoal: string }> {
+  return characters
+    .filter((character) => character.id.length <= MAX_MISSION_CHARACTER_ID_LENGTH)
+    .slice(0, MAX_MISSION_CONTEXT_CHARACTERS)
+    .map((character) => ({
+      id: character.id,
+      name: boundedMissionContextText(character.name, MAX_MISSION_CHARACTER_NAME_LENGTH, 'Unnamed character'),
+      currentState: boundedMissionContextText(
+        [character.emotionalState, character.arc.currentStage].filter((value): value is string => value !== undefined && value.trim().length > 0).join('; '),
+        MAX_MISSION_CHARACTER_STATE_LENGTH,
+        'No current state recorded'
+      ),
+      currentGoal: boundedMissionContextText(
+        character.currentGoal,
+        MAX_MISSION_CHARACTER_GOAL_LENGTH,
+        'No current goal recorded'
+      )
+    }));
+}
+
+function boundedMissionContextText(value: string | undefined, maxLength: number, fallback: string): string {
+  const normalized = value?.trim();
+  return (normalized === undefined || normalized.length === 0 ? fallback : normalized).slice(0, maxLength);
+}
+
+function validateMissionCharacterReferences(
+  mission: ChapterMission,
+  characters: z.infer<typeof StoryStateSchema>['characters'],
+  chapterNumber: number
+): void {
+  const knownCharacterIds = new Set(characters.map((character) => character.id));
+  const hasUnknownCharacter = mission.characterDeltas.some((delta) => !knownCharacterIds.has(delta.characterId));
+  if (!hasUnknownCharacter) return;
+
+  throw new AppError(
+    'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT',
+    `Chapter ${chapterNumber} mission references a character that is not present in Story State.`,
+    2,
+    {
+      chapterNumber,
+      stage: 'mission'
+    }
+  );
 }
 
 async function ensurePlanningPrerequisites(paths: ProjectPaths, fileStore: FileStore): Promise<void> {

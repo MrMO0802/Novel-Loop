@@ -295,6 +295,85 @@ describe('chapter planning generation', () => {
     })).not.toBeInTheDocument();
   });
 
+  test('ignores a late cancel response from task A after retry task B starts', async () => {
+    const api = installApi();
+    const oldCancel = deferred<ReturnType<typeof chapterTask>>();
+    const taskAId = 'chapter_aaaaaaaaaaaaaaaa';
+    const taskBId = 'chapter_bbbbbbbbbbbbbbbb';
+    api.chapter.startPlanning
+      .mockResolvedValueOnce(chapterTask({
+        taskId: taskAId,
+        stage: 'mission',
+        completedStages: ['preparing']
+      }))
+      .mockResolvedValueOnce(chapterTask({
+        taskId: taskBId,
+        stage: 'ranking',
+        completedStages: ['preparing', 'mission', 'plan_candidates'],
+        updatedAt: '2026-07-30T01:00:04.000Z'
+      }));
+    api.chapter.cancel.mockReturnValue(oldCancel.promise);
+    api.chapter.get
+      .mockResolvedValueOnce(chapterTask({
+        taskId: taskAId,
+        status: 'failed',
+        stage: 'mission',
+        completedStages: ['preparing'],
+        canCancel: false,
+        canRetry: true,
+        error: { kind: 'timeout', message: 'Task A timed out.' },
+        updatedAt: '2026-07-30T01:00:03.000Z'
+      }))
+      .mockResolvedValue(chapterTask({
+        taskId: taskBId,
+        stage: 'ranking',
+        completedStages: ['preparing', 'mission', 'plan_candidates'],
+        updatedAt: '2026-07-30T01:00:05.000Z'
+      }));
+
+    render(<App />);
+    await openPlanningGeneration();
+    await screen.findByRole('button', { name: '开始准备章节方向' });
+    vi.useFakeTimers();
+    fireEvent.click(screen.getByRole('button', {
+      name: '开始准备章节方向'
+    }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', {
+      name: '完成当前安全步骤后停止'
+    }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '继续准备' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('正在选择最合适的方向')).toBeVisible();
+
+    await act(async () => {
+      oldCancel.resolve(chapterTask({
+        taskId: taskAId,
+        status: 'cancelled',
+        stage: 'mission',
+        completedStages: ['preparing'],
+        canCancel: false,
+        canRetry: true,
+        updatedAt: '2026-07-30T01:00:06.000Z'
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('正在选择最合适的方向')).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(api.chapter.get).toHaveBeenLastCalledWith({ taskId: taskBId });
+  });
+
   test('continues planning polling after a temporary get failure', async () => {
     const api = installApi();
     api.chapter.startPlanning.mockResolvedValue(chapterTask({

@@ -14,7 +14,8 @@ export function shouldAcceptChapterTask(
   current: ChapterTask | null,
   next: ChapterTask
 ): boolean {
-  if (current === null || current.taskId !== next.taskId) return true;
+  if (current === null) return true;
+  if (current.taskId !== next.taskId) return false;
   if (TERMINAL.has(current.status)) return false;
   if (Date.parse(next.updatedAt) < Date.parse(current.updatedAt)) return false;
   if (

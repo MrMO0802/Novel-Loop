@@ -17,6 +17,7 @@ import {
 import { ChapterQueueSchema, RunManifestV2Schema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { validCharacterState } from '../fixtures/schemas/valid.js';
 import { writeFakeCodex } from '../helpers/fakeCodex.js';
 
 const projectId = 'desktop-chapter-workspace';
@@ -294,6 +295,11 @@ describe('desktop chapter workspace', () => {
 async function prepareGlobalPlan(): Promise<void> {
   await buildBible({ projectId, projectsRoot, provider: 'mock', promptRoot, runId: 'desktop_chapter_bible' });
   await planGlobal({ projectId, projectsRoot, provider: 'mock', promptRoot, runId: 'desktop_chapter_global_plan' });
+  const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
+  await store.writeJson(paths.storyState(), {
+    ...storyState,
+    characters: [validCharacterState]
+  }, StoryStateSchema);
   await updateQueue((queue) => {
     queue.projectId = projectId;
   });

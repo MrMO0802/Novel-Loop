@@ -20,6 +20,7 @@ Rules:
 - debtsToPayOrAdvance contains only existing narrative debt IDs from the supplied summary.
 - debtsToIntroduce contains only concise type, promise, and importance objects for new promises.
 - characterDeltas contains only characterId, from, to, and evidenceRequired objects.
+- characterDeltas may use only IDs listed in story_state_summary.characters; use an empty array when no supplied character changes.
 - Do not invent debt or character IDs.
 - Keep context bounded to the chapter.
 - Include readerKnowledge, readerQuestions, and forbiddenMoves as arrays.
@@ -33,7 +34,7 @@ Valid shape example:
   "objectives": ["Advance one queued plot objective."],
   "debtsToPayOrAdvance": [],
   "debtsToIntroduce": [{"type": "mystery", "promise": "Why does the radio speak without power?", "importance": 8}],
-  "characterDeltas": [{"characterId": "char_lincheng", "from": "skeptical", "to": "alert", "evidenceRequired": "He hears the broadcast without a power source."}],
+  "characterDeltas": [],
   "readerKnowledge": ["State one concrete thing the reader learns."],
   "readerQuestions": ["State one question the reader should carry forward."],
   "forbiddenMoves": ["Do not reveal the final answer."]

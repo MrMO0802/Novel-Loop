@@ -27,7 +27,9 @@ export type FakeCodexMode =
   | 'codex-expanded-target-residual-time'
   | 'codex-expanded-target-residual-duplicate'
   | 'codex-expanded-target-quality-regression'
-  | 'codex-candidate-preview';
+  | 'codex-candidate-preview'
+  | 'codex-mission-non-default-character'
+  | 'codex-mission-unknown-character';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
@@ -134,6 +136,12 @@ function jsonFor(promptId, mode, repairMode, stdin) {
   const chapterNumber = chapterFromPrompt(stdin);
   const nnn = formatChapter(chapterNumber);
   const previousNnn = formatChapter(Math.max(1, chapterNumber - 1));
+  const missionCharacterId =
+    mode === 'codex-mission-non-default-character'
+      ? 'char_mara'
+      : mode === 'codex-mission-unknown-character'
+        ? 'char_unknown'
+        : missionCharacterFromPrompt(stdin);
   const chapterTitle = chapterNumber === 1 ? 'The Radio Wakes' : chapterNumber === 2 ? 'The Elevator Log' : 'The Missing Floor';
   const chapterFact =
     chapterNumber === 1
@@ -236,8 +244,8 @@ function jsonFor(promptId, mode, repairMode, stdin) {
         promise: 'Why does the radio speak without power?',
         importance: 8
       }],
-      characterDeltas: [{
-        characterId: 'char_lincheng',
+      characterDeltas: missionCharacterId === undefined ? [] : [{
+        characterId: missionCharacterId,
         from: 'skeptical',
         to: 'alert',
         evidenceRequired: 'He hears the broadcast without a power source.'
@@ -584,6 +592,15 @@ function chapterFromPrompt(stdin) {
   const plain = /CHAPTER_NUMBER:\\s*(\\d+)/i.exec(stdin);
   if (plain) return Number.parseInt(plain[1], 10);
   return 1;
+}
+
+function missionCharacterFromPrompt(stdin) {
+  const summary = /<story_state_summary>\\s*([\\s\\S]*?)\\s*<\\/story_state_summary>/i.exec(stdin);
+  if (!summary) return undefined;
+  const charactersStart = summary[1].indexOf('"characters"');
+  if (charactersStart === -1) return undefined;
+  const characterId = /"id"\\s*:\\s*"([^"]+)"/.exec(summary[1].slice(charactersStart));
+  return characterId ? characterId[1] : undefined;
 }
 
 function formatChapter(chapterNumber) {

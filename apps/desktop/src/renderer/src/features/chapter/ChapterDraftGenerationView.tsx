@@ -64,6 +64,7 @@ export function ChapterDraftGenerationView({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(true);
   const requestToken = useRef(0);
+  const operationGeneration = useRef(0);
   const terminalAccepted = useRef(false);
   const latestTask = useRef<ChapterTask | null>(null);
   const completionRefreshStarted = useRef(false);
@@ -112,13 +113,20 @@ export function ChapterDraftGenerationView({
   }, [completeDraft]);
 
   const start = useCallback(async () => {
+    const generation = ++operationGeneration.current;
+    latestTask.current = null;
+    terminalAccepted.current = false;
     const currentRequest = ++requestToken.current;
     setLocalError(null);
     try {
       const next = await window.novelLoop.chapter.startDrafting({
         projectKey: project.projectKey
       });
-      if (mounted.current && currentRequest === requestToken.current) {
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && currentRequest === requestToken.current
+      ) {
         receiveTask(next);
       }
     } catch {
@@ -142,16 +150,35 @@ export function ChapterDraftGenerationView({
 
   const requestStop = async () => {
     if (!task || isStopping) return;
+    const generation = operationGeneration.current;
+    const taskId = task.taskId;
     setIsStopping(true);
     try {
       const next = await window.novelLoop.chapter.cancel({
-        taskId: task.taskId
+        taskId
       });
-      if (mounted.current) receiveTask(next);
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && latestTask.current?.taskId === taskId
+      ) {
+        receiveTask(next);
+      }
     } catch {
-      if (mounted.current) setRefreshWarning(true);
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && latestTask.current?.taskId === taskId
+      ) {
+        setRefreshWarning(true);
+      }
     } finally {
-      if (mounted.current && task.status !== 'stop_requested') {
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && latestTask.current?.taskId === taskId
+        && task.status !== 'stop_requested'
+      ) {
         setIsStopping(false);
       }
     }
@@ -162,6 +189,7 @@ export function ChapterDraftGenerationView({
     let disposed = false;
     let timer: number | undefined;
     const taskId = task.taskId;
+    const generation = operationGeneration.current;
     const schedule = () => {
       if (disposed || !mounted.current) return;
       timer = window.setTimeout(() => void poll(), POLL_INTERVAL_MS);
@@ -170,12 +198,20 @@ export function ChapterDraftGenerationView({
       const currentRequest = ++requestToken.current;
       try {
         const next = await window.novelLoop.chapter.get({ taskId });
-        if (mounted.current && currentRequest === requestToken.current) {
+        if (
+          mounted.current
+          && generation === operationGeneration.current
+          && currentRequest === requestToken.current
+        ) {
           receiveTask(next);
           if (ACTIVE_STATUSES.has(next.status)) schedule();
         }
       } catch {
-        if (mounted.current && currentRequest === requestToken.current) {
+        if (
+          mounted.current
+          && generation === operationGeneration.current
+          && currentRequest === requestToken.current
+        ) {
           setRefreshWarning(true);
           schedule();
         }
@@ -190,8 +226,6 @@ export function ChapterDraftGenerationView({
 
   const retry = () => {
     requestToken.current += 1;
-    terminalAccepted.current = false;
-    latestTask.current = null;
     completionRefreshStarted.current = false;
     setTask(null);
     setLocalError(null);

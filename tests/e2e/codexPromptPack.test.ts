@@ -75,4 +75,14 @@ describe('M23 codex prompt pack and slim schemas', () => {
     expect(schema.properties).toHaveProperty('debtsToIntroduce');
     expect(schema.properties).toHaveProperty('characterDeltas');
   });
+
+  test('chapter mission prompt requires supplied character context without a project-specific ID example', async () => {
+    const prompt = await readFile(
+      path.join(root, 'prompts/codex-text/planning/plan_chapter_mission_slim.md'),
+      'utf8'
+    );
+
+    expect(prompt).toContain('story_state_summary.characters');
+    expect(prompt).not.toContain('char_lincheng');
+  });
 });

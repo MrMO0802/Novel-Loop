@@ -260,6 +260,88 @@ describe('chapter draft generation', () => {
     })).not.toBeInTheDocument();
   });
 
+  test('ignores a late cancel response from draft task A after retry task B starts', async () => {
+    const api = installApi();
+    const oldCancel = deferred<ReturnType<typeof chapterTask>>();
+    const taskAId = 'chapter_aaaaaaaaaaaaaaaa';
+    const taskBId = 'chapter_bbbbbbbbbbbbbbbb';
+    api.chapter.startDrafting
+      .mockResolvedValueOnce(chapterTask({
+        taskId: taskAId,
+        kind: 'drafting',
+        stage: 'scene_cards',
+        completedStages: ['preparing']
+      }))
+      .mockResolvedValueOnce(chapterTask({
+        taskId: taskBId,
+        kind: 'drafting',
+        stage: 'scene_drafts',
+        completedStages: ['preparing', 'scene_cards'],
+        sceneProgress: { current: 1, total: 2 },
+        updatedAt: '2026-07-30T01:00:04.000Z'
+      }));
+    api.chapter.cancel.mockReturnValue(oldCancel.promise);
+    api.chapter.get
+      .mockResolvedValueOnce(chapterTask({
+        taskId: taskAId,
+        kind: 'drafting',
+        status: 'failed',
+        stage: 'scene_cards',
+        completedStages: ['preparing'],
+        canCancel: false,
+        canRetry: true,
+        error: { kind: 'timeout', message: 'Task A timed out.' },
+        updatedAt: '2026-07-30T01:00:03.000Z'
+      }))
+      .mockResolvedValue(chapterTask({
+        taskId: taskBId,
+        kind: 'drafting',
+        stage: 'scene_drafts',
+        completedStages: ['preparing', 'scene_cards'],
+        sceneProgress: { current: 1, total: 2 },
+        updatedAt: '2026-07-30T01:00:05.000Z'
+      }));
+
+    render(<App />);
+    await approvePlan();
+    vi.useFakeTimers();
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByRole('button', {
+      name: '完成当前安全步骤后停止'
+    }));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '继续生成' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    expect(screen.getByText('正在写第 1 / 2 个场景')).toBeVisible();
+
+    await act(async () => {
+      oldCancel.resolve(chapterTask({
+        taskId: taskAId,
+        kind: 'drafting',
+        status: 'cancelled',
+        stage: 'scene_cards',
+        completedStages: ['preparing'],
+        canCancel: false,
+        canRetry: true,
+        updatedAt: '2026-07-30T01:00:06.000Z'
+      }));
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText('正在写第 1 / 2 个场景')).toBeVisible();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(api.chapter.get).toHaveBeenLastCalledWith({ taskId: taskBId });
+  });
+
   test('continues draft polling after a temporary get failure', async () => {
     const api = installApi();
     api.chapter.startDrafting.mockResolvedValue(chapterTask({

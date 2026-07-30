@@ -77,6 +77,7 @@ export function ChapterPlanningGenerationView({
   const headingRef = useRef<HTMLHeadingElement>(null);
   const mounted = useRef(true);
   const requestToken = useRef(0);
+  const operationGeneration = useRef(0);
   const terminalAccepted = useRef(false);
   const latestTask = useRef<ChapterTask | null>(null);
   const inspectionRefreshStarted = useRef(false);
@@ -162,6 +163,9 @@ export function ChapterPlanningGenerationView({
 
   const start = async () => {
     if (isStarting) return;
+    const generation = ++operationGeneration.current;
+    latestTask.current = null;
+    terminalAccepted.current = false;
     const currentRequest = ++requestToken.current;
     setIsStarting(true);
     setLocalError(null);
@@ -169,7 +173,11 @@ export function ChapterPlanningGenerationView({
       const next = await window.novelLoop.chapter.startPlanning({
         projectKey: project.projectKey
       });
-      if (mounted.current && currentRequest === requestToken.current) {
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && currentRequest === requestToken.current
+      ) {
         receiveTask(next);
       }
     } catch {
@@ -185,16 +193,35 @@ export function ChapterPlanningGenerationView({
 
   const requestStop = async () => {
     if (!task || isStopping) return;
+    const generation = operationGeneration.current;
+    const taskId = task.taskId;
     setIsStopping(true);
     try {
       const next = await window.novelLoop.chapter.cancel({
-        taskId: task.taskId
+        taskId
       });
-      if (mounted.current) receiveTask(next);
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && latestTask.current?.taskId === taskId
+      ) {
+        receiveTask(next);
+      }
     } catch {
-      if (mounted.current) setRefreshWarning(true);
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && latestTask.current?.taskId === taskId
+      ) {
+        setRefreshWarning(true);
+      }
     } finally {
-      if (mounted.current && task.status !== 'stop_requested') {
+      if (
+        mounted.current
+        && generation === operationGeneration.current
+        && latestTask.current?.taskId === taskId
+        && task.status !== 'stop_requested'
+      ) {
         setIsStopping(false);
       }
     }
@@ -205,6 +232,7 @@ export function ChapterPlanningGenerationView({
     let disposed = false;
     let timer: number | undefined;
     const taskId = task.taskId;
+    const generation = operationGeneration.current;
     const schedule = () => {
       if (disposed || !mounted.current) return;
       timer = window.setTimeout(() => void poll(), POLL_INTERVAL_MS);
@@ -213,12 +241,20 @@ export function ChapterPlanningGenerationView({
       const currentRequest = ++requestToken.current;
       try {
         const next = await window.novelLoop.chapter.get({ taskId });
-        if (mounted.current && currentRequest === requestToken.current) {
+        if (
+          mounted.current
+          && generation === operationGeneration.current
+          && currentRequest === requestToken.current
+        ) {
           receiveTask(next);
           if (ACTIVE_STATUSES.has(next.status)) schedule();
         }
       } catch {
-        if (mounted.current && currentRequest === requestToken.current) {
+        if (
+          mounted.current
+          && generation === operationGeneration.current
+          && currentRequest === requestToken.current
+        ) {
           setRefreshWarning(true);
           schedule();
         }
@@ -233,8 +269,6 @@ export function ChapterPlanningGenerationView({
 
   const retry = () => {
     requestToken.current += 1;
-    terminalAccepted.current = false;
-    latestTask.current = null;
     inspectionRefreshStarted.current = false;
     setTask(null);
     setLocalError(null);

@@ -7,9 +7,10 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { buildBible } from '../../../../src/app/buildBible.js';
 import { initProjectFromBriefText } from '../../../../src/app/initProject.js';
 import { planGlobal } from '../../../../src/app/planGlobal.js';
-import { ChapterQueueSchema } from '../../../../src/schemas/index.js';
+import { ChapterQueueSchema, StoryStateSchema } from '../../../../src/schemas/index.js';
 import { FileStore } from '../../../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../../../src/storage/ProjectPaths.js';
+import { validCharacterState } from '../../../../tests/fixtures/schemas/valid.js';
 import {
   writeFakeCodex,
   type FakeCodexMode
@@ -235,6 +236,11 @@ async function createChapterProject(
     promptRoot: path.resolve('../../prompts'),
     runId: `${projectId}_planning`
   });
+  const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
+  await store.writeJson(paths.storyState(), {
+    ...storyState,
+    characters: [validCharacterState]
+  }, StoryStateSchema);
   const queue = await store.readJson(paths.chapterQueue(), ChapterQueueSchema);
   await store.writeJson(paths.chapterQueue(), {
     ...queue,

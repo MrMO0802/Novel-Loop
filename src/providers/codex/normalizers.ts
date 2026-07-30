@@ -100,7 +100,7 @@ const SlimSceneCardsSchema = z.object({
       entryPoint: z.string(),
       exitPoint: z.string(),
       location: z.string(),
-      characters: z.array(z.string()).default(['char_lincheng'])
+      characters: z.array(z.string()).min(1)
     })
   )
 });
@@ -350,7 +350,7 @@ export function normalizeSceneCards(value: unknown, context: CodexNormalizationC
       conflict: scene.conflict,
       entryPoint: scene.entryPoint,
       exitPoint: scene.exitPoint,
-      characters: scene.characters.length > 0 ? scene.characters : ['char_lincheng'],
+      characters: scene.characters,
       location: scene.location,
       time: index === 0 ? 'night' : 'later that night',
       informationDelta: [`Scene ${index + 1} advances the selected plan.`],

@@ -12,6 +12,7 @@ import { runChapterUntilDraft, type ChapterDraftProgressEvent } from '../../src/
 import { RunManifestSchema, SceneCardsSchema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { validCharacterState } from '../fixtures/schemas/valid.js';
 
 let tempRoot: string;
 let briefPath: string;
@@ -26,6 +27,13 @@ beforeEach(async () => {
   await initProject({ projectId: 'demo-novel', briefPath, projectsRoot: tempRoot });
   await buildBible({ projectId: 'demo-novel', projectsRoot: tempRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_build_bible_test' });
   await planGlobal({ projectId: 'demo-novel', projectsRoot: tempRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_plan_global_test' });
+  const paths = new ProjectPaths(tempRoot, 'demo-novel');
+  const store = new FileStore();
+  const initialState = await store.readJson(paths.storyState(), StoryStateSchema);
+  await store.writeJson(paths.storyState(), {
+    ...initialState,
+    characters: [validCharacterState]
+  }, StoryStateSchema);
   await runChapterDryRun({
     projectId: 'demo-novel',
     projectsRoot: tempRoot,
@@ -112,7 +120,7 @@ describe('chapter draft generation', () => {
       conflict: '林澈只想快速回家，摊主却急着把旧收音机脱手。',
       entryPoint: '林澈在旧货市场绕路避雨。',
       exitPoint: '他带走旧收音机，并发现它在没有电池时短暂亮灯。',
-      characters: ['char_lincheng', 'char_vendor'],
+      characters: ['char_lincheng'],
       location: '旧货市场',
       time: '第一章傍晚',
       informationDelta: ['旧收音机来源可疑', '旋钮上有被刮掉的楼层数字'],

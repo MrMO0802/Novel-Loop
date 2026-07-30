@@ -2,6 +2,10 @@ import path from 'node:path';
 import type { z } from 'zod';
 
 import { ChapterQueueStore } from './chapterQueue.js';
+import {
+  isStructuredOutputFailure,
+  sceneCharacterReferencesAreValid
+} from './chapterReferenceValidation.js';
 import { writeCodexContextManifest } from './codexMinimalContext.js';
 import { normalizeCodexOutput } from './codexNormalization.js';
 import { injectFailure } from './pipelineFailure.js';
@@ -97,6 +101,9 @@ export interface ChapterDraftResult {
 const DEFAULT_PROJECTS_ROOT = './projects';
 const DEFAULT_PROMPT_ROOT = './prompts';
 const DEFAULT_FIXTURES_ROOT = './fixtures/llm';
+const MAX_SCENE_CHARACTER_CONTEXT = 32;
+const MAX_SCENE_CHARACTER_ID_LENGTH = 200;
+const MAX_SCENE_CHARACTER_NAME_LENGTH = 120;
 
 export async function generateSceneCards(input: ChapterDraftingInput, fileStore = new FileStore()): Promise<GenerateSceneCardsResult> {
   const paths = createPaths(input);
@@ -114,7 +121,17 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
       ? await promptService.renderPrompt(promptId, {
           CHAPTER_NUMBER: input.chapterNumber,
           MISSION_SUMMARY: summarizeJson(mission),
-          SELECTED_PLAN_SUMMARY: summarizeText(selectedPlan)
+          SELECTED_PLAN_SUMMARY: summarizeText(selectedPlan),
+          CHARACTER_ID_NAME_MAP: JSON.stringify(
+            sceneCharacterContext(storyState, mission),
+            null,
+            2
+          ),
+          MISSION_CHARACTER_REFS: JSON.stringify(
+            missionCharacterReferences(mission),
+            null,
+            2
+          )
         })
       : await promptService.renderPrompt(promptId, {
           CHAPTER_NUMBER: input.chapterNumber,
@@ -122,31 +139,52 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
           SELECTED_PLAN_MARKDOWN: selectedPlan,
           STORY_STATE_JSON: JSON.stringify(storyState, null, 2)
         });
-  const response = await llmClient.complete({
-    promptId,
-    system: 'Novel Loop Engine scene planning module',
-    user: renderedPrompt,
-    responseFormat: 'json',
-    metadata: {
-      fixtureScenario: chapterFixtureScenario(input.chapterNumber)
+  let response;
+  try {
+    response = await llmClient.complete({
+      promptId,
+      system: 'Novel Loop Engine scene planning module',
+      user: renderedPrompt,
+      responseFormat: 'json',
+      metadata: {
+        fixtureScenario: chapterFixtureScenario(input.chapterNumber)
+      }
+    });
+  } catch (error) {
+    if (isStructuredOutputFailure(error)) {
+      throw invalidSceneCardsProviderOutput(input.chapterNumber);
     }
-  });
+    throw error;
+  }
 
   if (input.runId !== undefined) {
     await writePromptRunArtifacts(fileStore, paths, input.runId, promptId, renderedPrompt, response.text);
   }
 
-  const sceneCardsJson =
-    input.provider === 'codex-text'
-      ? await normalizeCodexOutput(paths, fileStore, {
-          runId: input.runId,
-          promptId,
-          stage: 'drafting',
-          value: response.json,
-          normalize: () => normalizeSceneCards(response.json, { projectId: paths.projectId, chapterNumber: input.chapterNumber })
-        })
-      : response.json;
-  const sceneCards = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'scene_cards.json'), sceneCardsJson, SceneCardsSchema);
+  let parsedSceneCards: SceneCards;
+  try {
+    const sceneCardsJson =
+      input.provider === 'codex-text'
+        ? await normalizeCodexOutput(paths, fileStore, {
+            runId: input.runId,
+            promptId,
+            stage: 'drafting',
+            value: response.json,
+            normalize: () => normalizeSceneCards(response.json, { projectId: paths.projectId, chapterNumber: input.chapterNumber })
+          })
+        : response.json;
+    parsedSceneCards = SceneCardsSchema.parse(sceneCardsJson);
+    if (!sceneCharacterReferencesAreValid(parsedSceneCards, storyState)) {
+      throw new Error('Scene character references are invalid.');
+    }
+  } catch {
+    throw invalidSceneCardsProviderOutput(input.chapterNumber);
+  }
+  const sceneCards = await fileStore.writeJson(
+    paths.chapterArtifact(input.chapterNumber, 'scene_cards.json'),
+    parsedSceneCards,
+    SceneCardsSchema
+  );
   return {
     artifact: relativeChapterArtifact(input.chapterNumber, 'scene_cards.json'),
     sceneCards
@@ -405,8 +443,10 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
   } catch (error) {
     await markDraftingFailed(queueStore, input, activeStage, runId, error);
     const cancelled = error instanceof AppError && error.code === 'CHAPTER_DRAFT_CANCELLED';
+    const invalidProviderOutput = error instanceof AppError
+      && error.code === 'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT';
     await runLogger.recordError(runId, {
-      code: cancelled ? error.code : 'CHAPTER_DRAFT_FAILED',
+      code: cancelled || invalidProviderOutput ? error.code : 'CHAPTER_DRAFT_FAILED',
       message: cancelled ? error.message : getErrorMessage(error),
       recoverable: cancelled
     });
@@ -729,6 +769,57 @@ function createLlmClient(
 function summarizeText(text: string, maxLength = 1800): string {
   const normalized = text.replace(/\s+/g, ' ').trim();
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}...`;
+}
+
+function missionCharacterReferences(mission: z.infer<typeof ChapterMissionSchema>): string[] {
+  return [...new Set(
+    mission.characterDeltas.map((delta) => delta.characterId)
+  )].slice(0, MAX_SCENE_CHARACTER_CONTEXT);
+}
+
+function sceneCharacterContext(
+  storyState: StoryState,
+  mission: z.infer<typeof ChapterMissionSchema>
+): Array<{ id: string; name: string }> {
+  const missionIds = missionCharacterReferences(mission);
+  const orderedIds = [
+    ...missionIds,
+    ...storyState.characters.map((character) => character.id)
+  ];
+  const charactersById = new Map(
+    storyState.characters.map((character) => [character.id, character])
+  );
+  const included = new Set<string>();
+  const context: Array<{ id: string; name: string }> = [];
+  for (const characterId of orderedIds) {
+    const character = charactersById.get(characterId);
+    if (
+      character === undefined
+      || included.has(characterId)
+      || characterId.length > MAX_SCENE_CHARACTER_ID_LENGTH
+    ) {
+      continue;
+    }
+    included.add(characterId);
+    context.push({
+      id: characterId,
+      name: character.name.trim().slice(0, MAX_SCENE_CHARACTER_NAME_LENGTH)
+    });
+    if (context.length === MAX_SCENE_CHARACTER_CONTEXT) break;
+  }
+  return context;
+}
+
+function invalidSceneCardsProviderOutput(chapterNumber: number): AppError {
+  return new AppError(
+    'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT',
+    'Chapter scene cards contain invalid character references.',
+    2,
+    {
+      chapterNumber,
+      stage: 'scene_cards'
+    }
+  );
 }
 
 function summarizeJson(value: unknown, maxLength = 1800): string {

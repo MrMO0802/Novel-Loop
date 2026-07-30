@@ -14,7 +14,11 @@ Rules:
 - No markdown.
 - No explanation.
 - No extra fields.
-- Include characters as an array for every scene.
+- Include a non-empty characters array for every scene.
+- characters may contain only canonical IDs from character_id_name_map.
+- Never use a display name in characters.
+- New characters are not supported in this workflow; do not invent character IDs.
+- Prefer mission_character_refs when the mission names participating characters.
 
 <chapter_number>
 {{CHAPTER_NUMBER}}
@@ -27,3 +31,11 @@ Rules:
 <selected_plan_summary>
 {{SELECTED_PLAN_SUMMARY}}
 </selected_plan_summary>
+
+<character_id_name_map>
+{{CHARACTER_ID_NAME_MAP}}
+</character_id_name_map>
+
+<mission_character_refs>
+{{MISSION_CHARACTER_REFS}}
+</mission_character_refs>

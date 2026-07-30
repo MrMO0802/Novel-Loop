@@ -138,6 +138,38 @@ corepack pnpm exec vitest run \
 PASS: 4 files, 8 tests
 ```
 
+### Residual Draft-Retry Regression
+
+The I3/I4 verification exposed an I2 baseline regression that was reproducible
+at commit `40e8033`: after scene-card generation failed before writing
+`scene_cards.json`, artifact inspection correctly fell back to `plan_ready`,
+while the queue correctly retained `failed/scene_cards`. The desktop matrix
+rejected that safe retry combination.
+
+The existing `chapterStateProtection` recovery test served as RED. The fix adds
+only the explicit `plan_ready + failed + scene_cards` recovery combination.
+It does not admit diagnostics, review, repair, commit, historical, or stale
+statuses or stages.
+
+```text
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/chapterStateProtection.test.ts \
+  -t "preserves Story State bytes through drafting invalid output recovery" \
+  --reporter=verbose
+PASS: 1 test
+
+corepack pnpm exec vitest run \
+  tests/unit/desktopChapterWorkspace.test.ts \
+  --reporter=dot
+PASS: 1 file, 35 tests
+
+corepack pnpm exec vitest run \
+  tests/e2e/chapterQueueLifecycle.test.ts \
+  -t "rejects a desktop queue transition" \
+  --reporter=verbose
+PASS: 2 tests
+```
+
 ## M1: Bounded Review-Unavailable Classification
 
 Status: **CLOSED**
@@ -181,13 +213,116 @@ corepack pnpm --dir apps/desktop exec vitest run \
 PASS: 6 files, 91 tests
 ```
 
+## I3: Mission Narrative-Debt Reference Integrity
+
+Status: **CLOSED**
+
+### Verification Of Finding
+
+The finding was valid. `ChapterMissionSchema` validated the shape of
+`debtsToPayOrAdvance`, but planning did not require each ID to be unique,
+present in the current Story State, and in an advanceable status. The desktop
+author review also replaced an impossible empty/invalid reference set with
+the claim that an existing suspense thread would be advanced.
+
+### RED Evidence
+
+The initial narrative-reference integration run failed all three debt cases:
+
+- an unknown debt ID produced a complete planning artifact set;
+- a duplicate debt ID was accepted;
+- a resolved-only debt ID was accepted.
+
+The author-review unit test also failed because it received the
+`推进一条既有悬念` fallback instead of bounded invalid-output handling.
+
+### Production Fix
+
+- Added a shared mission-debt validator against current Story State.
+- Allowed only unique debt IDs whose status is `open`, `escalated`, or
+  `partially_paid`.
+- Rejected unknown, duplicate, resolved, paid, and cancelled references before
+  writing `mission.json`.
+- Preserved Story State and prevented candidate, ranking, and selected-plan
+  fan-out after rejection.
+- Recorded `CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT` with a bounded queue
+  failure reason that does not expose IDs, paths, or raw provider output.
+- Removed the impossible author-facing suspense fallback.
+
+## I4: Scene Character Grounding
+
+Status: **CLOSED**
+
+### Verification Of Finding
+
+The finding was valid. The slim scene-card prompt omitted canonical character
+context, the normalizer supplied a hard-coded `char_lincheng` fallback, and
+scene cards were not checked against Story State before draft fan-out.
+
+### RED Evidence
+
+The initial narrative-reference integration run failed all four scene cases:
+
+- the prompt did not contain the non-default canonical character map;
+- an unknown character ID was accepted;
+- a display name was accepted in place of an ID;
+- an empty character list was accepted through normalization.
+
+Together with the I3 cases, the first focused run reported seven failed tests.
+
+### Production Fix
+
+- Added bounded canonical character ID/name context and mission character
+  references to the slim scene-card prompt.
+- Explicitly disallowed new-character creation in this flow.
+- Removed the hard-coded normalizer fallback and required at least one
+  character per scene in both provider and local schemas.
+- Required every scene character to be a canonical Story State ID before
+  writing `scene_cards.json`.
+- Rejected unknown IDs, display names, and empty lists before creating scenes
+  or `draft_v1.md`.
+- Updated mock and fake fixtures to use canonical IDs and seeded canonical
+  character state in focused legacy drafting tests.
+- Recorded `CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT` with a bounded queue
+  failure reason while preserving Story State.
+
+### GREEN Evidence
+
+```text
+corepack pnpm exec vitest run \
+  tests/integration/chapterNarrativeReferences.test.ts \
+  tests/integration/chapterMissionCharacterReferences.test.ts \
+  tests/e2e/codexTextProviderPipeline.test.ts \
+  tests/e2e/codexDryRunPipeline.test.ts \
+  tests/unit/codexMissionNormalizer.test.ts \
+  tests/e2e/codexPromptPack.test.ts \
+  --reporter=dot
+PASS: 6 files, 16 tests
+
+corepack pnpm exec vitest run \
+  tests/unit/desktopChapterWorkspace.test.ts \
+  tests/integration/chapterDesktopLifecycle.test.ts \
+  tests/integration/chapterDraft.test.ts \
+  tests/integration/chapterPlanningDryRun.test.ts \
+  --reporter=dot
+PASS: 4 files, 41 tests
+
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/projectChapterService.test.ts \
+  tests/main/chapterStateProtection.test.ts \
+  tests/main/chapterHandlers.test.ts \
+  tests/renderer/chapterPlanningGeneration.test.tsx \
+  tests/renderer/chapterDraftGeneration.test.tsx \
+  tests/renderer/chapterWorkspace.test.tsx \
+  --reporter=dot
+PASS: 6 files, 83 tests
+```
+
 ## Remaining Findings
 
 The following findings remain open and are intentionally outside this focused
-C1/I2/M1 work:
+C1/I2/M1/I3/I4 work:
 
 - I1: shared project operation lease and queue CAS/revalidation;
-- I3: mission narrative-debt reference integrity;
-- I4: scene character grounding;
 - I5: scene-card workload limits;
 - I6: partial candidate bounds and exact ranking inputs.

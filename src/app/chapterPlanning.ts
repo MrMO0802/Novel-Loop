@@ -2,6 +2,10 @@ import path from 'node:path';
 import type { z } from 'zod';
 
 import { ChapterQueueStore } from './chapterQueue.js';
+import {
+  isStructuredOutputFailure,
+  missionDebtReferencesAreValid
+} from './chapterReferenceValidation.js';
 import { normalizeCodexOutput } from './codexNormalization.js';
 import { injectFailure } from './pipelineFailure.js';
 import type { FailureInjectionPoint } from './pipelineFailure.js';
@@ -140,33 +144,49 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
           STORY_STATE_JSON: JSON.stringify(storyState, null, 2),
           CHAPTER_QUEUE_JSON: JSON.stringify(chapterQueue, null, 2)
         });
-  const response = await llmClient.complete({
-    promptId,
-    system: 'Novel Loop Engine planning module',
-    user: renderedPrompt,
-    responseFormat: 'json',
-    metadata: {
-      fixtureScenario: chapterFixtureScenario(input.chapterNumber)
+  let response;
+  try {
+    response = await llmClient.complete({
+      promptId,
+      system: 'Novel Loop Engine planning module',
+      user: renderedPrompt,
+      responseFormat: 'json',
+      metadata: {
+        fixtureScenario: chapterFixtureScenario(input.chapterNumber)
+      }
+    });
+  } catch (error) {
+    if (isStructuredOutputFailure(error)) {
+      throw invalidMissionProviderOutput(input.chapterNumber);
     }
-  });
+    throw error;
+  }
 
   if (input.runId !== undefined) {
     await writePromptRunArtifacts(fileStore, paths, input.runId, promptId, renderedPrompt, response.text);
   }
 
-  const missionJson =
-    input.provider === 'codex-text'
-      ? await normalizeCodexOutput(paths, fileStore, {
-          runId: input.runId,
-          promptId,
-          stage: 'chapter-planning',
-          value: response.json,
-          normalize: () => normalizeMission(response.json, { projectId: paths.projectId, chapterNumber: input.chapterNumber })
-        })
-      : response.json;
-  const parsedMission = ChapterMissionSchema.parse(missionJson);
-  if (input.provider === 'codex-text') {
-    validateMissionCharacterReferences(parsedMission, storyState.characters, input.chapterNumber);
+  let parsedMission: ChapterMission;
+  try {
+    const missionJson =
+      input.provider === 'codex-text'
+        ? await normalizeCodexOutput(paths, fileStore, {
+            runId: input.runId,
+            promptId,
+            stage: 'chapter-planning',
+            value: response.json,
+            normalize: () => normalizeMission(response.json, { projectId: paths.projectId, chapterNumber: input.chapterNumber })
+          })
+        : response.json;
+    parsedMission = ChapterMissionSchema.parse(missionJson);
+    if (input.provider === 'codex-text') {
+      validateMissionCharacterReferences(parsedMission, storyState.characters, input.chapterNumber);
+    }
+    if (!missionDebtReferencesAreValid(parsedMission, storyState)) {
+      throw new Error('Mission narrative debt references are invalid.');
+    }
+  } catch {
+    throw invalidMissionProviderOutput(input.chapterNumber);
   }
   const mission = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), parsedMission, ChapterMissionSchema);
   return {
@@ -473,8 +493,10 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
   } catch (error) {
     await markPlanningFailed(queueStore, input, activeStage, runId, error);
     const cancelled = error instanceof AppError && error.code === 'CHAPTER_PLANNING_CANCELLED';
+    const invalidProviderOutput = error instanceof AppError
+      && error.code === 'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT';
     await runLogger.recordError(runId, {
-      code: cancelled ? error.code : 'CHAPTER_DRY_RUN_FAILED',
+      code: cancelled || invalidProviderOutput ? error.code : 'CHAPTER_DRY_RUN_FAILED',
       message: cancelled ? error.message : getErrorMessage(error),
       recoverable: cancelled
     });
@@ -732,6 +754,18 @@ function validateMissionCharacterReferences(
   throw new AppError(
     'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT',
     `Chapter ${chapterNumber} mission references a character that is not present in Story State.`,
+    2,
+    {
+      chapterNumber,
+      stage: 'mission'
+    }
+  );
+}
+
+function invalidMissionProviderOutput(chapterNumber: number): AppError {
+  return new AppError(
+    'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT',
+    'Chapter mission contains invalid narrative references.',
     2,
     {
       chapterNumber,

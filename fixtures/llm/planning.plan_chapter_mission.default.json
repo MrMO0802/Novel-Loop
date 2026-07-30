@@ -22,7 +22,7 @@
       "priority": "should"
     }
   ],
-  "debtsToPayOrAdvance": ["debt_0001"],
+  "debtsToPayOrAdvance": [],
   "debtsToIntroduce": [
     {
       "type": "mystery",

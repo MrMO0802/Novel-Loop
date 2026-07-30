@@ -7,7 +7,7 @@
     "conflict": "林澈只想快速回家，摊主却急着把旧收音机脱手。",
     "entryPoint": "林澈在旧货市场绕路避雨。",
     "exitPoint": "他带走旧收音机，并发现它在没有电池时短暂亮灯。",
-    "characters": ["char_lincheng", "char_vendor"],
+    "characters": ["char_lincheng"],
     "location": "旧货市场",
     "time": "第一章傍晚",
     "informationDelta": ["旧收音机来源可疑", "旋钮上有被刮掉的楼层数字"],

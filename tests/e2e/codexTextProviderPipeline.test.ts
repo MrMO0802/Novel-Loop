@@ -9,8 +9,10 @@ import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { initProject } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
 import { validateProject } from '../../src/app/validateProject.js';
+import { StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { validCharacterState } from '../fixtures/schemas/valid.js';
 import { writeFakeCodex } from '../helpers/fakeCodex.js';
 import { briefPath, projectId, promptRoot } from './m16Helpers.js';
 
@@ -56,6 +58,13 @@ describe('codex-text provider pipeline integration', () => {
     expect(global.artifacts).toContain('planning/arc_map.json');
     expect(global.artifacts).toContain('planning/chapter_queue.json');
 
+    const paths = new ProjectPaths(tempRoot, projectId);
+    const initialState = await store.readJson(paths.storyState(), StoryStateSchema);
+    await store.writeJson(paths.storyState(), {
+      ...initialState,
+      characters: [validCharacterState]
+    }, StoryStateSchema);
+
     const dryRun = await runChapterDryRun({
       projectId,
       projectsRoot: tempRoot,
@@ -87,7 +96,6 @@ describe('codex-text provider pipeline integration', () => {
     expect(draft.artifacts).toContain('chapters/chapter_001/scene_cards.json');
     expect(draft.artifacts).toContain('chapters/chapter_001/draft_v1.md');
 
-    const paths = new ProjectPaths(tempRoot, projectId);
     const state = JSON.parse(await store.readText(paths.storyState())) as { latestCommittedChapter: number };
     expect(state.latestCommittedChapter).toBe(0);
     await expect(store.exists(paths.chapterArtifact(1, 'commit_report.json'))).resolves.toBe(false);

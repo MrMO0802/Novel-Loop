@@ -14,7 +14,7 @@ import {
   readDesktopChapterDraft,
   readDesktopChapterPlan
 } from '../../src/desktop/chapterWorkspace.js';
-import { ChapterQueueSchema, RunManifestV2Schema, StoryStateSchema } from '../../src/schemas/index.js';
+import { ChapterMissionSchema, ChapterQueueSchema, RunManifestV2Schema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 import { validCharacterState } from '../fixtures/schemas/valid.js';
@@ -229,6 +229,22 @@ describe('desktop chapter workspace', () => {
     expect(JSON.stringify(draftReview)).not.toMatch(
       /artifactPath|runId|contextManifest|scene_cards\.json|draft_v1\.md|story_state/i
     );
+  }, 30_000);
+
+  test('rejects an impossible mission debt reference instead of showing an author-facing fallback', async () => {
+    await prepareGeneratedChapter();
+    const mission = await store.readJson(
+      paths.chapterArtifact(1, 'mission.json'),
+      ChapterMissionSchema
+    );
+    await store.writeJson(paths.chapterArtifact(1, 'mission.json'), {
+      ...mission,
+      debtsToPayOrAdvance: ['debt_impossible']
+    }, ChapterMissionSchema);
+
+    await expect(readDesktopChapterPlan({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
   }, 30_000);
 
   test('fails closed for stale, already committed, sequence-gap, and missing target queue states', async () => {

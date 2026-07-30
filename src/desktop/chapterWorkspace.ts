@@ -7,6 +7,7 @@ import {
   runChapterUntilDraft,
   type ChapterDraftProgressEvent
 } from '../app/chapterDrafting.js';
+import { missionDebtReferencesAreValid } from '../app/chapterReferenceValidation.js';
 import {
   runChapterDryRun,
   type ChapterPlanningProgressEvent
@@ -221,13 +222,14 @@ function narrativePromisesForAuthor(
   mission: ReturnType<typeof ChapterMissionSchema.parse>,
   storyState: ReturnType<typeof StoryStateSchema.parse>
 ): string[] {
+  if (!missionDebtReferencesAreValid(mission, storyState)) {
+    throw invalidChapterOutput('The chapter mission contains invalid narrative references.');
+  }
   const knownDebts = new Map(
     storyState.narrativeDebts.map((debt) => [debt.id, debt.promise])
   );
   return uniqueAuthorText([
-    ...mission.debtsToPayOrAdvance.map((debtId) => (
-      knownDebts.get(debtId) ?? '推进一条既有悬念'
-    )),
+    ...mission.debtsToPayOrAdvance.map((debtId) => knownDebts.get(debtId)!),
     ...mission.debtsToIntroduce.map((debt) => debt.promise)
   ]);
 }
@@ -346,6 +348,12 @@ const DESKTOP_TARGET_RULES_BY_PHASE: Readonly<Record<DesktopChapterPhase, Deskto
   drafting_partial: { statuses: new Set(['drafting', 'failed']), stages: DRAFTING_STAGES },
   draft_ready: { statuses: new Set(['drafting', 'draft_ready', 'failed']), stages: DRAFTING_STAGES }
 };
+const DESKTOP_FAILED_RECOVERY_STAGES_BY_PHASE: Readonly<Partial<Record<
+  DesktopChapterPhase,
+  ReadonlySet<ChapterQueueStage>
+>>> = {
+  plan_ready: new Set(['scene_cards'])
+};
 
 function assertDesktopTargetPhase(
   status: ChapterQueueStatus,
@@ -353,6 +361,8 @@ function assertDesktopTargetPhase(
   phase: DesktopChapterPhase
 ): void {
   const rule = DESKTOP_TARGET_RULES_BY_PHASE[phase];
+  const failedRecoveryStages = DESKTOP_FAILED_RECOVERY_STAGES_BY_PHASE[phase];
+  if (status === 'failed' && failedRecoveryStages?.has(stage) === true) return;
   if (!rule.statuses.has(status) || !rule.stages.has(stage)) {
     throw invalidChapterOutput('The next chapter lifecycle status does not match its artifacts.');
   }

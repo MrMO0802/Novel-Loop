@@ -11,6 +11,7 @@ import { planGlobal } from '../../src/app/planGlobal.js';
 import { StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { validCharacterState } from '../fixtures/schemas/valid.js';
 import { writeFakeCodex } from '../helpers/fakeCodex.js';
 import { briefPath, projectId, promptRoot } from './m16Helpers.js';
 
@@ -33,6 +34,11 @@ describe('M23 codex dry-run and draft pipeline', () => {
     await planGlobal({ projectId, projectsRoot: tempRoot, provider: 'codex-text', promptRoot, codexBin: fake.codexBin, codexProfile: 'clean' }, store);
 
     const paths = new ProjectPaths(tempRoot, projectId);
+    const initialState = await store.readJson(paths.storyState(), StoryStateSchema);
+    await store.writeJson(paths.storyState(), {
+      ...initialState,
+      characters: [validCharacterState]
+    }, StoryStateSchema);
     const before = await store.readJson(paths.storyState(), StoryStateSchema);
     const dryRun = await runChapterDryRun({
       projectId,

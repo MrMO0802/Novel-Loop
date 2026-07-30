@@ -29,7 +29,14 @@ export type FakeCodexMode =
   | 'codex-expanded-target-quality-regression'
   | 'codex-candidate-preview'
   | 'codex-mission-non-default-character'
-  | 'codex-mission-unknown-character';
+  | 'codex-mission-unknown-character'
+  | 'codex-mission-unknown-debt'
+  | 'codex-mission-duplicate-debt'
+  | 'codex-mission-resolved-debt'
+  | 'codex-scene-non-default-character'
+  | 'codex-scene-unknown-character'
+  | 'codex-scene-display-name'
+  | 'codex-scene-empty-characters';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
@@ -142,6 +149,25 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       : mode === 'codex-mission-unknown-character'
         ? 'char_unknown'
         : missionCharacterFromPrompt(stdin);
+  const missionDebts =
+    mode === 'codex-mission-unknown-debt'
+      ? ['debt_unknown']
+      : mode === 'codex-mission-duplicate-debt'
+        ? ['debt_open', 'debt_open']
+        : mode === 'codex-mission-resolved-debt'
+          ? ['debt_resolved']
+          : [];
+  const sceneCharacterId = sceneCharacterFromPrompt(stdin);
+  const sceneCharacters =
+    mode === 'codex-scene-unknown-character'
+      ? ['char_unknown']
+      : mode === 'codex-scene-display-name'
+        ? ['Mara Vale']
+        : mode === 'codex-scene-empty-characters'
+          ? []
+          : sceneCharacterId === undefined
+            ? []
+            : [sceneCharacterId];
   const chapterTitle = chapterNumber === 1 ? 'The Radio Wakes' : chapterNumber === 2 ? 'The Elevator Log' : 'The Missing Floor';
   const chapterFact =
     chapterNumber === 1
@@ -238,7 +264,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       chapterNumber,
       chapterFunction: chapterNumber === 1 ? 'Open the mystery through the old radio.' : 'Advance the radio-building mystery using committed continuity.',
       objectives: ['Advance chapter ' + chapterNumber + ' using prior committed Story State.', chapterFact],
-      debtsToPayOrAdvance: [],
+      debtsToPayOrAdvance: missionDebts,
       debtsToIntroduce: [{
         type: 'mystery',
         promise: 'Why does the radio speak without power?',
@@ -269,8 +295,8 @@ function jsonFor(promptId, mode, repairMode, stdin) {
     },
     'planning.generate_scene_cards_slim': {
       scenes: [
-        { purpose: 'Introduce the radio.', conflict: 'Rational doubt versus impossible sound.', entryPoint: 'Lin Cheng buys the radio.', exitPoint: 'The radio speaks without power.', location: 'Apartment', characters: ['char_lincheng'] },
-        { purpose: 'Point toward the building.', conflict: 'Ignore the call or investigate.', entryPoint: 'The voice repeats an address.', exitPoint: 'Lin Cheng decides to go.', location: 'Street', characters: ['char_lincheng'] }
+        { purpose: 'Introduce the radio.', conflict: 'Rational doubt versus impossible sound.', entryPoint: 'The protagonist buys the radio.', exitPoint: 'The radio speaks without power.', location: 'Apartment', characters: sceneCharacters },
+        { purpose: 'Point toward the building.', conflict: 'Ignore the call or investigate.', entryPoint: 'The voice repeats an address.', exitPoint: 'The protagonist decides to go.', location: 'Street', characters: sceneCharacters }
       ]
     },
     'diagnostics.diagnose_chapter_slim': {
@@ -600,6 +626,18 @@ function missionCharacterFromPrompt(stdin) {
   const charactersStart = summary[1].indexOf('"characters"');
   if (charactersStart === -1) return undefined;
   const characterId = /"id"\\s*:\\s*"([^"]+)"/.exec(summary[1].slice(charactersStart));
+  return characterId ? characterId[1] : undefined;
+}
+
+function sceneCharacterFromPrompt(stdin) {
+  const refs = /<mission_character_refs>\\s*([\\s\\S]*?)\\s*<\\/mission_character_refs>/i.exec(stdin);
+  if (refs) {
+    const characterId = /\"([^\"]+)\"/.exec(refs[1]);
+    if (characterId) return characterId[1];
+  }
+  const mission = /<mission_summary>\\s*([\\s\\S]*?)\\s*<\\/mission_summary>/i.exec(stdin);
+  if (!mission) return undefined;
+  const characterId = /\"characterId\"\\s*:\\s*\"([^\"]+)\"/.exec(mission[1]);
   return characterId ? characterId[1] : undefined;
 }
 

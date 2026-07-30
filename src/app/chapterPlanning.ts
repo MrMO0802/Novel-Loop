@@ -27,6 +27,13 @@ import type { ChapterMission, ChapterPlanRanking, ChapterQueueStage, PlanCandida
 import type { ChapterQueueStatus } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
+import {
+  MAX_PLAN_CANDIDATE_BYTES,
+  MAX_PLAN_CANDIDATE_SEQUENCE,
+  MAX_PLAN_CANDIDATES_BYTES,
+  expectedPlanCandidateIds,
+  utf8Bytes
+} from '../utils/chapterWorkloadLimits.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
 
@@ -81,6 +88,14 @@ export interface ChapterPlanningStepResult<T> {
 export interface GeneratePlanCandidatesResult {
   artifacts: string[];
   candidates: PlanCandidate[];
+  validatedCandidates: ValidatedPlanCandidate[];
+}
+
+export interface ValidatedPlanCandidate {
+  id: string;
+  artifact: string;
+  markdown: string;
+  sizeBytes: number;
 }
 
 export interface RankPlanCandidatesResult {
@@ -253,42 +268,49 @@ export async function generatePlanCandidates(
         })
       : response.json
   );
-  const selectedCandidates = parsed.candidates.slice(0, input.count);
-
-  if (selectedCandidates.length < input.count) {
-    throw new AppError('INSUFFICIENT_PLAN_CANDIDATES', `Expected ${input.count} plan candidates, got ${selectedCandidates.length}`, 1);
-  }
+  const selectedCandidates = validateProducedPlanCandidates(
+    parsed.candidates,
+    input.count,
+    input.chapterNumber
+  );
+  const validatedCandidates = toValidatedPlanCandidates(
+    selectedCandidates,
+    input.count,
+    input.chapterNumber
+  );
 
   const artifacts: string[] = [];
-  for (const candidate of selectedCandidates) {
-    const fileName = `${candidate.id}.md`;
-    await fileStore.writeText(paths.chapterArtifact(input.chapterNumber, 'plan_candidates', fileName), candidate.markdown);
-    artifacts.push(relativeChapterArtifact(input.chapterNumber, 'plan_candidates', fileName));
+  for (const candidate of validatedCandidates) {
+    await fileStore.writeText(
+      paths.projectArtifact(candidate.artifact),
+      candidate.markdown
+    );
+    artifacts.push(candidate.artifact);
   }
 
   return {
     artifacts,
-    candidates: selectedCandidates
+    candidates: selectedCandidates,
+    validatedCandidates
   };
 }
 
-export async function rankPlanCandidates(input: ChapterPlanningInput, fileStore = new FileStore()): Promise<RankPlanCandidatesResult> {
+export async function rankPlanCandidates(
+  input: ChapterPlanningInput,
+  validatedCandidates: readonly ValidatedPlanCandidate[],
+  fileStore = new FileStore()
+): Promise<RankPlanCandidatesResult> {
   const paths = createPaths(input);
   await ensurePlanningPrerequisites(paths, fileStore);
   const mission = await fileStore.readJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), ChapterMissionSchema);
-  const candidateDir = paths.chapterArtifact(input.chapterNumber, 'plan_candidates');
-  const candidateFiles = (await fileStore.list(candidateDir)).filter((entry) => entry.endsWith('.md'));
-  const candidateContentBlocks: string[] = [];
-
-  for (const candidateFile of candidateFiles) {
-    const candidateText = await fileStore.readText(path.join(candidateDir, candidateFile));
-    candidateContentBlocks.push(`<candidate file="${candidateFile}">\n${candidateText}\n</candidate>`);
-  }
+  const candidateContentBlocks = validatedCandidates.map((candidate) => (
+    `<candidate file="${path.basename(candidate.artifact)}">\n${candidate.markdown}\n</candidate>`
+  ));
 
   const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const promptId = input.provider === 'codex-text' ? 'planning.rank_plan_candidates_slim' : 'planning.rank_plan_candidates';
-  const candidateIds = candidateFiles.map((file) => file.replace(/\.md$/, ''));
+  const candidateIds = validatedCandidates.map((candidate) => candidate.id);
   const renderedPrompt =
     input.provider === 'codex-text'
       ? await promptService.renderPrompt(promptId, {
@@ -326,7 +348,12 @@ export async function rankPlanCandidates(input: ChapterPlanningInput, fileStore 
         })
       : response.json;
   const ranking = await fileStore.writeJson(paths.chapterArtifact(input.chapterNumber, 'ranking.json'), rankingJson, ChapterPlanRankingSchema);
-  const selectedPlanText = await readSelectedPlanText(fileStore, paths, input.chapterNumber, ranking.selectedCandidateId, ranking.selectedPlanPath);
+  const selectedPlanText = validatedCandidates.find(
+    (candidate) => candidate.id === ranking.selectedCandidateId
+  )?.markdown;
+  if (selectedPlanText === undefined) {
+    throw invalidPlanCandidatesOutput(input.chapterNumber);
+  }
   await fileStore.writeText(paths.chapterArtifact(input.chapterNumber, 'selected_plan.md'), selectedPlanText);
 
   return {
@@ -456,7 +483,11 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
       input.forceStage === 'ranking' || forceRegeneration,
       async () => {
         injectFailure(input, 'ranking');
-        return rankPlanCandidates({ ...input, runId }, fileStore);
+        return rankPlanCandidates(
+          { ...input, runId },
+          planCandidates.validatedCandidates,
+          fileStore
+        );
       }
     );
     for (const artifact of ranking.artifacts) {
@@ -494,7 +525,10 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
     await markPlanningFailed(queueStore, input, activeStage, runId, error);
     const cancelled = error instanceof AppError && error.code === 'CHAPTER_PLANNING_CANCELLED';
     const invalidProviderOutput = error instanceof AppError
-      && error.code === 'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT';
+      && (
+        error.code === 'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT'
+        || error.code === 'CHAPTER_PLAN_CANDIDATES_INVALID_OUTPUT'
+      );
     await runLogger.recordError(runId, {
       code: cancelled || invalidProviderOutput ? error.code : 'CHAPTER_DRY_RUN_FAILED',
       message: cancelled ? error.message : getErrorMessage(error),
@@ -608,14 +642,19 @@ async function reusePlanCandidates(
 ): Promise<GeneratePlanCandidatesResult & { reused: boolean }> {
   const candidateDir = paths.chapterArtifact(chapterNumber, 'plan_candidates');
   if (!force && (await fileStore.exists(candidateDir))) {
-    const artifacts = (await fileStore.list(candidateDir))
-      .filter((entry) => entry.endsWith('.md'))
-      .slice(0, count)
-      .map((entry) => relativeChapterArtifact(chapterNumber, 'plan_candidates', entry));
-    if (artifacts.length >= count) {
+    const entries = await fileStore.list(candidateDir);
+    const validatedCandidates = await readValidatedPlanCandidateDirectory(
+      fileStore,
+      paths,
+      chapterNumber,
+      count,
+      entries
+    );
+    if (validatedCandidates.length === count) {
       return {
-        artifacts,
+        artifacts: validatedCandidates.map((candidate) => candidate.artifact),
         candidates: [],
+        validatedCandidates,
         reused: true
       };
     }
@@ -626,6 +665,126 @@ async function reusePlanCandidates(
     ...produced,
     reused: false
   };
+}
+
+function validateProducedPlanCandidates(
+  candidates: readonly PlanCandidate[],
+  count: number,
+  chapterNumber: number
+): PlanCandidate[] {
+  const expectedIds = validatedExpectedCandidateIds(count, chapterNumber);
+  if (
+    candidates.length !== count
+    || candidates.some((candidate, index) => candidate.id !== expectedIds[index])
+  ) {
+    throw invalidPlanCandidatesOutput(chapterNumber);
+  }
+  return [...candidates];
+}
+
+function toValidatedPlanCandidates(
+  candidates: readonly PlanCandidate[],
+  count: number,
+  chapterNumber: number
+): ValidatedPlanCandidate[] {
+  const expectedIds = validatedExpectedCandidateIds(count, chapterNumber);
+  let aggregateBytes = 0;
+  const validated = candidates.map((candidate, index) => {
+    if (candidate.id !== expectedIds[index] || candidate.markdown.trim().length === 0) {
+      throw invalidPlanCandidatesOutput(chapterNumber);
+    }
+    const sizeBytes = utf8Bytes(candidate.markdown);
+    aggregateBytes += sizeBytes;
+    if (sizeBytes > MAX_PLAN_CANDIDATE_BYTES || aggregateBytes > MAX_PLAN_CANDIDATES_BYTES) {
+      throw invalidPlanCandidatesOutput(chapterNumber);
+    }
+    return {
+      id: candidate.id,
+      artifact: relativeChapterArtifact(
+        chapterNumber,
+        'plan_candidates',
+        `${candidate.id}.md`
+      ),
+      markdown: candidate.markdown,
+      sizeBytes
+    };
+  });
+  if (validated.length !== count) {
+    throw invalidPlanCandidatesOutput(chapterNumber);
+  }
+  return validated;
+}
+
+async function readValidatedPlanCandidateDirectory(
+  fileStore: FileStore,
+  paths: ProjectPaths,
+  chapterNumber: number,
+  count: number,
+  entries: readonly string[]
+): Promise<ValidatedPlanCandidate[]> {
+  const expectedIds = validatedExpectedCandidateIds(count, chapterNumber);
+  const expectedFileNames = new Set(expectedIds.map((id) => `${id}.md`));
+  if (
+    entries.length > count
+    || entries.some((entry) => !expectedFileNames.has(entry))
+  ) {
+    throw invalidPlanCandidatesOutput(chapterNumber);
+  }
+
+  const presentEntries = new Set(entries);
+  let aggregateBytes = 0;
+  const validated: ValidatedPlanCandidate[] = [];
+  try {
+    for (const id of expectedIds) {
+      const fileName = `${id}.md`;
+      if (!presentEntries.has(fileName)) continue;
+      const artifact = relativeChapterArtifact(
+        chapterNumber,
+        'plan_candidates',
+        fileName
+      );
+      const markdown = await fileStore.readText(paths.projectArtifact(artifact));
+      const sizeBytes = utf8Bytes(markdown);
+      aggregateBytes += sizeBytes;
+      if (
+        markdown.trim().length === 0
+        || sizeBytes > MAX_PLAN_CANDIDATE_BYTES
+        || aggregateBytes > MAX_PLAN_CANDIDATES_BYTES
+      ) {
+        throw invalidPlanCandidatesOutput(chapterNumber);
+      }
+      validated.push({ id, artifact, markdown, sizeBytes });
+    }
+  } catch (error) {
+    if (error instanceof AppError && error.code === 'CHAPTER_PLAN_CANDIDATES_INVALID_OUTPUT') {
+      throw error;
+    }
+    throw invalidPlanCandidatesOutput(chapterNumber);
+  }
+  return validated;
+}
+
+function validatedExpectedCandidateIds(count: number, chapterNumber: number): string[] {
+  if (
+    !Number.isInteger(count)
+    || count < 1
+    || count > MAX_PLAN_CANDIDATE_SEQUENCE
+  ) {
+    throw invalidPlanCandidatesOutput(chapterNumber);
+  }
+  return expectedPlanCandidateIds(count);
+}
+
+function invalidPlanCandidatesOutput(chapterNumber: number): AppError {
+  return new AppError(
+    'CHAPTER_PLAN_CANDIDATES_INVALID_OUTPUT',
+    'Chapter plan candidates are invalid.',
+    2,
+    {
+      chapterNumber,
+      stage: 'plan_candidates'
+    }
+  );
 }
 
 async function reuseRanking(
@@ -784,23 +943,6 @@ async function ensurePlanningPrerequisites(paths: ProjectPaths, fileStore: FileS
   if (!(await fileStore.exists(path.join(paths.planningDir(), 'chapter_queue.json')))) {
     throw new AppError('CHAPTER_QUEUE_NOT_FOUND', `Chapter queue not found for project: ${paths.projectId}`, 2);
   }
-}
-
-async function readSelectedPlanText(
-  fileStore: FileStore,
-  paths: ProjectPaths,
-  chapterNumber: number,
-  selectedCandidateId: string,
-  selectedPlanPath: string
-): Promise<string> {
-  const directCandidatePath = paths.chapterArtifact(chapterNumber, 'plan_candidates', `${selectedCandidateId}.md`);
-  if (await fileStore.exists(directCandidatePath)) {
-    return fileStore.readText(directCandidatePath);
-  }
-
-  const selectedBasename = path.basename(selectedPlanPath);
-  const fallbackPath = paths.chapterArtifact(chapterNumber, 'plan_candidates', selectedBasename);
-  return fileStore.readText(fallbackPath);
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {

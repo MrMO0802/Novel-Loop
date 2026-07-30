@@ -36,9 +36,14 @@ export type FakeCodexMode =
   | 'codex-scene-non-default-character'
   | 'codex-scene-unknown-character'
   | 'codex-scene-display-name'
-  | 'codex-scene-empty-characters';
+  | 'codex-scene-empty-characters'
+  | 'codex-scene-over-limit';
 
-export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{ codexBin: string; argsLogPath: string }> {
+export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{
+  codexBin: string;
+  argsLogPath: string;
+  statePath: string;
+}> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
   const argsLogPath = path.join(root, `fake-codex-${mode}.log`);
   const statePath = path.join(root, `fake-codex-${mode}.state.json`);
@@ -296,7 +301,10 @@ function jsonFor(promptId, mode, repairMode, stdin) {
     'planning.generate_scene_cards_slim': {
       scenes: [
         { purpose: 'Introduce the radio.', conflict: 'Rational doubt versus impossible sound.', entryPoint: 'The protagonist buys the radio.', exitPoint: 'The radio speaks without power.', location: 'Apartment', characters: sceneCharacters },
-        { purpose: 'Point toward the building.', conflict: 'Ignore the call or investigate.', entryPoint: 'The voice repeats an address.', exitPoint: 'The protagonist decides to go.', location: 'Street', characters: sceneCharacters }
+        { purpose: 'Point toward the building.', conflict: 'Ignore the call or investigate.', entryPoint: 'The voice repeats an address.', exitPoint: 'The protagonist decides to go.', location: 'Street', characters: sceneCharacters },
+        ...(mode === 'codex-scene-over-limit'
+          ? [{ purpose: 'Repeat the hook.', conflict: 'The same decision repeats.', entryPoint: 'The radio speaks again.', exitPoint: 'The protagonist repeats the choice.', location: 'Street', characters: sceneCharacters }]
+          : [])
       ]
     },
     'diagnostics.diagnose_chapter_slim': {
@@ -648,5 +656,5 @@ function formatChapter(chapterNumber) {
     'utf8'
   );
   await chmod(codexBin, 0o755);
-  return { codexBin, argsLogPath };
+  return { codexBin, argsLogPath, statePath };
 }

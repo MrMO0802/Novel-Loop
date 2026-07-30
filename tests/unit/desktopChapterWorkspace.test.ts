@@ -169,6 +169,55 @@ describe('desktop chapter workspace', () => {
     });
   }, 30_000);
 
+  test.each([
+    [
+      'an extra deterministic candidate',
+      [
+        ['plan_001.md', '# Plan 001'],
+        ['plan_002.md', '# Plan 002'],
+        ['plan_003.md', '# Plan 003'],
+        ['plan_004.md', '# Plan 004']
+      ]
+    ],
+    [
+      'aggregate bytes above the desktop budget',
+      [
+        ['plan_001.md', `# Plan 001\n\n${'a'.repeat(220 * 1024)}`],
+        ['plan_002.md', `# Plan 002\n\n${'b'.repeat(220 * 1024)}`],
+        ['plan_003.md', `# Plan 003\n\n${'c'.repeat(220 * 1024)}`]
+      ]
+    ]
+  ] as const)('rejects a partial plan candidate directory containing %s', async (_label, files) => {
+    await prepareGlobalPlan();
+    const fake = await writeFakeCodex(projectsRoot);
+    const previousCodexBin = process.env.NLE_CODEX_BIN;
+    process.env.NLE_CODEX_BIN = fake.codexBin;
+    let stopPlanning = false;
+    try {
+      await expect(planDesktopNextChapter({
+        projectRoot: paths.projectRoot,
+        shouldStop: () => stopPlanning,
+        onProgress: (event) => {
+          if (event.stage === 'mission' && event.state === 'completed') stopPlanning = true;
+        }
+      })).rejects.toMatchObject({ code: 'CHAPTER_PLANNING_CANCELLED' });
+      await store.ensureDir(paths.chapterArtifact(1, 'plan_candidates'));
+      for (const [fileName, content] of files) {
+        await store.writeText(
+          paths.chapterArtifact(1, 'plan_candidates', fileName),
+          content
+        );
+      }
+
+      await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+        code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+      });
+    } finally {
+      if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
+      else process.env.NLE_CODEX_BIN = previousCodexBin;
+    }
+  }, 30_000);
+
   test('rejects a Story State copied from a different project identity', async () => {
     await prepareGlobalPlan();
     await store.writeJson(paths.storyState(), {

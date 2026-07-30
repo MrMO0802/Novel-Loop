@@ -318,11 +318,118 @@ corepack pnpm --dir apps/desktop exec vitest run \
 PASS: 6 files, 83 tests
 ```
 
+## I5: Scene-Card Workload Bounds
+
+Status: **CLOSED**
+
+### Verification Of Finding
+
+The finding was valid. The slim prompt requested two scenes, but the provider
+schema and normalizer accepted any scene count and unbounded strings. A
+three-scene fake response completed drafting and generated three scene files
+before any desktop review limit was applied.
+
+### RED Evidence
+
+The first workload integration run completed successfully instead of rejecting:
+
+- the scene-card provider returned three scenes;
+- three `production.write_scene` calls ran;
+- `scene_cards.json`, three scene drafts, and `draft_v1.md` were written.
+
+### Production Fix
+
+- Documented the current desktop slim contract in shared limits:
+  - exactly 2 scenes;
+  - at most 2,000 characters per slim text field;
+  - 1 through 8 canonical character IDs per scene;
+  - at most 16 items in normalized scene list fields;
+  - at most 32 KiB UTF-8 JSON for the scene-card set.
+- Applied count, string, and character-array limits in the Codex output schema.
+- Applied the same limits and the aggregate byte budget in the slim Zod
+  normalizer.
+- Revalidated normalized scene cards before writing `scene_cards.json`.
+- Rejected over-limit output with bounded invalid-output handling before any
+  `write_scene` fan-out, while preserving Story State.
+
+## I6: Bounded Candidate Recovery And Exact Ranking Input
+
+Status: **CLOSED**
+
+### Verification Of Finding
+
+The finding was valid. Partial recovery selected the first requested Markdown
+files from an arbitrary directory, while ranking separately scanned and read
+every Markdown file. Extra files, alias filenames, and an aggregate payload
+above a reasonable prompt budget all reached the ranking provider.
+
+### RED Evidence
+
+The initial integration run failed all three candidate safety cases because
+each completed ranking instead of rejecting:
+
+- valid `plan_001.md` through `plan_003.md` plus `plan_004.md`;
+- an alias filename (`plan_2.md`);
+- three individually valid near-limit files whose aggregate exceeded the
+  candidate budget.
+
+Together with I5, the first focused run reported four failed tests.
+
+### Production Fix
+
+- Required the deterministic `plan_001.md` through `plan_NNN.md` sequence.
+- Rejected aliases, unexpected files, over-request counts, empty files, files
+  above 256 KiB, and candidate sets above 512 KiB.
+- Kept partial deterministic subsets eligible for regeneration, but reused a
+  set only when all requested candidates are present.
+- Validated provider-generated candidate IDs, count, and bytes before writing
+  any candidate artifact.
+- Passed the ordered validated candidate set and its already-read Markdown
+  directly into ranking.
+- Removed ranking's independent directory scan and selected-plan fallback
+  lookup.
+- Preserved bounded queue failure metadata and prevented ranking provider
+  invocation for invalid recovery directories.
+- Applied the same three-candidate partial-directory limits during desktop
+  inspection.
+
+### GREEN Evidence
+
+```text
+corepack pnpm exec vitest run \
+  tests/unit/codexSceneCardWorkload.test.ts \
+  tests/integration/chapterWorkloadBounds.test.ts \
+  --reporter=dot
+PASS: 2 files, 9 tests
+
+corepack pnpm exec vitest run \
+  tests/integration/chapterWorkloadBounds.test.ts \
+  tests/unit/codexSceneCardWorkload.test.ts \
+  tests/unit/desktopChapterWorkspace.test.ts \
+  tests/integration/chapterPlanningDryRun.test.ts \
+  tests/integration/chapterDraft.test.ts \
+  tests/integration/chapterDesktopLifecycle.test.ts \
+  tests/integration/chapterNarrativeReferences.test.ts \
+  tests/e2e/codexDryRunPipeline.test.ts \
+  tests/e2e/codexTextProviderPipeline.test.ts \
+  tests/e2e/codexPromptPack.test.ts \
+  --reporter=dot
+PASS: 10 files, 65 tests
+
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/projectChapterService.test.ts \
+  tests/main/chapterStateProtection.test.ts \
+  tests/main/chapterHandlers.test.ts \
+  tests/renderer/chapterPlanningGeneration.test.tsx \
+  tests/renderer/chapterDraftGeneration.test.tsx \
+  tests/renderer/chapterWorkspace.test.tsx \
+  --reporter=dot
+PASS: 6 files, 83 tests
+```
+
 ## Remaining Findings
 
 The following findings remain open and are intentionally outside this focused
-C1/I2/M1/I3/I4 work:
+C1/I2/M1/I3/I4/I5/I6 work:
 
 - I1: shared project operation lease and queue CAS/revalidation;
-- I5: scene-card workload limits;
-- I6: partial candidate bounds and exact ranking inputs.

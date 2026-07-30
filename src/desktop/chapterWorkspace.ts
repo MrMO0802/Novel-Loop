@@ -24,6 +24,13 @@ import {
 import type { ChapterQueueStage, ChapterQueueStatus } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
+import {
+  MAX_DESKTOP_PLAN_CANDIDATES,
+  MAX_PLAN_CANDIDATE_BYTES,
+  MAX_PLAN_CANDIDATES_BYTES,
+  expectedPlanCandidateIds,
+  utf8Bytes
+} from '../utils/chapterWorkloadLimits.js';
 import { AppError } from '../utils/AppError.js';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
@@ -522,10 +529,33 @@ async function validateRankedCandidateDirectory(
 
 async function validateCandidateDirectory(directoryPath: string): Promise<void> {
   const entries = await readdir(directoryPath, { withFileTypes: true });
-  if (entries.length === 0 || entries.some((entry) => !entry.isFile() || !entry.name.endsWith('.md'))) {
+  const expectedFileNames = new Set(
+    expectedPlanCandidateIds(MAX_DESKTOP_PLAN_CANDIDATES)
+      .map((candidateId) => `${candidateId}.md`)
+  );
+  if (
+    entries.length === 0
+    || entries.length > MAX_DESKTOP_PLAN_CANDIDATES
+    || entries.some((entry) => (
+      !entry.isFile()
+      || !expectedFileNames.delete(entry.name)
+    ))
+  ) {
     throw invalidChapterOutput('The plan candidate set is invalid.');
   }
-  await Promise.all(entries.map((entry) => readRequiredMarkdown(path.join(directoryPath, entry.name))));
+  let aggregateBytes = 0;
+  for (const entry of entries) {
+    const markdown = await readRequiredMarkdown(path.join(directoryPath, entry.name));
+    const sizeBytes = utf8Bytes(markdown);
+    aggregateBytes += sizeBytes;
+    if (
+      markdown.trim().length === 0
+      || sizeBytes > MAX_PLAN_CANDIDATE_BYTES
+      || aggregateBytes > MAX_PLAN_CANDIDATES_BYTES
+    ) {
+      throw invalidChapterOutput('The plan candidate set is invalid.');
+    }
+  }
 }
 
 async function readRequiredJson<T>(filePath: string, schema: z.ZodType<T>): Promise<T> {

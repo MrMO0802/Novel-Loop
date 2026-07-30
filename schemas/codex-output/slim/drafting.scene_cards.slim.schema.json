@@ -4,18 +4,21 @@
   "properties": {
     "scenes": {
       "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
       "items": {
         "type": "object",
         "required": ["purpose", "conflict", "entryPoint", "exitPoint", "location", "characters"],
         "properties": {
-          "purpose": { "type": "string" },
-          "conflict": { "type": "string" },
-          "entryPoint": { "type": "string" },
-          "exitPoint": { "type": "string" },
-          "location": { "type": "string" },
+          "purpose": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "conflict": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "entryPoint": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "exitPoint": { "type": "string", "minLength": 1, "maxLength": 2000 },
+          "location": { "type": "string", "minLength": 1, "maxLength": 2000 },
           "characters": {
             "type": "array",
             "minItems": 1,
+            "maxItems": 8,
             "items": { "type": "string", "minLength": 1, "maxLength": 200 }
           }
         },

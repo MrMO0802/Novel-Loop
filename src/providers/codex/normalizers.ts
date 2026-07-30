@@ -12,6 +12,13 @@ import {
   SceneCardsSchema
 } from '../../schemas/index.js';
 import type { ArcMap, CanonPatch, ChapterMission, ChapterPlanRanking, ChapterQueue, DiagnosticsReport, PlanCandidates, RevisionPlan, SceneCards } from '../../schemas/index.js';
+import {
+  DESKTOP_SLIM_SCENE_COUNT,
+  MAX_SCENE_CARD_CHARACTERS,
+  MAX_SCENE_CARD_FIELD_CHARS,
+  MAX_SCENE_CARDS_BYTES,
+  utf8Bytes
+} from '../../utils/chapterWorkloadLimits.js';
 import { normalizeDiagnosticsWithReport } from './diagnosticsNormalizer.js';
 
 export {
@@ -92,17 +99,29 @@ const SlimRankingSchema = z.object({
   rationale: z.string()
 });
 
+const SlimSceneTextSchema = z.string().trim().min(1).max(MAX_SCENE_CARD_FIELD_CHARS);
+
 const SlimSceneCardsSchema = z.object({
   scenes: z.array(
     z.object({
-      purpose: z.string(),
-      conflict: z.string(),
-      entryPoint: z.string(),
-      exitPoint: z.string(),
-      location: z.string(),
-      characters: z.array(z.string()).min(1)
+      purpose: SlimSceneTextSchema,
+      conflict: SlimSceneTextSchema,
+      entryPoint: SlimSceneTextSchema,
+      exitPoint: SlimSceneTextSchema,
+      location: SlimSceneTextSchema,
+      characters: z.array(z.string().min(1).max(200))
+        .min(1)
+        .max(MAX_SCENE_CARD_CHARACTERS)
     })
-  )
+  ).length(DESKTOP_SLIM_SCENE_COUNT)
+}).superRefine((value, context) => {
+  if (utf8Bytes(JSON.stringify(value)) > MAX_SCENE_CARDS_BYTES) {
+    context.addIssue({
+      code: 'custom',
+      path: ['scenes'],
+      message: 'scene-card output exceeds the desktop workload budget'
+    });
+  }
 });
 
 const SlimRevisionPlanSchema = z.object({

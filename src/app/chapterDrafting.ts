@@ -20,6 +20,14 @@ import { ChapterMissionSchema, SceneCardsSchema, StoryStateSchema } from '../sch
 import type { ChapterQueueStage, ChapterQueueStatus, SceneCard, SceneCards, StoryState } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
+import {
+  DESKTOP_SLIM_SCENE_COUNT,
+  MAX_SCENE_CARD_ARRAY_ITEMS,
+  MAX_SCENE_CARD_CHARACTERS,
+  MAX_SCENE_CARD_FIELD_CHARS,
+  MAX_SCENE_CARDS_BYTES,
+  utf8Bytes
+} from '../utils/chapterWorkloadLimits.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
 
@@ -174,6 +182,12 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
           })
         : response.json;
     parsedSceneCards = SceneCardsSchema.parse(sceneCardsJson);
+    if (
+      input.provider === 'codex-text'
+      && !desktopSlimSceneCardsWithinBounds(parsedSceneCards)
+    ) {
+      throw new Error('Scene-card workload exceeds desktop limits.');
+    }
     if (!sceneCharacterReferencesAreValid(parsedSceneCards, storyState)) {
       throw new Error('Scene character references are invalid.');
     }
@@ -775,6 +789,47 @@ function missionCharacterReferences(mission: z.infer<typeof ChapterMissionSchema
   return [...new Set(
     mission.characterDeltas.map((delta) => delta.characterId)
   )].slice(0, MAX_SCENE_CHARACTER_CONTEXT);
+}
+
+function desktopSlimSceneCardsWithinBounds(sceneCards: SceneCards): boolean {
+  if (
+    sceneCards.length !== DESKTOP_SLIM_SCENE_COUNT
+    || utf8Bytes(JSON.stringify(sceneCards)) > MAX_SCENE_CARDS_BYTES
+  ) {
+    return false;
+  }
+  return sceneCards.every((scene) => {
+    const scalarFields = [
+      scene.purpose,
+      scene.conflict,
+      scene.entryPoint,
+      scene.exitPoint,
+      scene.location,
+      scene.time,
+      scene.emotionalShift,
+      scene.readerEffect,
+      scene.title,
+      scene.povCharacterId,
+      scene.entryState,
+      scene.exitHook
+    ].filter((value): value is string => value !== undefined);
+    const arrayFields = [
+      scene.informationDelta,
+      scene.constraints,
+      scene.beats ?? []
+    ];
+    return scene.characters.length <= MAX_SCENE_CARD_CHARACTERS
+      && scalarFields.every((value) => value.length <= MAX_SCENE_CARD_FIELD_CHARS)
+      && arrayFields.every((values) => (
+        values.length <= MAX_SCENE_CARD_ARRAY_ITEMS
+        && values.every((value) => value.length <= MAX_SCENE_CARD_FIELD_CHARS)
+      ))
+      && scene.characterDelta.length <= MAX_SCENE_CARD_CHARACTERS
+      && scene.characterDelta.every((delta) => (
+        delta.characterId.length <= MAX_SCENE_CARD_FIELD_CHARS
+        && delta.change.length <= MAX_SCENE_CARD_FIELD_CHARS
+      ));
+  });
 }
 
 function sceneCharacterContext(

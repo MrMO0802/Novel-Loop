@@ -13,7 +13,7 @@ import { PromptService } from '../prompts/PromptService.js';
 import type { CodexProfile } from '../providers/providerTypes.js';
 import { normalizeSceneCards } from '../providers/codex/normalizers.js';
 import { ChapterMissionSchema, SceneCardsSchema, StoryStateSchema } from '../schemas/index.js';
-import type { ChapterQueueStage, SceneCard, SceneCards, StoryState } from '../schemas/index.js';
+import type { ChapterQueueStage, ChapterQueueStatus, SceneCard, SceneCards, StoryState } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
@@ -54,6 +54,7 @@ export interface ChapterDraftingInput {
   forceStage?: ChapterQueueStage;
   failAt?: FailureInjectionPoint;
   regenerateStale?: boolean;
+  enforceDesktopQueueTransitions?: boolean;
   onProgress?: (event: ChapterDraftProgressEvent) => void | Promise<void>;
   shouldStop?: () => boolean | Promise<boolean>;
 }
@@ -244,6 +245,9 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
   const generatedArtifacts: string[] = [];
   const reusedArtifacts: string[] = [];
   const forceRegeneration = input.regenerateStale === true;
+  const initialExpectedStatuses = desktopExpectedStatuses(input, ['planned_ready', 'drafting', 'failed']);
+  const draftingExpectedStatuses = desktopExpectedStatuses(input, ['drafting']);
+  const draftingExpectedStages = desktopExpectedStages(input);
   let activeStage: ChapterQueueStage = 'scene_cards';
 
   await ensureForceStageNotCommitted(input, paths, fileStore);
@@ -266,7 +270,14 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
 
     await emitProgress(input.onProgress, { stage: 'scene_cards', state: 'started' });
     await stopIfRequested(input, 'CHAPTER_DRAFT_CANCELLED');
-    await queueStore.markStageStart(input.chapterNumber, 'drafting', 'scene_cards', runId);
+    await queueStore.markStageStart(
+      input.chapterNumber,
+      'drafting',
+      'scene_cards',
+      runId,
+      initialExpectedStatuses,
+      draftingExpectedStages
+    );
     const sceneCardResult = await reuseJsonArtifact(
       fileStore,
       paths.chapterArtifact(input.chapterNumber, 'scene_cards.json'),
@@ -280,12 +291,26 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
     );
     recordArtifact(artifacts, sceneCardResult.artifact, sceneCardResult.reused ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, sceneCardResult.artifact, sceneCardResult.reused ? 'reused' : 'generated');
-    await queueStore.markStageComplete(input.chapterNumber, 'drafting', 'scene_cards', runId);
+    await queueStore.markStageComplete(
+      input.chapterNumber,
+      'drafting',
+      'scene_cards',
+      runId,
+      draftingExpectedStatuses,
+      draftingExpectedStages
+    );
     await emitProgress(input.onProgress, { stage: 'scene_cards', state: 'completed' });
 
     activeStage = 'scene_drafts';
     await emitProgress(input.onProgress, { stage: 'scene_drafts', state: 'started' });
-    await queueStore.markStageStart(input.chapterNumber, 'drafting', 'scene_drafts', runId);
+    await queueStore.markStageStart(
+      input.chapterNumber,
+      'drafting',
+      'scene_drafts',
+      runId,
+      draftingExpectedStatuses,
+      draftingExpectedStages
+    );
     const sceneCards = sortSceneCards(sceneCardResult.sceneCards);
     for (const [index, sceneCard] of sceneCards.entries()) {
       const sceneResult = await reuseSceneDraft(
@@ -319,13 +344,27 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
       }
       await emitProgress(input.onProgress, { stage: 'scene_drafts', state: 'progress', current: index + 1, total: sceneCards.length });
     }
-    await queueStore.markStageComplete(input.chapterNumber, 'drafting', 'scene_drafts', runId);
+    await queueStore.markStageComplete(
+      input.chapterNumber,
+      'drafting',
+      'scene_drafts',
+      runId,
+      draftingExpectedStatuses,
+      draftingExpectedStages
+    );
     await emitProgress(input.onProgress, { stage: 'scene_drafts', state: 'completed' });
 
     activeStage = 'draft_assembly';
     await emitProgress(input.onProgress, { stage: 'draft_assembly', state: 'started' });
     await stopIfRequested(input, 'CHAPTER_DRAFT_CANCELLED');
-    await queueStore.markStageStart(input.chapterNumber, 'drafting', 'draft_assembly', runId);
+    await queueStore.markStageStart(
+      input.chapterNumber,
+      'drafting',
+      'draft_assembly',
+      runId,
+      draftingExpectedStatuses,
+      draftingExpectedStages
+    );
     const draft = await reuseDraftAssembly(
       fileStore,
       paths,
@@ -338,7 +377,14 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
     await emitProgress(input.onProgress, { stage: 'draft_assembly', state: 'completed' });
 
     await emitProgress(input.onProgress, { stage: 'finalizing', state: 'started' });
-    const finalQueueItem = await queueStore.markStageComplete(input.chapterNumber, 'draft_ready', 'draft_assembly', runId);
+    const finalQueueItem = await queueStore.markStageComplete(
+      input.chapterNumber,
+      'draft_ready',
+      'draft_assembly',
+      runId,
+      draftingExpectedStatuses,
+      draftingExpectedStages
+    );
     await emitProgress(input.onProgress, { stage: 'finalizing', state: 'completed' });
     await emitProgress(input.onProgress, { stage: 'completed', state: 'completed' });
 
@@ -357,7 +403,7 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
       currentStage: finalQueueItem.currentStage
     };
   } catch (error) {
-    await queueStore.markFailed(input.chapterNumber, activeStage, runId, error);
+    await markDraftingFailed(queueStore, input, activeStage, runId, error);
     const cancelled = error instanceof AppError && error.code === 'CHAPTER_DRAFT_CANCELLED';
     await runLogger.recordError(runId, {
       code: cancelled ? error.code : 'CHAPTER_DRAFT_FAILED',
@@ -366,6 +412,44 @@ export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStor
     });
     await runLogger.endRun(runId, 'failed');
     throw error;
+  }
+}
+
+function desktopExpectedStatuses(
+  input: Pick<ChapterDraftingInput, 'enforceDesktopQueueTransitions'>,
+  statuses: readonly ChapterQueueStatus[]
+): readonly ChapterQueueStatus[] | undefined {
+  return input.enforceDesktopQueueTransitions === true ? statuses : undefined;
+}
+
+function desktopExpectedStages(
+  input: Pick<ChapterDraftingInput, 'enforceDesktopQueueTransitions'>
+): readonly ChapterQueueStage[] | undefined {
+  return input.enforceDesktopQueueTransitions === true
+    ? ['ranking', 'scene_cards', 'scene_drafts', 'draft_assembly']
+    : undefined;
+}
+
+async function markDraftingFailed(
+  queueStore: ChapterQueueStore,
+  input: ChapterDraftingInput,
+  activeStage: ChapterQueueStage,
+  runId: string,
+  error: unknown
+): Promise<void> {
+  try {
+    await queueStore.markFailed(
+      input.chapterNumber,
+      activeStage,
+      runId,
+      error,
+      desktopExpectedStatuses(input, ['drafting']),
+      desktopExpectedStages(input)
+    );
+  } catch (transitionError) {
+    if (!(transitionError instanceof AppError && transitionError.code === 'CHAPTER_QUEUE_TRANSITION_INVALID')) {
+      throw transitionError;
+    }
   }
 }
 

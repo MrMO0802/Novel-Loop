@@ -253,7 +253,7 @@ function markdownSchema() {
 function unavailableReviewSchema() {
   return z.object({
     available: z.literal(false),
-    reason: z.enum(['not_ready', 'project_unavailable'])
+    reason: z.enum(['not_ready', 'invalid_output', 'project_unavailable'])
   }).strict();
 }
 

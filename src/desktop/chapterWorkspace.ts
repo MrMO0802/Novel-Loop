@@ -11,6 +11,7 @@ import {
   runChapterDryRun,
   type ChapterPlanningProgressEvent
 } from '../app/chapterPlanning.js';
+import { validateChapterQueueConsistency } from '../app/chapterQueue.js';
 import {
   ChapterMissionSchema,
   ChapterPlanRankingSchema,
@@ -19,6 +20,7 @@ import {
   SceneCardsSchema,
   StoryStateSchema
 } from '../schemas/index.js';
+import type { ChapterQueueStage, ChapterQueueStatus } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError } from '../utils/AppError.js';
@@ -119,7 +121,10 @@ export async function inspectDesktopNextChapter(
   }
 
   const chapterNumber = storyState.latestCommittedChapter + 1;
-  validateQueueForNextChapter(queue.chapters, storyState.latestCommittedChapter, chapterNumber);
+  const queueIssues = validateChapterQueueConsistency(queue, storyState);
+  if (queueIssues.length > 0) {
+    throw invalidChapterOutput('The chapter queue disagrees with the canonical Story State.');
+  }
   const queueItem = queue.chapters.find((chapter) => chapter.chapterNumber === chapterNumber);
   if (queueItem === undefined) return { available: false, reason: 'chapter_missing' };
   if (queueItem.status === 'stale_due_to_history_edit') {
@@ -134,6 +139,7 @@ export async function inspectDesktopNextChapter(
   }
 
   const phase = await inspectPhase(context.paths, chapterNumber);
+  assertDesktopTargetPhase(queueItem.status, queueItem.currentStage, phase);
   return { available: true, chapterNumber, title: queueItem.title, phase };
 }
 
@@ -151,6 +157,7 @@ export async function planDesktopNextChapter(
     chapterNumber: inspection.chapterNumber,
     provider: 'codex-text',
     candidates: 3,
+    enforceDesktopQueueTransitions: true,
     ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
     ...(input.shouldStop === undefined ? {} : { shouldStop: input.shouldStop })
   }, fileStore);
@@ -261,6 +268,7 @@ export async function draftDesktopNextChapter(
     projectsRoot: context.projectsRoot,
     chapterNumber: inspection.chapterNumber,
     provider: 'codex-text',
+    enforceDesktopQueueTransitions: true,
     ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
     ...(input.shouldStop === undefined ? {} : { shouldStop: input.shouldStop })
   }, fileStore);
@@ -321,23 +329,32 @@ async function assertDesktopArtifactPathsSafe(paths: ProjectPaths): Promise<void
   }
 }
 
-function validateQueueForNextChapter(
-  chapters: Array<{ chapterNumber: number; status: string }>,
-  latestCommittedChapter: number,
-  chapterNumber: number
+type DesktopChapterPhase = Extract<DesktopNextChapterInspection, { available: true }>['phase'];
+
+interface DesktopTargetPhaseRule {
+  statuses: ReadonlySet<ChapterQueueStatus>;
+  stages: ReadonlySet<ChapterQueueStage>;
+}
+
+const PLANNING_STAGES = new Set<ChapterQueueStage>(['none', 'mission', 'plan_candidates', 'ranking']);
+const DRAFTING_STAGES = new Set<ChapterQueueStage>(['scene_cards', 'scene_drafts', 'draft_assembly']);
+
+const DESKTOP_TARGET_RULES_BY_PHASE: Readonly<Record<DesktopChapterPhase, DesktopTargetPhaseRule>> = {
+  not_started: { statuses: new Set(['planned', 'planning', 'failed']), stages: PLANNING_STAGES },
+  planning_partial: { statuses: new Set(['planning', 'failed']), stages: PLANNING_STAGES },
+  plan_ready: { statuses: new Set(['planning', 'planned_ready', 'failed']), stages: PLANNING_STAGES },
+  drafting_partial: { statuses: new Set(['drafting', 'failed']), stages: DRAFTING_STAGES },
+  draft_ready: { statuses: new Set(['drafting', 'draft_ready', 'failed']), stages: DRAFTING_STAGES }
+};
+
+function assertDesktopTargetPhase(
+  status: ChapterQueueStatus,
+  stage: ChapterQueueStage,
+  phase: DesktopChapterPhase
 ): void {
-  const numbers = new Set<number>();
-  for (const chapter of chapters) {
-    if (numbers.has(chapter.chapterNumber)) {
-      throw invalidChapterOutput('The chapter queue contains duplicate chapter numbers.');
-    }
-    numbers.add(chapter.chapterNumber);
-    if (chapter.chapterNumber <= latestCommittedChapter && chapter.status !== 'committed') {
-      throw invalidChapterOutput('The chapter queue disagrees with the committed Story State.');
-    }
-  }
-  if (!numbers.has(chapterNumber) && [...numbers].some((number) => number > chapterNumber)) {
-    throw invalidChapterOutput('The chapter queue has a gap before the next chapter.');
+  const rule = DESKTOP_TARGET_RULES_BY_PHASE[phase];
+  if (!rule.statuses.has(status) || !rule.stages.has(stage)) {
+    throw invalidChapterOutput('The next chapter lifecycle status does not match its artifacts.');
   }
 }
 

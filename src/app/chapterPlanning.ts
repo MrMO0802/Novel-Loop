@@ -20,6 +20,7 @@ import {
   StoryStateSchema
 } from '../schemas/index.js';
 import type { ChapterMission, ChapterPlanRanking, ChapterQueueStage, PlanCandidate } from '../schemas/index.js';
+import type { ChapterQueueStatus } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
@@ -55,6 +56,7 @@ export interface ChapterPlanningInput {
   forceStage?: ChapterQueueStage;
   failAt?: FailureInjectionPoint;
   regenerateStale?: boolean;
+  enforceDesktopQueueTransitions?: boolean;
 }
 
 export interface GeneratePlanCandidatesInput extends ChapterPlanningInput {
@@ -323,6 +325,9 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
   const generatedArtifacts: string[] = [];
   const reusedArtifacts: string[] = [];
   const forceRegeneration = input.regenerateStale === true;
+  const initialExpectedStatuses = desktopExpectedStatuses(input, ['planned', 'planning', 'failed']);
+  const planningExpectedStatuses = desktopExpectedStatuses(input, ['planning']);
+  const planningExpectedStages = desktopExpectedStages(input);
   let activeStage: ChapterQueueStage = 'mission';
 
   await ensureForceStageNotCommitted(input, paths, fileStore);
@@ -346,7 +351,14 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
 
     await emitProgress(input.onProgress, { stage: 'mission', state: 'started' });
     await stopIfRequested(input, 'CHAPTER_PLANNING_CANCELLED');
-    await queueStore.markStageStart(input.chapterNumber, 'planning', 'mission', runId);
+    await queueStore.markStageStart(
+      input.chapterNumber,
+      'planning',
+      'mission',
+      runId,
+      initialExpectedStatuses,
+      planningExpectedStages
+    );
     const mission = await reuseJsonArtifact(
       fileStore,
       paths.chapterArtifact(input.chapterNumber, 'mission.json'),
@@ -360,13 +372,27 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
     );
     recordArtifact(artifacts, mission.artifact, mission.reused ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, mission.artifact, mission.reused ? 'reused' : 'generated');
-    await queueStore.markStageComplete(input.chapterNumber, 'planning', 'mission', runId);
+    await queueStore.markStageComplete(
+      input.chapterNumber,
+      'planning',
+      'mission',
+      runId,
+      planningExpectedStatuses,
+      planningExpectedStages
+    );
     await emitProgress(input.onProgress, { stage: 'mission', state: 'completed' });
 
     activeStage = 'plan_candidates';
     await emitProgress(input.onProgress, { stage: 'plan_candidates', state: 'started' });
     await stopIfRequested(input, 'CHAPTER_PLANNING_CANCELLED');
-    await queueStore.markStageStart(input.chapterNumber, 'planning', 'plan_candidates', runId);
+    await queueStore.markStageStart(
+      input.chapterNumber,
+      'planning',
+      'plan_candidates',
+      runId,
+      planningExpectedStatuses,
+      planningExpectedStages
+    );
     const planCandidates = await reusePlanCandidates(
       fileStore,
       paths,
@@ -382,13 +408,27 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
       recordArtifact(artifacts, artifact, planCandidates.reused ? reusedArtifacts : generatedArtifacts);
       await runLogger.recordArtifact(runId, artifact, planCandidates.reused ? 'reused' : 'generated');
     }
-    await queueStore.markStageComplete(input.chapterNumber, 'planning', 'plan_candidates', runId);
+    await queueStore.markStageComplete(
+      input.chapterNumber,
+      'planning',
+      'plan_candidates',
+      runId,
+      planningExpectedStatuses,
+      planningExpectedStages
+    );
     await emitProgress(input.onProgress, { stage: 'plan_candidates', state: 'completed' });
 
     activeStage = 'ranking';
     await emitProgress(input.onProgress, { stage: 'ranking', state: 'started' });
     await stopIfRequested(input, 'CHAPTER_PLANNING_CANCELLED');
-    await queueStore.markStageStart(input.chapterNumber, 'planning', 'ranking', runId);
+    await queueStore.markStageStart(
+      input.chapterNumber,
+      'planning',
+      'ranking',
+      runId,
+      planningExpectedStatuses,
+      planningExpectedStages
+    );
     const ranking = await reuseRanking(
       fileStore,
       paths,
@@ -406,7 +446,14 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
     await emitProgress(input.onProgress, { stage: 'ranking', state: 'completed' });
 
     await emitProgress(input.onProgress, { stage: 'finalizing', state: 'started' });
-    const finalQueueItem = await queueStore.markStageComplete(input.chapterNumber, 'planned_ready', 'ranking', runId);
+    const finalQueueItem = await queueStore.markStageComplete(
+      input.chapterNumber,
+      'planned_ready',
+      'ranking',
+      runId,
+      planningExpectedStatuses,
+      planningExpectedStages
+    );
     await emitProgress(input.onProgress, { stage: 'finalizing', state: 'completed' });
     await emitProgress(input.onProgress, { stage: 'completed', state: 'completed' });
 
@@ -424,7 +471,7 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
       currentStage: finalQueueItem.currentStage
     };
   } catch (error) {
-    await queueStore.markFailed(input.chapterNumber, activeStage, runId, error);
+    await markPlanningFailed(queueStore, input, activeStage, runId, error);
     const cancelled = error instanceof AppError && error.code === 'CHAPTER_PLANNING_CANCELLED';
     await runLogger.recordError(runId, {
       code: cancelled ? error.code : 'CHAPTER_DRY_RUN_FAILED',
@@ -433,6 +480,44 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
     });
     await runLogger.endRun(runId, 'failed');
     throw error;
+  }
+}
+
+function desktopExpectedStatuses(
+  input: Pick<ChapterPlanningInput, 'enforceDesktopQueueTransitions'>,
+  statuses: readonly ChapterQueueStatus[]
+): readonly ChapterQueueStatus[] | undefined {
+  return input.enforceDesktopQueueTransitions === true ? statuses : undefined;
+}
+
+function desktopExpectedStages(
+  input: Pick<ChapterPlanningInput, 'enforceDesktopQueueTransitions'>
+): readonly ChapterQueueStage[] | undefined {
+  return input.enforceDesktopQueueTransitions === true
+    ? ['none', 'mission', 'plan_candidates', 'ranking']
+    : undefined;
+}
+
+async function markPlanningFailed(
+  queueStore: ChapterQueueStore,
+  input: ChapterDryRunInput,
+  activeStage: ChapterQueueStage,
+  runId: string,
+  error: unknown
+): Promise<void> {
+  try {
+    await queueStore.markFailed(
+      input.chapterNumber,
+      activeStage,
+      runId,
+      error,
+      desktopExpectedStatuses(input, ['planning']),
+      desktopExpectedStages(input)
+    );
+  } catch (transitionError) {
+    if (!(transitionError instanceof AppError && transitionError.code === 'CHAPTER_QUEUE_TRANSITION_INVALID')) {
+      throw transitionError;
+    }
   }
 }
 

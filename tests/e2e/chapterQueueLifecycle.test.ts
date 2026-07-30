@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
 import { buildBible } from '../../src/app/buildBible.js';
 import { runChapterFullProduction } from '../../src/app/chapterPipeline.js';
+import { ChapterQueueStore, validateChapterQueueConsistency } from '../../src/app/chapterQueue.js';
 import { initProject } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
 import { validateProject } from '../../src/app/validateProject.js';
@@ -69,6 +70,69 @@ describe('chapter queue lifecycle', () => {
     expect(validation.checks.find((check) => check.name === 'planning/chapter_queue.json consistency')).toMatchObject({
       ok: false
     });
+  });
+
+  test('requires continuous committed or recommitted canonical history', async () => {
+    const paths = await prepareProject();
+    const store = new FileStore();
+    const queue = await store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+    const state = await store.readJson(paths.storyState(), StoryStateSchema);
+    state.latestCommittedChapter = 2;
+    queue.chapters[0].status = 'committed';
+    queue.chapters[1].status = 'recommitted';
+
+    expect(validateChapterQueueConsistency(queue, state)).toEqual([]);
+
+    queue.chapters = queue.chapters.filter((chapter) => chapter.chapterNumber !== 1);
+    expect(validateChapterQueueConsistency(queue, state)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining('Chapter 1')
+      ])
+    );
+  });
+
+  test('rejects a desktop queue transition from a later lifecycle status without changing the queue', async () => {
+    const paths = await prepareProject();
+    const store = new FileStore();
+    const queue = await store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+    queue.chapters[0].status = 'diagnosing';
+    await store.writeJson(paths.chapterQueue(), queue, ChapterQueueSchema);
+    const before = await store.readText(paths.chapterQueue());
+
+    const queueStore = new ChapterQueueStore(paths, store);
+    await expect(queueStore.markStageStart(
+      1,
+      'planning',
+      'mission',
+      'desktop_transition_test',
+      ['planned', 'planning', 'failed']
+    )).rejects.toMatchObject({
+      code: 'CHAPTER_QUEUE_TRANSITION_INVALID'
+    });
+    expect(await store.readText(paths.chapterQueue())).toBe(before);
+  });
+
+  test('rejects a desktop queue transition from a failed later lifecycle stage', async () => {
+    const paths = await prepareProject();
+    const store = new FileStore();
+    const queue = await store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+    queue.chapters[0].status = 'failed';
+    queue.chapters[0].currentStage = 'diagnostics';
+    await store.writeJson(paths.chapterQueue(), queue, ChapterQueueSchema);
+    const before = await store.readText(paths.chapterQueue());
+
+    const queueStore = new ChapterQueueStore(paths, store);
+    await expect(queueStore.markStageStart(
+      1,
+      'planning',
+      'mission',
+      'desktop_transition_stage_test',
+      ['planned', 'planning', 'failed'],
+      ['none', 'mission', 'plan_candidates', 'ranking']
+    )).rejects.toMatchObject({
+      code: 'CHAPTER_QUEUE_TRANSITION_INVALID'
+    });
+    expect(await store.readText(paths.chapterQueue())).toBe(before);
   });
 });
 

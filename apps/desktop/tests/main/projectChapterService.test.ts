@@ -74,6 +74,8 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   readonly runs: DeferredRun[] = [];
   autoComplete = false;
   inspectError: unknown;
+  planReviewError: unknown;
+  draftReviewError: unknown;
 
   constructor() {
     this.inspections.set(projectRoot, availableInspection('not_started'));
@@ -94,10 +96,12 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   }
 
   async readPlan(root: string): Promise<ChapterPlanReviewResult> {
+    if (this.planReviewError !== undefined) throw this.planReviewError;
     return this.planReviews.get(root) ?? { available: false, reason: 'not_ready' };
   }
 
   async readDraft(root: string): Promise<ChapterDraftReviewResult> {
+    if (this.draftReviewError !== undefined) throw this.draftReviewError;
     return this.draftReviews.get(root) ?? { available: false, reason: 'not_ready' };
   }
 
@@ -338,6 +342,46 @@ describe('ProjectChapterService', () => {
       });
       expect(failed.completedStages).not.toContain('completed');
     });
+  });
+
+  test('classifies unavailable plan and draft reviews without exposing internal errors', async () => {
+    const notReady = createService();
+    await expect(notReady.service.readPlan(projectKey)).resolves.toEqual({
+      available: false,
+      reason: 'not_ready'
+    });
+
+    const invalidPlan = createService();
+    invalidPlan.gateway.planReviewError = withCode(
+      'DESKTOP_CHAPTER_INVALID_OUTPUT',
+      '/private/library/radio/planning/ranking.json is invalid'
+    );
+    await expect(invalidPlan.service.readPlan(projectKey)).resolves.toEqual({
+      available: false,
+      reason: 'invalid_output'
+    });
+
+    const invalidDraft = createService();
+    invalidDraft.gateway.draftReviewError = withCode(
+      'ZOD_INVALID_OUTPUT',
+      '/private/library/radio/chapters/chapter_001/draft_v1.md is invalid'
+    );
+    await expect(invalidDraft.service.readDraft(projectKey)).resolves.toEqual({
+      available: false,
+      reason: 'invalid_output'
+    });
+
+    const unavailable = createService();
+    unavailable.gateway.planReviewError = withCode(
+      'ENOENT',
+      '/private/library/radio disappeared'
+    );
+    const result = await unavailable.service.readPlan(projectKey);
+    expect(result).toEqual({
+      available: false,
+      reason: 'project_unavailable'
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private|ranking\.json|draft_v1\.md/i);
   });
 
   test.each([

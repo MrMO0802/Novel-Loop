@@ -264,6 +264,87 @@ describe('desktop chapter workspace', () => {
     });
   });
 
+  test('accepts recommitted canonical history and selects the next planned chapter', async () => {
+    await prepareGlobalPlan();
+    await updateStoryState((storyState) => {
+      storyState.latestCommittedChapter = 1;
+    });
+    await updateQueue((queue) => {
+      queue.chapters[0].status = 'recommitted';
+      queue.chapters[1].status = 'planned';
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      available: true,
+      chapterNumber: 2,
+      phase: 'not_started'
+    });
+  });
+
+  test('rejects a missing canonical queue row before the next chapter', async () => {
+    await prepareGlobalPlan();
+    await updateStoryState((storyState) => {
+      storyState.latestCommittedChapter = 1;
+    });
+    await updateQueue((queue) => {
+      queue.chapters = queue.chapters.filter((chapter) => chapter.chapterNumber !== 1);
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  });
+
+  test.each([
+    'diagnosing',
+    'revision_required',
+    'revising',
+    'final_ready',
+    'patch_extracted',
+    'conflict_detected',
+    'conflict_repairing',
+    'conflict_repaired',
+    'under_review',
+    'manually_edited',
+    'recommit_ready',
+    'recommitting',
+    'committing',
+    'needs_human_review',
+    'blocked'
+  ] as const)('rejects desktop target status %s', async (status) => {
+    await prepareGlobalPlan();
+    await updateQueue((queue) => {
+      queue.chapters[0].status = status;
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  });
+
+  test('rejects a queue status that disagrees with the inspected artifact phase', async () => {
+    await prepareGeneratedChapter();
+    await updateQueue((queue) => {
+      queue.chapters[0].status = 'planned';
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  }, 30_000);
+
+  test('rejects a failed desktop target whose queue stage belongs to diagnostics', async () => {
+    await prepareGeneratedChapter();
+    await updateQueue((queue) => {
+      queue.chapters[0].status = 'failed';
+      queue.chapters[0].currentStage = 'diagnostics';
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  }, 30_000);
+
   test('fails closed for non-file, oversized Markdown, and invalid JSON review artifacts', async () => {
     await prepareGeneratedChapter();
     const selectedPlanPath = paths.chapterArtifact(1, 'selected_plan.md');
@@ -327,6 +408,18 @@ async function updateQueue(mutator: (queue: Awaited<ReturnType<typeof readQueue>
 
 async function readQueue() {
   return store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+}
+
+async function updateStoryState(
+  mutator: (storyState: Awaited<ReturnType<typeof readStoryState>>) => void
+): Promise<void> {
+  const storyState = await readStoryState();
+  mutator(storyState);
+  await store.writeJson(paths.storyState(), storyState, StoryStateSchema);
+}
+
+async function readStoryState() {
+  return store.readJson(paths.storyState(), StoryStateSchema);
 }
 
 async function findChapterRunManifest(): Promise<string> {

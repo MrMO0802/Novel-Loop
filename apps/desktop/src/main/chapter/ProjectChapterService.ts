@@ -129,10 +129,10 @@ export class ProjectChapterService implements ChapterApplicationService {
       return ChapterPlanReviewResultSchema.parse(
         await this.dependencies.gateway.readPlan(projectRoot)
       );
-    } catch {
+    } catch (error) {
       return ChapterPlanReviewResultSchema.parse({
         available: false,
-        reason: 'project_unavailable'
+        reason: toReviewUnavailableReason(error)
       });
     }
   }
@@ -149,10 +149,10 @@ export class ProjectChapterService implements ChapterApplicationService {
       return ChapterDraftReviewResultSchema.parse(
         await this.dependencies.gateway.readDraft(projectRoot)
       );
-    } catch {
+    } catch (error) {
       return ChapterDraftReviewResultSchema.parse({
         available: false,
-        reason: 'project_unavailable'
+        reason: toReviewUnavailableReason(error)
       });
     }
   }
@@ -611,6 +611,14 @@ function isInvalidOutputError(error: unknown): boolean {
     || code.includes('INVALID_JSON')
     || code.includes('INVALID_OUTPUT')
     || code.includes('REPAIR_FAILED');
+}
+
+function toReviewUnavailableReason(
+  error: unknown
+): 'not_ready' | 'invalid_output' | 'project_unavailable' {
+  if (isInvalidOutputError(error)) return 'invalid_output';
+  if (errorCode(error) === 'DESKTOP_CHAPTER_UNAVAILABLE') return 'not_ready';
+  return 'project_unavailable';
 }
 
 function providerClassification(error: unknown): string {

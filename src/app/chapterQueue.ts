@@ -63,7 +63,9 @@ export class ChapterQueueStore {
     chapterNumber: number,
     status: ChapterQueueStatus,
     currentStage: ChapterQueueStage,
-    runId: string | undefined
+    runId: string | undefined,
+    expectedStatuses?: readonly ChapterQueueStatus[],
+    expectedStages?: readonly ChapterQueueStage[]
   ): Promise<ChapterQueueItem> {
     return this.updateChapter(chapterNumber, (chapter, now) => ({
       ...chapter,
@@ -73,14 +75,16 @@ export class ChapterQueueStore {
       startedAt: chapter.startedAt ?? now,
       updatedAt: now,
       failureReason: null
-    }));
+    }), expectedStatuses, expectedStages);
   }
 
   async markStageComplete(
     chapterNumber: number,
     status: ChapterQueueStatus,
     completedStage: ChapterQueueStage,
-    runId: string | undefined
+    runId: string | undefined,
+    expectedStatuses?: readonly ChapterQueueStatus[],
+    expectedStages?: readonly ChapterQueueStage[]
   ): Promise<ChapterQueueItem> {
     return this.updateChapter(chapterNumber, (chapter, now) => ({
       ...chapter,
@@ -91,14 +95,16 @@ export class ChapterQueueStore {
       completedStages: chapter.completedStages.includes(completedStage)
         ? chapter.completedStages
         : [...chapter.completedStages, completedStage]
-    }));
+    }), expectedStatuses, expectedStages);
   }
 
   async markFailed(
     chapterNumber: number,
     currentStage: ChapterQueueStage,
     runId: string | undefined,
-    error: unknown
+    error: unknown,
+    expectedStatuses?: readonly ChapterQueueStatus[],
+    expectedStages?: readonly ChapterQueueStage[]
   ): Promise<ChapterQueueItem> {
     return this.updateChapter(chapterNumber, (chapter, now) => ({
       ...chapter,
@@ -107,7 +113,7 @@ export class ChapterQueueStore {
       latestRunId: runId ?? chapter.latestRunId,
       updatedAt: now,
       failureReason: getErrorMessage(error)
-    }));
+    }), expectedStatuses, expectedStages);
   }
 
   async markNeedsHumanReview(chapterNumber: number, currentStage: ChapterQueueStage, runId: string | undefined): Promise<ChapterQueueItem> {
@@ -230,7 +236,9 @@ export class ChapterQueueStore {
 
   private async updateChapter(
     chapterNumber: number,
-    updater: (chapter: ChapterQueueItem, now: string) => ChapterQueueItem
+    updater: (chapter: ChapterQueueItem, now: string) => ChapterQueueItem,
+    expectedStatuses?: readonly ChapterQueueStatus[],
+    expectedStages?: readonly ChapterQueueStage[]
   ): Promise<ChapterQueueItem> {
     const queue = await this.readQueue();
     const chapterIndex = queue.chapters.findIndex((chapter) => chapter.chapterNumber === chapterNumber);
@@ -238,8 +246,18 @@ export class ChapterQueueStore {
       throw new AppError('CHAPTER_QUEUE_ITEM_NOT_FOUND', `Chapter ${chapterNumber} is not present in chapter_queue.json.`, 2);
     }
 
-    const updatedChapter = updater(queue.chapters[chapterIndex]!, new Date().toISOString());
     const beforeChapter = queue.chapters[chapterIndex]!;
+    if (
+      (expectedStatuses !== undefined && !expectedStatuses.includes(beforeChapter.status))
+      || (expectedStages !== undefined && !expectedStages.includes(beforeChapter.currentStage))
+    ) {
+      throw new AppError(
+        'CHAPTER_QUEUE_TRANSITION_INVALID',
+        `Chapter ${chapterNumber} cannot transition from queue state ${beforeChapter.status}/${beforeChapter.currentStage}.`,
+        2
+      );
+    }
+    const updatedChapter = updater(beforeChapter, new Date().toISOString());
     const nextQueue: ChapterQueue = {
       ...queue,
       chapters: queue.chapters.map((chapter, index) => (index === chapterIndex ? updatedChapter : chapter))
@@ -297,13 +315,15 @@ function relatedArtifactPath(chapter: ChapterQueueItem): string | undefined {
 
 export function validateChapterQueueConsistency(queue: ChapterQueue, storyState: StoryState): string[] {
   const issues: string[] = [];
+  const acceptedCommittedStatuses = new Set<ChapterQueueStatus>(['committed', 'recommitted']);
+  const chapterCounts = new Map<number, number>();
   const hasStale = queue.chapters.some((chapter) => chapter.status === 'stale_due_to_history_edit');
   const staleChapters = queue.chapters.filter((chapter) => chapter.status === 'stale_due_to_history_edit');
   const staleChapterNumbers = new Set(staleChapters.map((chapter) => chapter.chapterNumber));
 
   for (const chapter of queue.chapters) {
-    const acceptedCommittedStatuses: ChapterQueueStatus[] = ['committed', 'recommitted'];
-    if (chapter.chapterNumber <= storyState.latestCommittedChapter && !acceptedCommittedStatuses.includes(chapter.status)) {
+    chapterCounts.set(chapter.chapterNumber, (chapterCounts.get(chapter.chapterNumber) ?? 0) + 1);
+    if (chapter.chapterNumber <= storyState.latestCommittedChapter && !acceptedCommittedStatuses.has(chapter.status)) {
       issues.push(
         `Chapter ${chapter.chapterNumber} is <= latestCommittedChapter ${storyState.latestCommittedChapter}, but queue status is ${chapter.status}.`
       );
@@ -311,11 +331,31 @@ export function validateChapterQueueConsistency(queue: ChapterQueue, storyState:
     if (chapter.chapterNumber <= storyState.latestCommittedChapter && chapter.status === 'stale_due_to_history_edit') {
       issues.push(`Chapter ${chapter.chapterNumber} is stale but is not downstream of latestCommittedChapter ${storyState.latestCommittedChapter}.`);
     }
-    if (chapter.chapterNumber > storyState.latestCommittedChapter && (chapter.status === 'committed' || chapter.status === 'recommitted')) {
+    if (chapter.chapterNumber > storyState.latestCommittedChapter && acceptedCommittedStatuses.has(chapter.status)) {
       issues.push(
         `Chapter ${chapter.chapterNumber} is marked committed, but latestCommittedChapter is ${storyState.latestCommittedChapter}.`
       );
     }
+  }
+
+  for (const [chapterNumber, count] of chapterCounts) {
+    if (count > 1) {
+      issues.push(`Chapter queue contains ${count} entries for Chapter ${chapterNumber}.`);
+    }
+  }
+  for (let chapterNumber = 1; chapterNumber <= storyState.latestCommittedChapter; chapterNumber += 1) {
+    if (!chapterCounts.has(chapterNumber)) {
+      issues.push(
+        `Chapter ${chapterNumber} is missing from canonical queue history through latestCommittedChapter ${storyState.latestCommittedChapter}.`
+      );
+    }
+  }
+  const nextChapterNumber = storyState.latestCommittedChapter + 1;
+  if (
+    !chapterCounts.has(nextChapterNumber)
+    && queue.chapters.some((chapter) => chapter.chapterNumber > nextChapterNumber)
+  ) {
+    issues.push(`Chapter queue has a gap before next Chapter ${nextChapterNumber}.`);
   }
 
   if (!hasStale) {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -16,6 +16,7 @@ import {
   type FakeCodexMode
 } from '../../../../tests/helpers/fakeCodex.js';
 import { EngineChapterGateway } from '../../src/main/chapter/EngineChapterGateway';
+import { ProjectChapterService } from '../../src/main/chapter/ProjectChapterService';
 
 const temporaryDirectories: string[] = [];
 const store = new FileStore();
@@ -192,6 +193,54 @@ describe('chapter workspace Story State protection', () => {
       context.restoreCodexBin();
     }
   }, 30_000);
+
+  test('serializes two real chapter service instances through the shared project lease', async () => {
+    const context = await createChapterProject(
+      'chapter-cross-service-lease',
+      'pause-on-mission'
+    );
+    const projectKey = 'project_shared';
+    const resolver = {
+      resolveProjectRoot: async (candidate: string) => (
+        candidate === projectKey ? context.paths.projectRoot : null
+      )
+    };
+    const firstService = new ProjectChapterService({
+      projects: resolver,
+      gateway: new EngineChapterGateway()
+    });
+    const secondService = new ProjectChapterService({
+      projects: resolver,
+      gateway: new EngineChapterGateway()
+    });
+
+    try {
+      const firstTask = await firstService.startPlanning(projectKey);
+      await waitForFile(context.pausePath);
+      const secondTask = await secondService.startPlanning(projectKey);
+
+      await eventually(async () => {
+        await expect(secondService.get(secondTask.taskId)).resolves.toMatchObject({
+          status: 'failed',
+          error: { kind: 'generation_busy' }
+        });
+      });
+      expect(await promptCallCount(
+        context.statePath,
+        'planning.plan_chapter_mission_slim'
+      )).toBe(1);
+
+      await writeFile(context.releasePath, 'release\n', 'utf8');
+      await eventually(async () => {
+        await expect(firstService.get(firstTask.taskId)).resolves.toMatchObject({
+          status: 'succeeded'
+        });
+      });
+    } finally {
+      await writeFile(context.releasePath, 'release\n', 'utf8');
+      context.restoreCodexBin();
+    }
+  }, 30_000);
 });
 
 function runInput(projectRoot: string) {
@@ -210,6 +259,9 @@ async function createChapterProject(
   paths: ProjectPaths;
   projectsRoot: string;
   useCodexMode(mode: FakeCodexMode): Promise<void>;
+  pausePath: string;
+  releasePath: string;
+  statePath: string;
   restoreCodexBin(): void;
 }> {
   const projectsRoot = await mkdtemp(
@@ -259,11 +311,50 @@ async function createChapterProject(
       const nextFake = await writeFakeCodex(projectsRoot, mode);
       process.env.NLE_CODEX_BIN = nextFake.codexBin;
     },
+    pausePath: fake.pausePath,
+    releasePath: fake.releasePath,
+    statePath: fake.statePath,
     restoreCodexBin: () => {
       if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
       else process.env.NLE_CODEX_BIN = previousCodexBin;
     }
   };
+}
+
+async function waitForFile(filePath: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    try {
+      await readFile(filePath);
+      return;
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw new Error(`Timed out waiting for ${path.basename(filePath)}.`);
+}
+
+async function promptCallCount(
+  statePath: string,
+  promptId: string
+): Promise<number> {
+  const state = JSON.parse(await readFile(statePath, 'utf8')) as Record<string, number>;
+  return state[`${promptId}:json:normal`] ?? 0;
+}
+
+async function eventually(assertion: () => void | Promise<void>): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  let lastError: unknown;
+  while (Date.now() < deadline) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  }
+  throw lastError;
 }
 
 async function sha256(filePath: string): Promise<string> {

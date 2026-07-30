@@ -36,45 +36,23 @@
       "createdAt": "2026-07-02T00:00:00.000Z"
     }
   ],
-  "characterStates": [
+  "characterStates": [],
+  "characterUpdates": [
     {
-      "id": "char_lincheng",
-      "name": "林澈",
-      "role": "protagonist",
-      "age": 24,
-      "publicDescription": "外卖员，疲惫克制，但会被异常细节牵引。",
-      "privateTruths": [],
-      "personality": ["克制", "敏锐", "习惯先压下恐惧"],
-      "desire": "维持平静生活",
-      "fear": "被无法解释的事件拖入危险",
-      "flaw": "遇到异常时先试图自我说服",
-      "currentGoal": "查清十七楼求救声的来源",
-      "emotionalState": "警觉",
-      "physicalState": "疲惫",
-      "knowledge": [
-        {
-          "factId": "fact_ch001_radio_purchase",
-          "text": "旧收音机来自旧货市场。",
-          "status": "knows",
-          "learnedInChapter": 1
-        },
-        {
-          "factId": "fact_ch001_radio_distress",
-          "text": "旧收音机会在没有电池时播放十七楼求救声。",
-          "status": "knows",
-          "learnedInChapter": 1
-        }
-      ],
-      "arc": {
-        "startingPoint": "只想避开麻烦",
-        "currentStage": "被迫面对异常",
-        "targetEndState": "主动追查真相"
-      },
-      "constraints": ["不能开局无敌", "不能提前知道母亲失踪案关联"],
-      "lastUpdatedChapter": 1
+      "characterId": "char_lincheng",
+      "field": "currentGoal",
+      "oldValueSummary": "查清旧收音机的求救声来源",
+      "newValue": "查清十七楼求救声的来源",
+      "reason": "第一章结尾林澈决定追查十七楼求救声。"
+    },
+    {
+      "characterId": "char_lincheng",
+      "field": "emotionalState",
+      "oldValueSummary": "警觉",
+      "newValue": "警觉",
+      "reason": "异常广播让林澈保持警觉。"
     }
   ],
-  "characterUpdates": [],
   "timelineEvents": [
     {
       "id": "event_ch001_market",

@@ -4,6 +4,10 @@ import type { z } from 'zod';
 
 import { AtomicWriter } from './AtomicWriter.js';
 import { ProjectPathGuard } from './ProjectPathGuard.js';
+import {
+  afterProjectOperationWrite,
+  beforeProjectOperationWrite
+} from '../app/projectOperationLease.js';
 
 export class FileStore {
   constructor(
@@ -32,12 +36,15 @@ export class FileStore {
   async writeText(filePath: string, content: string): Promise<void> {
     const resolvedPath = path.resolve(filePath);
     await this.assertSafePath(resolvedPath);
+    await beforeProjectOperationWrite(resolvedPath);
     await this.writer.writeText(resolvedPath, content);
+    await afterProjectOperationWrite(resolvedPath, content);
   }
 
   async appendText(filePath: string, content: string): Promise<void> {
     const resolvedPath = path.resolve(filePath);
     await this.assertSafePath(resolvedPath);
+    await beforeProjectOperationWrite(resolvedPath);
     await mkdir(path.dirname(resolvedPath), { recursive: true });
     await this.assertSafePath(path.dirname(resolvedPath));
     await this.assertSafePath(resolvedPath);
@@ -47,6 +54,7 @@ export class FileStore {
   async ensureDir(dirPath: string): Promise<void> {
     const resolvedPath = path.resolve(dirPath);
     await this.assertSafePath(resolvedPath);
+    await beforeProjectOperationWrite(resolvedPath);
     await mkdir(resolvedPath, { recursive: true });
     await this.assertSafePath(resolvedPath);
   }

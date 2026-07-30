@@ -37,16 +37,21 @@ export type FakeCodexMode =
   | 'codex-scene-unknown-character'
   | 'codex-scene-display-name'
   | 'codex-scene-empty-characters'
-  | 'codex-scene-over-limit';
+  | 'codex-scene-over-limit'
+  | 'pause-on-mission';
 
 export async function writeFakeCodex(root: string, mode: FakeCodexMode = 'valid'): Promise<{
   codexBin: string;
   argsLogPath: string;
   statePath: string;
+  pausePath: string;
+  releasePath: string;
 }> {
   const codexBin = path.join(root, `fake-codex-${mode}.cjs`);
   const argsLogPath = path.join(root, `fake-codex-${mode}.log`);
   const statePath = path.join(root, `fake-codex-${mode}.state.json`);
+  const pausePath = path.join(root, `fake-codex-${mode}.paused`);
+  const releasePath = path.join(root, `fake-codex-${mode}.release`);
   await writeFile(
     codexBin,
     `#!/usr/bin/env node
@@ -55,6 +60,8 @@ const args = process.argv.slice(2);
 fs.appendFileSync(${JSON.stringify(argsLogPath)}, args.join(' ') + '\\n');
 const mode = ${JSON.stringify(mode)};
 const statePath = ${JSON.stringify(statePath)};
+const pausePath = ${JSON.stringify(pausePath)};
+const releasePath = ${JSON.stringify(releasePath)};
 if (args[0] === '--version') {
   process.stdout.write('codex-cli 9.9.9\\n');
   process.exit(0);
@@ -75,6 +82,12 @@ if (args.includes('exec')) {
   const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || 'unknown';
   const repairMode = stdin.includes('REPAIR_JSON_ONLY');
   const callNumber = incrementCall(promptId, schemaMode, repairMode);
+  if (mode === 'pause-on-mission' && promptId === 'planning.plan_chapter_mission_slim' && callNumber === 1) {
+    fs.writeFileSync(pausePath, 'paused\\n');
+    while (!fs.existsSync(releasePath)) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25);
+    }
+  }
   if (mode === 'slow-timeout') {
     setTimeout(() => {
       if (outputFile) fs.writeFileSync(outputFile, schemaMode ? JSON.stringify({ ok: true }) : 'too late\\n');
@@ -656,5 +669,5 @@ function formatChapter(chapterNumber) {
     'utf8'
   );
   await chmod(codexBin, 0o755);
-  return { codexBin, argsLogPath, statePath };
+  return { codexBin, argsLogPath, statePath, pausePath, releasePath };
 }

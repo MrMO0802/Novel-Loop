@@ -10,6 +10,7 @@ import { writeCodexContextManifest } from './codexMinimalContext.js';
 import { normalizeCodexOutput } from './codexNormalization.js';
 import { injectFailure } from './pipelineFailure.js';
 import type { FailureInjectionPoint } from './pipelineFailure.js';
+import { withProjectChapterOperationLease } from './projectOperationLease.js';
 import { ProviderFactory, type ProviderName } from '../llm/ProviderFactory.js';
 import { writePromptRunArtifacts } from '../logging/PromptArtifactWriter.js';
 import { RunLogger } from '../logging/RunLogger.js';
@@ -289,6 +290,16 @@ export async function assembleChapter(input: ChapterDraftingInput, fileStore = n
 }
 
 export async function runChapterUntilDraft(input: ChapterDraftingInput, fileStore = new FileStore()): Promise<ChapterDraftResult> {
+  const paths = createPaths(input);
+  return withProjectChapterOperationLease({
+    projectRoot: paths.projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter-drafting',
+    allowStoryStateWrite: false
+  }, () => runChapterUntilDraftWithinLease(input, fileStore));
+}
+
+async function runChapterUntilDraftWithinLease(input: ChapterDraftingInput, fileStore: FileStore): Promise<ChapterDraftResult> {
   const paths = createPaths(input);
   const runId = input.runId ?? createRunId();
   const runLogger = new RunLogger(paths, fileStore);

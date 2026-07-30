@@ -8,6 +8,7 @@ import { recordCommitJournalPhase, startCommitJournal } from './commitJournal.js
 import type { CommitJournalHandle } from './commitJournal.js';
 import { injectFailure } from './pipelineFailure.js';
 import type { FailureInjectionPoint } from './pipelineFailure.js';
+import { withProjectChapterOperationLease } from './projectOperationLease.js';
 import { ProviderFactory, type ProviderName } from '../llm/ProviderFactory.js';
 import { writePromptRunArtifacts } from '../logging/PromptArtifactWriter.js';
 import { hashJson, RunLogger } from '../logging/RunLogger.js';
@@ -212,6 +213,16 @@ export function applyCanonPatchToStoryState(storyState: StoryState, patch: Canon
 }
 
 export async function commitChapterState(input: ChapterCommitInput, fileStore = new FileStore()): Promise<CommitChapterStateResult> {
+  const paths = createPaths(input);
+  return withProjectChapterOperationLease({
+    projectRoot: paths.projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter-commit',
+    allowStoryStateWrite: true
+  }, () => commitChapterStateWithinLease(input, fileStore));
+}
+
+async function commitChapterStateWithinLease(input: ChapterCommitInput, fileStore: FileStore): Promise<CommitChapterStateResult> {
   blockCodexTextUnsafeOperation({
     provider: input.provider,
     projectId: input.projectId,

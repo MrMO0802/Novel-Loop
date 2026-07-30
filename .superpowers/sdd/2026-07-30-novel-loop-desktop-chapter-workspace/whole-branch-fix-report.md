@@ -427,9 +427,136 @@ corepack pnpm --dir apps/desktop exec vitest run \
 PASS: 6 files, 83 tests
 ```
 
+## I1: Shared Project Operation Lease And Mutation Revalidation
+
+Status: **CLOSED**
+
+### Verification Of Finding
+
+The finding was valid. The filesystem build lock covered Story Bible and
+global planning only. Chapter planning, drafting, and commit relied on
+per-`ProjectChapterService` maps and could run concurrently across another
+service instance or process. Queue transitions used guarded status/stage
+values, but provider wait time left no state or queue revision check before
+later canonical writes.
+
+### RED Evidence
+
+The first engine concurrency run failed all three cases:
+
+- a chapter dry-run completed while an independent child process owned the
+  existing project lock;
+- a commit entered conflict processing while a chapter mission provider was
+  paused instead of failing with `PROJECT_OPERATION_LOCKED`;
+- a paused planning operation completed after external Story State and queue
+  replacement instead of failing stale.
+
+The real desktop service test also failed: two independent
+`ProjectChapterService` instances targeting the same project both completed,
+and the fake Codex received a second mission call.
+
+### Production Fix
+
+- Generalized the existing filesystem lock implementation while preserving the
+  `.novel-loop-build-bible.lock` path and `BUILD_BIBLE_LOCKED` compatibility.
+- Added `PROJECT_OPERATION_LOCKED` for chapter planning, drafting, and commit.
+- Wrapped `runChapterDryRun`, `runChapterUntilDraft`, and
+  `commitChapterState` at their top-level mutation boundaries.
+- Reused an existing same-project operation context for nested calls so the
+  listed top-level workflows cannot deadlock themselves.
+- Captured operation-scoped Story State hash, `latestCommittedChapter`, chapter
+  queue hash, target chapter, target status, and target stage.
+- Added guarded `FileStore` write checkpoints. Every project write in an
+  active chapter operation revalidates the expected state and queue before the
+  write; successful queue or Story State writes update the operation's own
+  expected hash.
+- Forbade Story State writes in planning and drafting contexts.
+- Made stale detection sticky. Failure handlers cannot overwrite a queue or
+  Story State that changed while the provider was running.
+- Kept commit provider restrictions, conflict checks, snapshots, authorization,
+  and Story State mutation semantics unchanged.
+
+### Regression Fixture Alignment
+
+The required commit and Electron regressions exposed old I4 fixtures rather
+than lease failures:
+
+- legacy commit tests had no canonical character while mock scene cards used
+  `char_lincheng`;
+- the default chapter-one patch attempted a whole-character replacement after
+  the character was correctly present in Story State;
+- the Electron fake still returned display names and required the pre-I4
+  scene-card prompt marker.
+
+The fixtures now seed the canonical character, use targeted character updates,
+return canonical IDs, and verify the new character map and mission-reference
+prompt blocks. Production character grounding was not relaxed.
+
+The first required Electron E2E rerun retained fake-Codex stderr and identified
+the exact remaining rejection: the fake still required the old
+`Include characters as an array for every scene.` marker while production now
+requires a non-empty canonical-ID character array plus the bounded character
+map and mission-reference blocks. The fake rejected both configured JSON
+attempts before the UI reported Codex unavailable. Updating that test contract
+made the author flow pass. The final negative-contract rerun still rejected
+display-name characters, altered prompt bodies, dangerous instructions,
+unknown prompts/schemas/operations, and unsafe execution flags.
+
+### GREEN Evidence
+
+```text
+corepack pnpm exec vitest run \
+  tests/integration/projectOperationLease.test.ts \
+  --reporter=verbose
+PASS: 1 file, 3 tests
+
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/chapterStateProtection.test.ts \
+  -t "serializes two real chapter service instances" \
+  --reporter=verbose
+PASS: 1 test
+
+corepack pnpm exec vitest run \
+  tests/integration/projectOperationLease.test.ts \
+  tests/integration/buildBibleLifecycle.test.ts \
+  tests/integration/planGlobalLifecycle.test.ts \
+  tests/integration/buildBiblePlanGlobal.test.ts \
+  tests/integration/chapterDesktopLifecycle.test.ts \
+  tests/integration/chapterPlanningDryRun.test.ts \
+  tests/integration/chapterDraft.test.ts \
+  tests/integration/chapterCommit.test.ts \
+  tests/integration/inspectRollbackCommit.test.ts \
+  tests/integration/chapterNarrativeReferences.test.ts \
+  tests/integration/chapterWorkloadBounds.test.ts \
+  --reporter=dot
+PASS: 11 files, 43 tests
+
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/projectChapterService.test.ts \
+  tests/main/chapterStateProtection.test.ts \
+  tests/main/chapterHandlers.test.ts \
+  tests/renderer/chapterPlanningGeneration.test.tsx \
+  tests/renderer/chapterDraftGeneration.test.tsx \
+  tests/renderer/chapterWorkspace.test.tsx \
+  --reporter=dot
+PASS: 6 files, 84 tests
+
+corepack pnpm build
+PASS
+
+corepack pnpm --dir apps/desktop check
+PASS
+
+corepack pnpm --dir apps/desktop build
+PASS
+
+corepack pnpm --dir apps/desktop test:e2e:required
+PASS: 6 tests
+
+git diff --check
+PASS
+```
+
 ## Remaining Findings
 
-The following findings remain open and are intentionally outside this focused
-C1/I2/M1/I3/I4/I5/I6 work:
-
-- I1: shared project operation lease and queue CAS/revalidation;
+All eight findings from `whole-branch-review.md` are closed.

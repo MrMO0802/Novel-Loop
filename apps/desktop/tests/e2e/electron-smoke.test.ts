@@ -15,6 +15,8 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
+import { validCharacterState } from '../../../../tests/fixtures/schemas/valid.js';
+
 const electronExecutable = require('electron') as string;
 const desktopRoot = path.resolve(__dirname, '../..');
 const repositoryRoot = path.resolve(desktopRoot, '../..');
@@ -302,10 +304,26 @@ test('authors can create chapter one through planning review and initial draft w
       '--root',
       projectsRoot
     ]);
+    const storyStatePath = path.join(
+      projectRoot,
+      'state',
+      'story_state.json'
+    );
+    const initialStoryState = JSON.parse(
+      await readFile(storyStatePath, 'utf8')
+    ) as Record<string, unknown>;
+    await writeFile(storyStatePath, `${JSON.stringify({
+      ...initialStoryState,
+      characters: [{
+        ...validCharacterState,
+        knowledge: [],
+        lastUpdatedChapter: 0
+      }]
+    }, null, 2)}\n`);
 
     const protectedArtifactsBefore = await listProtectedArtifacts(projectRoot);
     const storyStateHashBefore = await sha256(
-      path.join(projectRoot, 'state', 'story_state.json')
+      storyStatePath
     );
     await writeProjectRegistry({
       projectId,
@@ -392,9 +410,18 @@ test('authors can create chapter one through planning review and initial draft w
       })).toBeFocused();
       await page.getByRole('button', { name: '开始生成草稿' }).click();
 
-      await expect(page.getByText('初稿', { exact: true })).toBeVisible({
-        timeout: 45_000
-      });
+      try {
+        await expect(page.getByText('初稿', { exact: true })).toBeVisible({
+          timeout: 45_000
+        });
+      } catch (error) {
+        const fakeErrors = await readFile(fake.errorLogPath, 'utf8')
+          .catch(() => '(no fake Codex stderr was captured)');
+        throw new Error(
+          `Draft generation did not complete. Fake Codex stderr: ${fakeErrors}`,
+          { cause: error }
+        );
+      }
       await expect(page.getByRole('heading', {
         name: '第 1 章 The Radio Wakes'
       })).toBeVisible();
@@ -659,7 +686,7 @@ test('chapter-flow fake Codex rejects an invalid production scene-card context',
       fakeExecArguments(outputPath),
       invalidScenePrompt
     )).rejects.toThrow(
-      'Prompt contract violation: invalid scene card context'
+      'Prompt contract violation for production.write_scene: invalid scene card context'
     );
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
@@ -1092,9 +1119,13 @@ async function writeProjectRegistry(input: {
   );
 }
 
-async function writePlanningFakeCodex(root: string): Promise<{ codexBin: string }> {
+async function writePlanningFakeCodex(root: string): Promise<{
+  codexBin: string;
+  errorLogPath: string;
+}> {
   const codexBin = path.join(root, 'codex');
   const callsLogPath = path.join(root, 'planning-codex-calls.ndjson');
+  const errorLogPath = path.join(root, 'planning-codex-errors.log');
   const statePath = path.join(root, 'planning-codex-state.json');
   const expectedProjectRoot = path.join(
     root,
@@ -1108,9 +1139,15 @@ const path = require('node:path');
 const args = process.argv.slice(2);
 const expectedPromptIds = ${JSON.stringify(FULL_DRAFT_PROMPT_IDS)};
 const callsLogPath = ${JSON.stringify(callsLogPath)};
+const errorLogPath = ${JSON.stringify(errorLogPath)};
 const statePath = ${JSON.stringify(statePath)};
 const expectedProjectRoot = path.resolve(${JSON.stringify(expectedProjectRoot)});
 const expectedSchemaRoot = path.resolve(${JSON.stringify(expectedSchemaRoot)});
+const originalStderrWrite = process.stderr.write.bind(process.stderr);
+process.stderr.write = (chunk, ...args) => {
+  fs.appendFileSync(errorLogPath, String(chunk));
+  return originalStderrWrite(chunk, ...args);
+};
 if (args.length === 1 && args[0] === '--version') {
   process.stdout.write('codex-cli 9.9.9\\n');
   process.exit(0);
@@ -1239,12 +1276,16 @@ const promptContracts = {
     requiredMarkers: [
       'Return only JSON that matches the provided output schema.',
       'Create two concise scene cards for the selected chapter plan.',
-      'Include characters as an array for every scene.'
+      'Include a non-empty characters array for every scene.',
+      'characters may contain only canonical IDs from character_id_name_map.',
+      'Never use a display name in characters.'
     ],
     requiredBlocks: [
       'chapter_number',
       'mission_summary',
-      'selected_plan_summary'
+      'selected_plan_summary',
+      'character_id_name_map',
+      'mission_character_refs'
     ]
   },
   'production.write_scene': {
@@ -1401,7 +1442,7 @@ const outputs = {
         entryPoint: 'Lin Cheng sets the powerless radio on his desk.',
         exitPoint: 'The radio says the old building address.',
         location: 'Lin Cheng apartment',
-        characters: ['Lin Cheng']
+        characters: ['char_lincheng']
       },
       {
         purpose: 'Turn the broadcast into a decision.',
@@ -1409,7 +1450,7 @@ const outputs = {
         entryPoint: 'The address repeats after the room falls silent.',
         exitPoint: 'Lin Cheng writes down the address and leaves.',
         location: 'Apartment stairwell',
-        characters: ['Lin Cheng']
+        characters: ['char_lincheng']
       }
     ]
   })
@@ -1535,11 +1576,11 @@ function hasNonEmptyString(value) {
 }
 
 function failPromptContract(reason) {
-  process.stderr.write('Prompt contract violation: ' + reason);
+  process.stderr.write('Prompt contract violation for ' + promptId + ': ' + reason);
   process.exit(2);
 }
 `;
   await writeFile(codexBin, script, { mode: 0o700 });
   await chmod(codexBin, 0o700);
-  return { codexBin };
+  return { codexBin, errorLogPath };
 }

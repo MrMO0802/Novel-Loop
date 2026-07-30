@@ -14,6 +14,7 @@ import { CanonPatchSchema, CommitReportSchema, ConflictReportSchema, RunManifest
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 import { SnapshotStore } from '../../src/storage/SnapshotStore.js';
+import { validCharacterState } from '../fixtures/schemas/valid.js';
 
 let tempRoot: string;
 let briefPath: string;
@@ -28,6 +29,17 @@ beforeEach(async () => {
   await initProject({ projectId: 'demo-novel', briefPath, projectsRoot: tempRoot });
   await buildBible({ projectId: 'demo-novel', projectsRoot: tempRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_build_bible_test' });
   await planGlobal({ projectId: 'demo-novel', projectsRoot: tempRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_plan_global_test' });
+  const paths = new ProjectPaths(tempRoot, 'demo-novel');
+  const store = new FileStore();
+  const state = await store.readJson(paths.storyState(), StoryStateSchema);
+  await store.writeJson(paths.storyState(), {
+    ...state,
+    characters: [{
+      ...validCharacterState,
+      knowledge: [],
+      lastUpdatedChapter: 0
+    }]
+  }, StoryStateSchema);
   await runChapterDryRun({
     projectId: 'demo-novel',
     projectsRoot: tempRoot,
@@ -79,7 +91,11 @@ describe('chapter canon patch commit', () => {
     expect(patch.sourceFinalPath).toBe('chapters/chapter_001/final.md');
     expect(patch.latestCommittedChapter).toBe(1);
     expect(patch.newFacts.map((fact) => fact.id)).toEqual(['fact_ch001_radio_purchase', 'fact_ch001_radio_distress']);
-    expect(patch.characterStates.map((character) => character.id)).toEqual(['char_lincheng']);
+    expect(patch.characterStates).toEqual([]);
+    expect(patch.characterUpdates.map((update) => update.characterId)).toEqual([
+      'char_lincheng',
+      'char_lincheng'
+    ]);
     expect(patch.timelineEvents).toHaveLength(2);
     expect(patch.narrativeDebtUpdates[0]?.action).toBe('create');
     expect(patch.foreshadowingUpdates[0]?.action).toBe('create');
@@ -113,7 +129,8 @@ describe('chapter canon patch commit', () => {
     expect(report.status).toBe('committed');
     expect(report.appliedChanges).toMatchObject({
       canonFactsAdded: 2,
-      characterStatesUpserted: 1,
+      characterStatesUpserted: 0,
+      characterUpdatesApplied: 2,
       timelineEventsAdded: 2,
       narrativeDebtsChanged: 1,
       foreshadowingChanged: 1,

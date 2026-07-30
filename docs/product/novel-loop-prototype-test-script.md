@@ -52,7 +52,17 @@ does not consume local Codex quota.
 
 ## Consent And Privacy
 
-Explain that this is a non-production prototype with simulated content and actions. Participation is voluntary; participants may skip a task, take a break, or stop the session without explanation. Do not collect their manuscript, account credentials, project files, or personally identifying story material. Store recordings and notes in the approved research location, limit access to the research team, and remove identifying details from synthesis quotes.
+Explain that this is a non-production pilot. The integrated chapter path uses
+the participant's real local Codex installation to generate a local initial
+draft, but it does not create canonical chapter artifacts or modify formal Story
+State. Forward-looking research surfaces and the required fake-Codex regression
+fixtures use simulated content and actions and must be identified as
+simulations. Participation is voluntary; participants may skip a task, take a
+break, or stop the session without explanation. Do not collect their
+manuscript, account credentials, project files, or personally identifying story
+material. Store recordings and notes in the approved research location, limit
+access to the research team, and remove identifying details from synthesis
+quotes.
 
 ## Neutral Prompts
 

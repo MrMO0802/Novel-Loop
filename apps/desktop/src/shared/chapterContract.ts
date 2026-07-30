@@ -18,6 +18,23 @@ export const ChapterTaskIdSchema = z.string()
   .max(96)
   .regex(/^chapter_[A-Za-z0-9_-]+$/);
 
+export const ChapterProjectRequestSchema = z.object({
+  projectKey: ChapterProjectKeySchema
+}).strict();
+
+export const ChapterTaskRequestSchema = z.object({
+  taskId: ChapterTaskIdSchema
+}).strict();
+
+export const ChapterInspectRequestSchema = ChapterProjectRequestSchema;
+export const ChapterStartRequestSchema = ChapterProjectRequestSchema;
+export const ChapterStartPlanningRequestSchema = ChapterStartRequestSchema;
+export const ChapterStartDraftingRequestSchema = ChapterStartRequestSchema;
+export const ChapterGetRequestSchema = ChapterTaskRequestSchema;
+export const ChapterCancelRequestSchema = ChapterTaskRequestSchema;
+export const ChapterReadPlanRequestSchema = ChapterProjectRequestSchema;
+export const ChapterReadDraftRequestSchema = ChapterProjectRequestSchema;
+
 export const ChapterTaskKindSchema = z.enum(['planning', 'drafting']);
 
 export const ChapterTaskStatusSchema = z.enum([
@@ -61,7 +78,7 @@ const ChapterErrorSchema = z.object({
 }).strict();
 
 export const ChapterSceneProgressSchema = z.object({
-  current: z.number().int().nonnegative(),
+  current: z.number().int().positive(),
   total: z.number().int().positive()
 }).strict().refine(
   ({ current, total }) => current <= total,
@@ -164,6 +181,28 @@ export const ChapterDraftReviewResultSchema = z.discriminatedUnion('available', 
 ]);
 
 export type ChapterTaskKind = z.infer<typeof ChapterTaskKindSchema>;
+export type ChapterProjectRequest = z.infer<
+  typeof ChapterProjectRequestSchema
+>;
+export type ChapterTaskRequest = z.infer<typeof ChapterTaskRequestSchema>;
+export type ChapterInspectRequest = z.infer<
+  typeof ChapterInspectRequestSchema
+>;
+export type ChapterStartRequest = z.infer<typeof ChapterStartRequestSchema>;
+export type ChapterStartPlanningRequest = z.infer<
+  typeof ChapterStartPlanningRequestSchema
+>;
+export type ChapterStartDraftingRequest = z.infer<
+  typeof ChapterStartDraftingRequestSchema
+>;
+export type ChapterGetRequest = z.infer<typeof ChapterGetRequestSchema>;
+export type ChapterCancelRequest = z.infer<typeof ChapterCancelRequestSchema>;
+export type ChapterReadPlanRequest = z.infer<
+  typeof ChapterReadPlanRequestSchema
+>;
+export type ChapterReadDraftRequest = z.infer<
+  typeof ChapterReadDraftRequestSchema
+>;
 export type ChapterTaskStatus = z.infer<typeof ChapterTaskStatusSchema>;
 export type ChapterTaskStage = z.infer<typeof ChapterTaskStageSchema>;
 export type ChapterErrorKind = z.infer<typeof ChapterErrorKindSchema>;

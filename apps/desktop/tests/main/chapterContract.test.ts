@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'vitest';
 
+import * as chapterContract from '../../src/shared/chapterContract';
 import {
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
@@ -60,6 +61,49 @@ const validTask = {
 } as const;
 
 describe('chapter workspace contract', () => {
+  test('exports strict request objects for all seven service operations', () => {
+    const cases = [
+      ['ChapterInspectRequestSchema', { projectKey: 'project_radio' }, {
+        projectKey: 'project_radio',
+        path: '/private/library/radio'
+      }],
+      ['ChapterStartPlanningRequestSchema', { projectKey: 'project_radio' }, {
+        projectKey: 'project_radio',
+        provider: 'codex-text'
+      }],
+      ['ChapterStartDraftingRequestSchema', { projectKey: 'project_radio' }, {
+        projectKey: 'project_radio',
+        chapterNumber: 1
+      }],
+      ['ChapterGetRequestSchema', { taskId: 'chapter_0123456789abcdef' }, {
+        taskId: 'chapter_0123456789abcdef',
+        command: 'status'
+      }],
+      ['ChapterCancelRequestSchema', { taskId: 'chapter_0123456789abcdef' }, {
+        taskId: 'chapter_0123456789abcdef',
+        provider: 'codex-text'
+      }],
+      ['ChapterReadPlanRequestSchema', { projectKey: 'project_radio' }, {
+        projectKey: 'project_radio',
+        command: 'cat'
+      }],
+      ['ChapterReadDraftRequestSchema', { projectKey: 'project_radio' }, {
+        projectKey: 'project_radio',
+        path: '/private/chapter.md'
+      }]
+    ] as const;
+
+    for (const [exportName, valid, withExtra] of cases) {
+      const schema = (
+        chapterContract as unknown as Record<string, RequestObjectSchema>
+      )[exportName];
+      expect(schema, `${exportName} must be exported`).toBeDefined();
+      if (schema === undefined) continue;
+      expect(schema.safeParse(valid).success).toBe(true);
+      expect(schema.safeParse(withExtra).success).toBe(false);
+    }
+  });
+
   test('parses valid plan and draft reviews', () => {
     expect(ChapterPlanReviewResultSchema.parse(validPlanReview)).toEqual(validPlanReview);
     expect(ChapterDraftReviewResultSchema.parse(validDraftReview)).toEqual(validDraftReview);
@@ -120,8 +164,34 @@ describe('chapter workspace contract', () => {
     }).success).toBe(false);
   });
 
+  test('rejects a plan review whose aggregate payload exceeds four MiB', () => {
+    const repeatedReviewText = Array.from(
+      { length: 100 },
+      () => 'x'.repeat(1_100)
+    );
+    const oversizedReview = {
+      ...validPlanReview,
+      selectedPlan: {
+        ...validPlanReview.selectedPlan,
+        markdown: 'x'.repeat(2 * 1024 * 1024)
+      },
+      alternatives: Array.from({ length: 10 }, (_, index) => ({
+        title: `Alternative ${index + 1}`,
+        excerpt: 'A bounded excerpt.',
+        strengths: repeatedReviewText,
+        risks: repeatedReviewText
+      }))
+    };
+
+    expect(new TextEncoder().encode(JSON.stringify(oversizedReview)).byteLength)
+      .toBeGreaterThan(4 * 1024 * 1024);
+    expect(ChapterPlanReviewResultSchema.safeParse(oversizedReview).success)
+      .toBe(false);
+  });
+
   test.each([
     { current: -1, total: 2 },
+    { current: 0, total: 2 },
     { current: 1, total: 0 },
     { current: 3, total: 2 },
     { current: 0.5, total: 2 }
@@ -150,4 +220,18 @@ describe('chapter workspace contract', () => {
       }]
     }).success).toBe(false);
   });
+
+  test('rejects engine scene identifiers from draft scene summaries', () => {
+    expect(ChapterDraftReviewResultSchema.safeParse({
+      ...validDraftReview,
+      scenes: [{
+        summary: 'Lin Cheng hears the radio.',
+        sceneId: 'scene_001'
+      }]
+    }).success).toBe(false);
+  });
 });
+
+interface RequestObjectSchema {
+  safeParse(value: unknown): { success: boolean };
+}

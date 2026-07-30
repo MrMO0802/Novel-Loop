@@ -231,7 +231,7 @@ export class ProjectChapterService implements ChapterApplicationService {
         projectKey,
         kind,
         1,
-        toChapterStartErrorKind(error)
+        toChapterStartErrorKind(error, kind)
       );
     }
 
@@ -314,7 +314,10 @@ export class ProjectChapterService implements ChapterApplicationService {
       if (isCancellation(error)) {
         this.finishCancelled(internal);
       } else {
-        this.finishFailed(internal, toChapterRunErrorKind(error));
+        this.finishFailed(
+          internal,
+          toChapterRunErrorKind(error, internal.task.kind)
+        );
       }
     } finally {
       if (
@@ -332,6 +335,7 @@ export class ProjectChapterService implements ChapterApplicationService {
     event: ChapterEngineProgressEvent
   ): void {
     if (internal.terminal) return;
+    if (event.stage === 'completed') return;
     const completedStages = event.state === 'completed'
       ? addCompletedStage(internal.task.completedStages, event.stage)
       : internal.task.completedStages;
@@ -538,7 +542,10 @@ function toInspectionErrorKind(
   return 'project_unavailable';
 }
 
-function toChapterStartErrorKind(error: unknown): ChapterErrorKind {
+function toChapterStartErrorKind(
+  error: unknown,
+  taskKind: ChapterTaskKind
+): ChapterErrorKind {
   const code = errorCode(error);
   if (code === 'DESKTOP_CHAPTER_STALE') return 'stale_chapter';
   if (isInvalidOutputError(error)) return 'invalid_output';
@@ -550,10 +557,13 @@ function toChapterStartErrorKind(error: unknown): ChapterErrorKind {
   ) {
     return 'project_unavailable';
   }
-  return toChapterRunErrorKind(error);
+  return toChapterRunErrorKind(error, taskKind);
 }
 
-function toChapterRunErrorKind(error: unknown): ChapterErrorKind {
+function toChapterRunErrorKind(
+  error: unknown,
+  taskKind: ChapterTaskKind
+): ChapterErrorKind {
   const classification = providerClassification(error);
   if (classification === 'login_required') return 'login_required';
   if (classification === 'usage_limit') return 'usage_limit';
@@ -567,7 +577,9 @@ function toChapterRunErrorKind(error: unknown): ChapterErrorKind {
   }
   if (code.includes('TIMEOUT')) return 'timeout';
   if (code === 'DESKTOP_CHAPTER_STALE') return 'stale_chapter';
-  if (code === 'DESKTOP_CHAPTER_UNAVAILABLE') return 'plan_missing';
+  if (code === 'DESKTOP_CHAPTER_UNAVAILABLE') {
+    return taskKind === 'drafting' ? 'plan_missing' : 'project_unavailable';
+  }
   if (isInvalidOutputError(error)) return 'invalid_output';
   if (
     code === 'ENOENT'

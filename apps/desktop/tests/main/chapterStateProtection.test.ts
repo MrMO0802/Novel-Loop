@@ -32,8 +32,11 @@ describe('chapter workspace Story State protection', () => {
 
     try {
       await context.gateway.plan(runInput(context.paths.projectRoot));
-      await context.gateway.draft(runInput(context.paths.projectRoot));
+      expect(await sha256(context.paths.storyState())).toBe(before);
+      await expect(context.gateway.readPlan(context.paths.projectRoot))
+        .resolves.toMatchObject({ available: true });
 
+      await context.gateway.draft(runInput(context.paths.projectRoot));
       expect(await sha256(context.paths.storyState())).toBe(before);
       await expect(context.gateway.readDraft(context.paths.projectRoot))
         .resolves.toMatchObject({ available: true });
@@ -91,19 +94,84 @@ describe('chapter workspace Story State protection', () => {
         .rejects.toBeDefined();
       expect(await sha256(context.paths.storyState())).toBe(before);
 
+      await context.useCodexMode('valid');
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      await expect(context.gateway.readPlan(context.paths.projectRoot))
+        .resolves.toMatchObject({ available: true });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
       context.restoreCodexBin();
-      const validFake = await writeFakeCodex(context.projectsRoot, 'valid');
-      const previousCodexBin = process.env.NLE_CODEX_BIN;
-      process.env.NLE_CODEX_BIN = validFake.codexBin;
-      try {
-        await context.gateway.plan(runInput(context.paths.projectRoot));
-        await expect(context.gateway.readPlan(context.paths.projectRoot))
-          .resolves.toMatchObject({ available: true });
-        expect(await sha256(context.paths.storyState())).toBe(before);
-      } finally {
-        if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
-        else process.env.NLE_CODEX_BIN = previousCodexBin;
-      }
+    }
+  }, 30_000);
+
+  test('preserves Story State bytes after a drafting execution failure', async () => {
+    const context = await createChapterProject(
+      'chapter-state-draft-failure',
+      'valid'
+    );
+    const before = await sha256(context.paths.storyState());
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      expect(await sha256(context.paths.storyState())).toBe(before);
+      await context.useCodexMode('missing-output');
+
+      await expect(context.gateway.draft(runInput(context.paths.projectRoot)))
+        .rejects.toBeDefined();
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
+  test('preserves Story State bytes after drafting cancellation', async () => {
+    const context = await createChapterProject(
+      'chapter-state-draft-cancel',
+      'valid'
+    );
+    const before = await sha256(context.paths.storyState());
+    let stopRequested = false;
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      expect(await sha256(context.paths.storyState())).toBe(before);
+
+      await expect(context.gateway.draft({
+        ...runInput(context.paths.projectRoot),
+        onProgress: (event) => {
+          if (event.stage === 'scene_cards' && event.state === 'completed') {
+            stopRequested = true;
+          }
+        },
+        shouldStop: () => stopRequested
+      })).rejects.toMatchObject({ code: 'CHAPTER_DRAFT_CANCELLED' });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
+  test('preserves Story State bytes through drafting invalid output recovery', async () => {
+    const context = await createChapterProject(
+      'chapter-state-draft-invalid-output',
+      'valid'
+    );
+    const before = await sha256(context.paths.storyState());
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      expect(await sha256(context.paths.storyState())).toBe(before);
+      await context.useCodexMode('invalid-json');
+
+      await expect(context.gateway.draft(runInput(context.paths.projectRoot)))
+        .rejects.toBeDefined();
+      expect(await sha256(context.paths.storyState())).toBe(before);
+
+      await context.useCodexMode('valid');
+      await context.gateway.draft(runInput(context.paths.projectRoot));
+      await expect(context.gateway.readDraft(context.paths.projectRoot))
+        .resolves.toMatchObject({ available: true });
+      expect(await sha256(context.paths.storyState())).toBe(before);
     } finally {
       context.restoreCodexBin();
     }
@@ -125,6 +193,7 @@ async function createChapterProject(
   gateway: EngineChapterGateway;
   paths: ProjectPaths;
   projectsRoot: string;
+  useCodexMode(mode: FakeCodexMode): Promise<void>;
   restoreCodexBin(): void;
 }> {
   const projectsRoot = await mkdtemp(
@@ -165,6 +234,10 @@ async function createChapterProject(
     gateway: new EngineChapterGateway(),
     paths,
     projectsRoot,
+    useCodexMode: async (mode) => {
+      const nextFake = await writeFakeCodex(projectsRoot, mode);
+      process.env.NLE_CODEX_BIN = nextFake.codexBin;
+    },
     restoreCodexBin: () => {
       if (previousCodexBin === undefined) delete process.env.NLE_CODEX_BIN;
       else process.env.NLE_CODEX_BIN = previousCodexBin;

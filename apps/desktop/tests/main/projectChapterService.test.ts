@@ -310,23 +310,31 @@ describe('ProjectChapterService', () => {
     const { gateway, service } = createService();
     const missing = await service.startPlanning(projectKey);
     await eventually(() => expect(gateway.runs).toHaveLength(1));
+    emitEngineCompletion(gateway, 0);
     gateway.succeedWithoutReview(0);
     await eventually(async () => {
-      await expect(service.get(missing.taskId)).resolves.toMatchObject({
+      const failed = await service.get(missing.taskId);
+      expect(failed).toMatchObject({
         status: 'failed',
+        stage: 'finalizing',
         error: { kind: 'invalid_output' }
       });
+      expect(failed.completedStages).not.toContain('completed');
     });
 
     gateway.inspections.set(projectRoot, availableInspection('planning_partial'));
     const invalid = await service.startPlanning(projectKey);
     await eventually(() => expect(gateway.runs).toHaveLength(2));
+    emitEngineCompletion(gateway, 1);
     gateway.succeedWithInvalidReview(1);
     await eventually(async () => {
-      await expect(service.get(invalid.taskId)).resolves.toMatchObject({
+      const failed = await service.get(invalid.taskId);
+      expect(failed).toMatchObject({
         status: 'failed',
+        stage: 'finalizing',
         error: { kind: 'invalid_output' }
       });
+      expect(failed.completedStages).not.toContain('completed');
     });
   });
 
@@ -356,6 +364,39 @@ describe('ProjectChapterService', () => {
       expect(failed.error?.message).not.toMatch(/private|secret|codex absent/i);
     });
   });
+
+  test.each([
+    ['planning', 'project_unavailable'],
+    ['drafting', 'plan_missing']
+  ] as const)(
+    'maps a late unavailable engine result for %s to %s',
+    async (taskKind, errorKind) => {
+      const { gateway, service } = createService();
+      if (taskKind === 'drafting') {
+        gateway.inspections.set(projectRoot, availableInspection('plan_ready'));
+      }
+      const task = taskKind === 'planning'
+        ? await service.startPlanning(projectKey)
+        : await service.startDrafting(projectKey);
+      await eventually(() => expect(gateway.runs).toHaveLength(1));
+      gateway.fail(0, withCode(
+        'DESKTOP_CHAPTER_UNAVAILABLE',
+        '/private/project artifacts disappeared'
+      ));
+
+      await eventually(async () => {
+        const failed = await service.get(task.taskId);
+        expect(failed).toMatchObject({
+          status: 'failed',
+          error: { kind: errorKind }
+        });
+        expect(failed.error?.message).not.toContain('/private/project');
+        if (taskKind === 'planning') {
+          expect(failed.error?.message).not.toMatch(/plan before drafting/i);
+        }
+      });
+    }
+  );
 
   test('maps missing plans, unavailable projects, and stale chapters safely', async () => {
     const missing = createService();
@@ -489,6 +530,14 @@ function inspectionChapterNumber(
 
 function withCode(code: string, message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code });
+}
+
+function emitEngineCompletion(
+  gateway: DeferredChapterGateway,
+  index: number
+): void {
+  gateway.emit(index, { stage: 'finalizing', state: 'completed' });
+  gateway.emit(index, { stage: 'completed', state: 'completed' });
 }
 
 async function eventually(assertion: () => void | Promise<void>): Promise<void> {

@@ -29,10 +29,15 @@ type PlanningTab = typeof TABS[number]['id'];
 
 interface PlanningReviewProps {
   onBack: () => void;
+  onCreateChapter: () => void;
   project: ProjectSummary;
 }
 
-export function PlanningReview({ onBack, project }: PlanningReviewProps) {
+export function PlanningReview({
+  onBack,
+  onCreateChapter,
+  project
+}: PlanningReviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const requestToken = useRef(0);
@@ -169,16 +174,18 @@ export function PlanningReview({ onBack, project }: PlanningReviewProps) {
               <div>
                 <h2>{t('planning.review.nextTitle')}</h2>
                 <p id="planning-next-note">
-                  {t('planning.review.nextUnavailable')}
+                  {t('planning.review.nextAvailable')}
                 </p>
               </div>
               <button
                 aria-describedby="planning-next-note"
                 className="nl-primary-action"
-                disabled
+                onClick={onCreateChapter}
                 type="button"
               >
-                {t('planning.review.nextButton')}
+                {formatMessage('planning.review.nextButton', {
+                  chapter: project.latestCommittedChapter + 1
+                })}
               </button>
             </footer>
           </>

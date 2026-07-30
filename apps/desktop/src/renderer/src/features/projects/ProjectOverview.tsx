@@ -2,15 +2,25 @@ import { ArrowLeft } from '@phosphor-icons/react/ArrowLeft';
 import { BookOpenText } from '@phosphor-icons/react/BookOpenText';
 import { CheckCircle } from '@phosphor-icons/react/CheckCircle';
 import { WarningCircle } from '@phosphor-icons/react/WarningCircle';
-import { useEffect, useRef, type ReactNode } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode
+} from 'react';
 
+import type { ChapterInspection } from '../../../../shared/chapterContract';
 import type { ProjectSummary } from '../../../../shared/projectContract';
 import { formatMessage, t } from '../../i18n/messages.zh-CN';
 
 interface ProjectOverviewProps {
   onBack: () => void;
+  onOpenChapterDraft: () => void;
+  onPrepareChapter: () => void;
   onPrepareFoundation: () => void;
   onPreparePlanning: () => void;
+  onResumeChapterDraft: () => void;
+  onReviewChapterPlan: () => void;
   onReviewFoundation: () => void;
   onReviewPlanning: () => void;
   project: ProjectSummary;
@@ -18,20 +28,53 @@ interface ProjectOverviewProps {
 
 export function ProjectOverview({
   onBack,
+  onOpenChapterDraft,
+  onPrepareChapter,
   onPrepareFoundation,
   onPreparePlanning,
+  onResumeChapterDraft,
+  onReviewChapterPlan,
   onReviewFoundation,
   onReviewPlanning,
   project
 }: ProjectOverviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const requestToken = useRef(0);
+  const [chapterInspection, setChapterInspection] =
+    useState<ChapterInspection | null>(null);
 
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!project.globalPlanAvailable) {
+      setChapterInspection(null);
+      return;
+    }
+    const currentRequest = ++requestToken.current;
+    void window.novelLoop.chapter.inspect({ projectKey: project.projectKey })
+      .then((inspection) => {
+        if (currentRequest === requestToken.current) {
+          setChapterInspection(inspection);
+        }
+      })
+      .catch(() => {
+        // Keep the existing planning-review action available if inspection
+        // cannot be refreshed.
+      });
+    return () => {
+      requestToken.current += 1;
+    };
+  }, [project.globalPlanAvailable, project.projectKey]);
+
   const nextAction = project.globalPlanAvailable
-    ? {
+    ? chapterAction(chapterInspection, {
+      onOpenChapterDraft,
+      onPrepareChapter,
+      onResumeChapterDraft,
+      onReviewChapterPlan
+    }) ?? {
       action: t('overview.planningReviewAction'),
       note: t('overview.planningReviewActionNote'),
       onClick: onReviewPlanning,
@@ -159,6 +202,60 @@ export function ProjectOverview({
       </div>
     </main>
   );
+}
+
+function chapterAction(
+  inspection: ChapterInspection | null,
+  actions: {
+    onOpenChapterDraft: () => void;
+    onPrepareChapter: () => void;
+    onResumeChapterDraft: () => void;
+    onReviewChapterPlan: () => void;
+  }
+) {
+  if (!inspection?.available) return null;
+  const chapter = inspection.chapterNumber;
+  switch (inspection.phase) {
+    case 'not_started':
+      return {
+        action: formatMessage('overview.chapter.createAction', { chapter }),
+        note: t('overview.chapter.createNote'),
+        onClick: actions.onPrepareChapter,
+        title: formatMessage('overview.chapter.createTitle', { chapter })
+      };
+    case 'planning_partial':
+      return {
+        action: formatMessage('overview.chapter.resumePlanningAction', {
+          chapter
+        }),
+        note: t('overview.chapter.resumePlanningNote'),
+        onClick: actions.onPrepareChapter,
+        title: formatMessage('overview.chapter.resumePlanningTitle', {
+          chapter
+        })
+      };
+    case 'plan_ready':
+      return {
+        action: formatMessage('overview.chapter.reviewPlanAction', { chapter }),
+        note: t('overview.chapter.reviewPlanNote'),
+        onClick: actions.onReviewChapterPlan,
+        title: formatMessage('overview.chapter.reviewPlanTitle', { chapter })
+      };
+    case 'drafting_partial':
+      return {
+        action: formatMessage('overview.chapter.resumeDraftAction', { chapter }),
+        note: t('overview.chapter.resumeDraftNote'),
+        onClick: actions.onResumeChapterDraft,
+        title: formatMessage('overview.chapter.resumeDraftTitle', { chapter })
+      };
+    case 'draft_ready':
+      return {
+        action: formatMessage('overview.chapter.openDraftAction', { chapter }),
+        note: t('overview.chapter.openDraftNote'),
+        onClick: actions.onOpenChapterDraft,
+        title: formatMessage('overview.chapter.openDraftTitle', { chapter })
+      };
+  }
 }
 
 function OverviewRow({

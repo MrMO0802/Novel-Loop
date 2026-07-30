@@ -18,6 +18,10 @@ import {
 
 import type { ProjectSummary } from '../../shared/projectContract';
 import type { SystemReadiness } from '../../shared/systemContract';
+import { ChapterDraftGenerationView } from './features/chapter/ChapterDraftGenerationView';
+import { ChapterPlanningGenerationView } from './features/chapter/ChapterPlanningGenerationView';
+import { ChapterPlanReview } from './features/chapter/ChapterPlanReview';
+import { ChapterWorkspace } from './features/chapter/ChapterWorkspace';
 import { FoundationGenerationView } from './features/foundation/FoundationGenerationView';
 import { FoundationReview } from './features/foundation/FoundationReview';
 import { PlanningGenerationView } from './features/planning/PlanningGenerationView';
@@ -40,7 +44,11 @@ type AppRoute =
   | { kind: 'foundation-generation'; project: ProjectSummary }
   | { kind: 'foundation-review'; project: ProjectSummary }
   | { kind: 'planning-generation'; project: ProjectSummary }
-  | { kind: 'planning-review'; project: ProjectSummary };
+  | { kind: 'planning-review'; project: ProjectSummary }
+  | { kind: 'chapter-planning-generation'; project: ProjectSummary }
+  | { kind: 'chapter-plan-review'; project: ProjectSummary }
+  | { kind: 'chapter-draft-generation'; project: ProjectSummary }
+  | { kind: 'chapter-workspace'; project: ProjectSummary };
 
 const READINESS_UI_TIMEOUT_MS = 20_000;
 
@@ -141,6 +149,22 @@ export function App() {
           kind: 'planning-review',
           project: route.project
         })}
+        onPrepareChapter={() => setRoute({
+          kind: 'chapter-planning-generation',
+          project: route.project
+        })}
+        onReviewChapterPlan={() => setRoute({
+          kind: 'chapter-plan-review',
+          project: route.project
+        })}
+        onResumeChapterDraft={() => setRoute({
+          kind: 'chapter-draft-generation',
+          project: route.project
+        })}
+        onOpenChapterDraft={() => setRoute({
+          kind: 'chapter-workspace',
+          project: route.project
+        })}
         project={route.project}
       />
     );
@@ -188,6 +212,62 @@ export function App() {
   if (route.kind === 'planning-review') {
     return (
       <PlanningReview
+        onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onCreateChapter={() => setRoute({
+          kind: 'chapter-planning-generation',
+          project: route.project
+        })}
+        project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'chapter-planning-generation') {
+    return (
+      <ChapterPlanningGenerationView
+        onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onDraftReady={() => setRoute({
+          kind: 'chapter-workspace',
+          project: route.project
+        })}
+        onPlanReady={() => setRoute({
+          kind: 'chapter-plan-review',
+          project: route.project
+        })}
+        project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'chapter-plan-review') {
+    return (
+      <ChapterPlanReview
+        onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onGenerateDraft={() => setRoute({
+          kind: 'chapter-draft-generation',
+          project: route.project
+        })}
+        project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'chapter-draft-generation') {
+    return (
+      <ChapterDraftGenerationView
+        onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onCompleted={() => setRoute({
+          kind: 'chapter-workspace',
+          project: route.project
+        })}
+        project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'chapter-workspace') {
+    return (
+      <ChapterWorkspace
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
         project={route.project}
       />

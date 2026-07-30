@@ -1,0 +1,399 @@
+.nl-chapter-task {
+  max-width: 900px;
+}
+
+.nl-chapter-task > section {
+  max-width: 720px;
+}
+
+.nl-chapter-confirmation {
+  display: grid;
+  gap: 14px;
+  margin-top: 30px;
+  padding-top: 28px;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-chapter-confirmation p,
+.nl-chapter-review-loading p,
+.nl-chapter-plan-review p,
+.nl-chapter-plan-review h2,
+.nl-chapter-plan-review h3,
+.nl-chapter-workspace p,
+.nl-chapter-workspace h1,
+.nl-chapter-workspace h2 {
+  margin-top: 0;
+  margin-bottom: 0;
+  letter-spacing: 0;
+}
+
+.nl-chapter-review-loading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 36px 0;
+  color: var(--nl-muted);
+}
+
+.nl-chapter-plan-review {
+  max-width: 1080px;
+}
+
+.nl-chapter-plan-review__header {
+  padding-bottom: 30px;
+}
+
+.nl-chapter-plan-review__header > p:last-child {
+  max-width: 62ch;
+  margin-top: 12px;
+  color: var(--nl-muted);
+  line-height: 1.75;
+}
+
+.nl-chapter-mission,
+.nl-selected-plan,
+.nl-chapter-alternatives,
+.nl-chapter-review-actions {
+  padding: 34px 0;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-chapter-mission > h2,
+.nl-selected-plan > h2,
+.nl-chapter-alternatives > h2,
+.nl-chapter-review-actions h2 {
+  margin-top: 7px;
+  font-size: 21px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.nl-chapter-mission__purpose {
+  max-width: 72ch;
+  margin-top: 14px !important;
+  font-size: 17px;
+  line-height: 1.8;
+}
+
+.nl-chapter-mission__sections {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 36px;
+  margin-top: 26px;
+}
+
+.nl-chapter-mission__sections > section {
+  min-width: 0;
+  padding: 20px 0;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-chapter-mission__sections h3,
+.nl-chapter-alternative__body h3 {
+  font-size: 14px;
+}
+
+.nl-chapter-mission__sections ul,
+.nl-chapter-alternative__body ul {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0 0;
+  padding-left: 20px;
+  color: var(--nl-muted);
+  line-height: 1.7;
+}
+
+.nl-selected-plan {
+  max-width: 82ch;
+}
+
+.nl-safe-manuscript {
+  display: grid;
+  gap: 20px;
+  margin-top: 22px;
+  line-height: 1.9;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.nl-chapter-alternatives > p {
+  margin-top: 8px;
+  color: var(--nl-muted);
+}
+
+.nl-chapter-alternatives details {
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-chapter-alternatives details:first-of-type {
+  margin-top: 18px;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-chapter-alternatives summary {
+  padding: 17px 2px;
+  cursor: pointer;
+  font-weight: 700;
+  outline: none;
+}
+
+.nl-chapter-alternatives summary:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid var(--nl-accent-strong);
+  outline-offset: 2px;
+}
+
+.nl-chapter-alternative__body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) repeat(2, minmax(10rem, 0.55fr));
+  gap: 24px;
+  padding: 0 2px 20px;
+  color: var(--nl-muted);
+  line-height: 1.7;
+}
+
+.nl-chapter-review-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 28px;
+}
+
+.nl-chapter-review-actions p {
+  max-width: 60ch;
+  margin-top: 8px;
+  color: var(--nl-muted);
+  line-height: 1.7;
+}
+
+.nl-chapter-draft-confirmation {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 28px;
+  padding: 20px;
+  border: 1px solid var(--nl-border);
+  border-radius: 8px;
+  background: var(--nl-accent-soft);
+}
+
+.nl-chapter-workspace {
+  display: grid;
+  grid-template-columns: minmax(12rem, 15rem) minmax(30rem, 1fr) minmax(16rem, 20rem);
+  width: min(100%, 1520px);
+  min-height: calc(100dvh - 65px);
+  margin: 0 auto;
+}
+
+.nl-chapter-workspace__rail,
+.nl-chapter-workspace__context {
+  min-width: 0;
+  padding: 36px 28px;
+  background: var(--nl-canvas);
+}
+
+.nl-chapter-workspace__rail {
+  border-right: 1px solid var(--nl-border);
+}
+
+.nl-chapter-workspace__rail h2 {
+  margin-top: 8px;
+  font-size: 20px;
+}
+
+.nl-draft-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 28px;
+  padding: 6px 9px;
+  border: 1px solid var(--nl-border);
+  border-radius: 6px;
+  background: var(--nl-surface);
+  color: var(--nl-accent);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.nl-chapter-word-count {
+  margin-top: 12px !important;
+  color: var(--nl-muted);
+  font-size: 13px;
+}
+
+.nl-chapter-workspace__boundary {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-top: 30px !important;
+  padding-top: 22px;
+  border-top: 1px solid var(--nl-border);
+  color: var(--nl-muted);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
+.nl-chapter-workspace__boundary svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--nl-accent);
+}
+
+.nl-chapter-manuscript {
+  min-width: 0;
+  padding: 48px clamp(38px, 6vw, 88px) 80px;
+  background: var(--nl-surface);
+}
+
+.nl-chapter-manuscript > header {
+  padding-bottom: 30px;
+  border-bottom: 1px solid var(--nl-border);
+}
+
+.nl-chapter-manuscript h1 {
+  margin-top: 8px;
+  font-family:
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
+    serif;
+  font-size: clamp(29px, 3vw, 40px);
+  line-height: 1.3;
+  overflow-wrap: anywhere;
+}
+
+.nl-chapter-manuscript h1:focus-visible {
+  border-radius: 4px;
+  outline: 3px solid var(--nl-accent-strong);
+  outline-offset: 5px;
+}
+
+.nl-chapter-manuscript__body {
+  display: grid;
+  gap: 1.15em;
+  max-width: 72ch;
+  margin: 34px auto 0;
+  font-family:
+    "Noto Serif CJK SC",
+    "Source Han Serif SC",
+    serif;
+  font-size: 18px;
+  line-height: 2;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.nl-chapter-workspace__context {
+  display: grid;
+  align-content: start;
+  gap: 32px;
+  border-left: 1px solid var(--nl-border);
+}
+
+.nl-chapter-workspace__context > section + section {
+  padding-top: 28px;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-chapter-workspace__context h2 {
+  margin-top: 7px;
+  font-size: 17px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+
+.nl-chapter-workspace__context section > p:last-child {
+  margin-top: 12px;
+  color: var(--nl-muted);
+  line-height: 1.7;
+}
+
+.nl-chapter-scene-list {
+  display: grid;
+  gap: 0;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nl-chapter-scene-list li {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  gap: 8px;
+  padding: 13px 0;
+  border-top: 1px solid var(--nl-border);
+}
+
+.nl-chapter-scene-list span {
+  color: var(--nl-accent);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.nl-chapter-scene-list p {
+  min-width: 0;
+  color: var(--nl-muted);
+  font-size: 13px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 1100px) {
+  .nl-chapter-workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-chapter-workspace__rail,
+  .nl-chapter-workspace__context {
+    padding: 26px clamp(24px, 6vw, 56px);
+    border-right: 0;
+    border-left: 0;
+  }
+
+  .nl-chapter-workspace__rail {
+    border-bottom: 1px solid var(--nl-border);
+  }
+
+  .nl-chapter-workspace__context {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    border-top: 1px solid var(--nl-border);
+  }
+
+  .nl-chapter-workspace__context > section + section {
+    padding-top: 0;
+    padding-left: 28px;
+    border-top: 0;
+    border-left: 1px solid var(--nl-border);
+  }
+}
+
+@media (max-width: 760px) {
+  .nl-chapter-mission__sections,
+  .nl-chapter-alternative__body,
+  .nl-chapter-review-actions,
+  .nl-chapter-draft-confirmation,
+  .nl-chapter-workspace__context {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .nl-chapter-review-actions .nl-primary-action,
+  .nl-chapter-draft-confirmation .nl-primary-action,
+  .nl-chapter-draft-confirmation .nl-secondary-action {
+    width: 100%;
+  }
+
+  .nl-chapter-workspace__context > section + section {
+    padding-top: 28px;
+    padding-left: 0;
+    border-top: 1px solid var(--nl-border);
+    border-left: 0;
+  }
+
+  .nl-chapter-manuscript {
+    padding: 36px 24px 64px;
+  }
+
+  .nl-chapter-manuscript__body {
+    font-size: 17px;
+  }
+}

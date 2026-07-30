@@ -18,7 +18,10 @@ import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import type { PlanningReviewResult } from '../../src/shared/planningContract';
 import type { ProjectSummary } from '../../src/shared/projectContract';
 import type { SystemReadiness } from '../../src/shared/systemContract';
-import { createInertChapterApi } from './desktopApiFixtures';
+import {
+  createInertChapterApi,
+  readyChapterInspection
+} from './desktopApiFixtures';
 
 const projectKey = 'project_0123456789abcdef01234567';
 const readiness: SystemReadiness = {
@@ -123,7 +126,10 @@ function installApi(result: PlanningReviewResult = review) {
       cancel: vi.fn(),
       read: vi.fn().mockResolvedValue(result)
     },
-    chapter: createInertChapterApi()
+    chapter: {
+      ...createInertChapterApi(),
+      inspect: vi.fn().mockResolvedValue(readyChapterInspection)
+    }
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,
@@ -138,6 +144,7 @@ async function openPlanningReview() {
   await screen.findByRole('heading', { name: '雾港来信' });
   fireEvent.click(screen.getByRole('button', { name: '查看全局规划' }));
   await screen.findByRole('heading', { name: '全局规划' });
+  await screen.findByRole('tablist', { name: '全局规划内容' });
 }
 
 afterEach(() => {
@@ -232,7 +239,7 @@ describe('global planning review', () => {
     expect(screen.getByRole('tab', { name: '全书方向' })).toHaveFocus();
   });
 
-  test('states the Story State boundary and keeps next-chapter work unavailable', async () => {
+  test('opens the next chapter planning confirmation without changing Story State', async () => {
     installApi();
     render(<App />);
     await openPlanningReview();
@@ -240,10 +247,18 @@ describe('global planning review', () => {
     expect(screen.getByText(
       '这是一份创作规划，尚未提交章节，也没有修改正式故事状态。'
     )).toBeVisible();
-    expect(screen.getByText('下一章创作将在后续阶段开放。')).toBeVisible();
-    expect(screen.getByRole('button', {
-      name: '创建下一章（尚未开放）'
-    })).toBeDisabled();
+    expect(screen.getByText(
+      '先准备并审阅本章方向，确认后才会开始写初稿。'
+    )).toBeVisible();
+    fireEvent.click(screen.getByRole('button', {
+      name: '创建第 1 章'
+    }));
+    expect(await screen.findByRole('heading', {
+      name: '准备第 1 章方向'
+    })).toBeVisible();
+    expect(screen.getByText(
+      '开始后会准备章节任务、比较不同方案并选出一个方向，不会写正文或修改正式故事状态。'
+    )).toBeVisible();
   });
 
   test('keeps long arc and chapter values inside narrow layouts', () => {

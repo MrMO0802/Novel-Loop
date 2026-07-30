@@ -218,7 +218,8 @@ export async function execCodexJsonPrompt(input: CodexExecPromptJsonInput): Prom
     schemaPath: input.schemaPath
   });
   const paths = projectPaths(input);
-  const finalText = await fileStore.readText(paths.projectArtifact(result.finalOutputPath));
+  const projectFileStore = FileStore.forProject(paths.projectRoot);
+  const finalText = await projectFileStore.readText(paths.projectArtifact(result.finalOutputPath));
   await result.runLogger.recordEvent(result.runId, 'CODEX_PARSE_STARTED', {
     stage: 'codex',
     relatedArtifactPaths: [result.finalOutputPath],
@@ -242,7 +243,7 @@ export async function execCodexJsonPrompt(input: CodexExecPromptJsonInput): Prom
     payload: { schemaPath: safePromptPath(input.schemaPath) }
   });
   await recordArtifactWriteEvent(result.runLogger, result.runId, 'started', result.parsedJsonPath, 'parsed_output');
-  await fileStore.writeJson(paths.projectArtifact(result.parsedJsonPath), parsedJson, UnknownJsonSchema);
+  await projectFileStore.writeJson(paths.projectArtifact(result.parsedJsonPath), parsedJson, UnknownJsonSchema);
   await recordArtifactWriteEvent(result.runLogger, result.runId, 'completed', result.parsedJsonPath, 'parsed_output');
   await result.runLogger.recordArtifact(result.runId, result.parsedJsonPath, {
     action: 'generated',
@@ -275,9 +276,9 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
   }
 > {
   const binaryPath = await resolveCodexBinary(input.codexBin);
-  const fileStore = new FileStore();
   const paths = projectPaths(input);
-  await fileStore.ensureDir(paths.projectRoot);
+  await new FileStore().ensureDir(paths.projectRoot);
+  const fileStore = FileStore.forProject(paths.projectRoot);
   const runId = input.runId ?? createRunId(input.operation);
   const runLogger = new RunLogger(paths, fileStore);
   const promptArtifactPath = posixJoin('codex', 'runs', runId, 'prompt.md');
@@ -286,6 +287,7 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
   const parsedJsonPath = posixJoin('codex', 'runs', runId, 'parsed_output.json');
   const codexRunDir = paths.projectArtifact(posixJoin('codex', 'runs', runId));
   await fileStore.ensureDir(codexRunDir);
+  await fileStore.assertSafePath(paths.projectArtifact(finalOutputPath));
   await fileStore.writeText(
     paths.projectArtifact(promptArtifactPath),
     shouldRedactPromptArtifacts() ? `[redacted codex prompt artifact for ${input.operation}]\n` : input.promptText
@@ -366,7 +368,9 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
     }
     const finalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
     const latencyMs = Math.max(0, Date.now() - startedAtMs);
-    const schemaBytes = input.schemaPath === undefined ? 0 : await safeFileSize(input.schemaPath, fileStore);
+    const schemaBytes = input.schemaPath === undefined
+      ? 0
+      : await safeFileSize(input.schemaPath, new FileStore());
     await runLogger.recordLlmCall(runId, {
       promptId: `codex.${input.operation}`,
       provider: 'codex-cli',

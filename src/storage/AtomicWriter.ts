@@ -15,11 +15,15 @@ export interface AtomicWriterFileSystem {
 }
 
 export type AtomicWriterOverrides = Partial<AtomicWriterFileSystem>;
+export type AtomicWriterPathGuard = (filePath: string) => Promise<void>;
 
 export class AtomicWriter {
   private readonly fileSystem: AtomicWriterFileSystem;
 
-  constructor(overrides: AtomicWriterOverrides = {}) {
+  constructor(
+    overrides: AtomicWriterOverrides = {},
+    private readonly pathGuard?: AtomicWriterPathGuard
+  ) {
     this.fileSystem = {
       mkdir,
       writeFile,
@@ -34,10 +38,16 @@ export class AtomicWriter {
     const targetDir = path.dirname(resolvedTargetPath);
     const tempPath = path.join(targetDir, this.createTempFileName(resolvedTargetPath));
 
+    await this.pathGuard?.(resolvedTargetPath);
+    await this.pathGuard?.(targetDir);
     await this.fileSystem.mkdir(targetDir, { recursive: true });
+    await this.pathGuard?.(targetDir);
 
     try {
+      await this.pathGuard?.(tempPath);
       await this.fileSystem.writeFile(tempPath, content, { encoding: 'utf8' });
+      await this.pathGuard?.(tempPath);
+      await this.pathGuard?.(resolvedTargetPath);
       await this.fileSystem.rename(tempPath, resolvedTargetPath);
     } catch (error) {
       await this.fileSystem.rm(tempPath, { force: true });

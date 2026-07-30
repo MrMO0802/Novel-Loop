@@ -105,7 +105,7 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
   const mission = await fileStore.readJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), ChapterMissionSchema);
   const selectedPlan = await fileStore.readText(paths.chapterArtifact(input.chapterNumber, 'selected_plan.md'));
   const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
-  const promptService = createPromptService(input, fileStore);
+  const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const promptId = input.provider === 'codex-text' ? 'planning.generate_scene_cards_slim' : 'planning.generate_scene_cards';
   const renderedPrompt =
@@ -173,7 +173,7 @@ export async function writeScene(input: WriteSceneInput, fileStore = new FileSto
           ...(input.codexMaxArtifactsInContext === undefined ? {} : { maxArtifacts: input.codexMaxArtifactsInContext })
         })
       : undefined;
-  const promptService = createPromptService(input, fileStore);
+  const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const renderedPrompt =
     input.provider === 'codex-text'
@@ -598,9 +598,9 @@ function createPaths(input: Pick<ChapterDraftingInput, 'projectId' | 'projectsRo
   return new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
 }
 
-function createPromptService(input: Pick<ChapterDraftingInput, 'promptRoot' | 'provider'>, fileStore: FileStore): PromptService {
+function createPromptService(input: Pick<ChapterDraftingInput, 'promptRoot' | 'provider'>): PromptService {
   const root = input.provider === 'codex-text' ? path.join(input.promptRoot ?? DEFAULT_PROMPT_ROOT, 'codex-text') : input.promptRoot ?? DEFAULT_PROMPT_ROOT;
-  return new PromptService(root, fileStore);
+  return new PromptService(root, new FileStore());
 }
 
 function createLlmClient(

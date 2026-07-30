@@ -107,6 +107,7 @@ export async function inspectDesktopNextChapter(
   input: { projectRoot: string }
 ): Promise<DesktopNextChapterInspection> {
   const context = createContext(input.projectRoot);
+  await assertDesktopArtifactPathsSafe(context.paths);
   const storyState = await readRequiredJson(context.paths.storyState(), StoryStateSchema);
   if (storyState.projectId !== context.projectId) {
     throw invalidChapterOutput('Story State project identity does not match the project root.');
@@ -142,6 +143,7 @@ export async function planDesktopNextChapter(
   const context = createContext(input.projectRoot);
   const inspection = await inspectDesktopNextChapter({ projectRoot: context.projectRoot });
   if (!inspection.available) throw unavailableNextChapter(inspection.reason);
+  const fileStore = FileStore.forProject(context.projectRoot);
 
   const result = await runChapterDryRun({
     projectId: context.projectId,
@@ -151,7 +153,7 @@ export async function planDesktopNextChapter(
     candidates: 3,
     ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
     ...(input.shouldStop === undefined ? {} : { shouldStop: input.shouldStop })
-  });
+  }, fileStore);
   if (result.chapterNumber !== inspection.chapterNumber || result.status !== 'dry_run_complete') {
     throw invalidChapterOutput('Chapter planning did not complete the requested chapter.');
   }
@@ -252,6 +254,7 @@ export async function draftDesktopNextChapter(
   const context = createContext(input.projectRoot);
   const inspection = await inspectDesktopNextChapter({ projectRoot: context.projectRoot });
   if (!inspection.available) throw unavailableNextChapter(inspection.reason);
+  const fileStore = FileStore.forProject(context.projectRoot);
 
   const result = await runChapterUntilDraft({
     projectId: context.projectId,
@@ -260,7 +263,7 @@ export async function draftDesktopNextChapter(
     provider: 'codex-text',
     ...(input.onProgress === undefined ? {} : { onProgress: input.onProgress }),
     ...(input.shouldStop === undefined ? {} : { shouldStop: input.shouldStop })
-  });
+  }, fileStore);
   if (result.chapterNumber !== inspection.chapterNumber || result.status !== 'draft_complete') {
     throw invalidChapterOutput('Chapter drafting did not complete the requested chapter.');
   }
@@ -300,6 +303,22 @@ function createContext(projectRootInput: string): { projectRoot: string; project
   const projectId = ProjectIdSchema.parse(path.basename(projectRoot));
   const projectsRoot = path.dirname(projectRoot);
   return { projectRoot, projectsRoot, projectId, paths: new ProjectPaths(projectsRoot, projectId) };
+}
+
+async function assertDesktopArtifactPathsSafe(paths: ProjectPaths): Promise<void> {
+  const fileStore = FileStore.forProject(paths.projectRoot);
+  const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+  const chapterNumber = storyState.latestCommittedChapter + 1;
+  for (const artifactPath of [
+    paths.chaptersDir(),
+    paths.chapterDir(chapterNumber),
+    paths.chapterArtifact(chapterNumber, 'scenes'),
+    paths.runsDir(),
+    paths.projectArtifact('codex'),
+    paths.projectArtifact(path.join('codex', 'runs'))
+  ]) {
+    await fileStore.assertSafePath(artifactPath);
+  }
 }
 
 function validateQueueForNextChapter(

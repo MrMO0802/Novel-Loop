@@ -3,26 +3,52 @@ import path from 'node:path';
 import type { z } from 'zod';
 
 import { AtomicWriter } from './AtomicWriter.js';
+import { ProjectPathGuard } from './ProjectPathGuard.js';
 
 export class FileStore {
-  constructor(private readonly writer = new AtomicWriter()) {}
+  constructor(
+    private readonly writer = new AtomicWriter(),
+    private readonly pathGuard?: ProjectPathGuard
+  ) {}
+
+  static forProject(projectRoot: string): FileStore {
+    const guard = new ProjectPathGuard(projectRoot);
+    return new FileStore(
+      new AtomicWriter({}, (filePath) => guard.assertSafePath(filePath)),
+      guard
+    );
+  }
+
+  async assertSafePath(filePath: string): Promise<void> {
+    await this.pathGuard?.assertSafePath(path.resolve(filePath));
+  }
 
   async readText(filePath: string): Promise<string> {
-    return readFile(path.resolve(filePath), 'utf8');
+    const resolvedPath = path.resolve(filePath);
+    await this.assertSafePath(resolvedPath);
+    return readFile(resolvedPath, 'utf8');
   }
 
   async writeText(filePath: string, content: string): Promise<void> {
-    await this.writer.writeText(path.resolve(filePath), content);
+    const resolvedPath = path.resolve(filePath);
+    await this.assertSafePath(resolvedPath);
+    await this.writer.writeText(resolvedPath, content);
   }
 
   async appendText(filePath: string, content: string): Promise<void> {
     const resolvedPath = path.resolve(filePath);
+    await this.assertSafePath(resolvedPath);
     await mkdir(path.dirname(resolvedPath), { recursive: true });
+    await this.assertSafePath(path.dirname(resolvedPath));
+    await this.assertSafePath(resolvedPath);
     await appendFile(resolvedPath, content, 'utf8');
   }
 
   async ensureDir(dirPath: string): Promise<void> {
-    await mkdir(path.resolve(dirPath), { recursive: true });
+    const resolvedPath = path.resolve(dirPath);
+    await this.assertSafePath(resolvedPath);
+    await mkdir(resolvedPath, { recursive: true });
+    await this.assertSafePath(resolvedPath);
   }
 
   async readJson<T>(filePath: string, schema: z.ZodType<T>): Promise<T> {
@@ -39,8 +65,10 @@ export class FileStore {
   }
 
   async exists(filePath: string): Promise<boolean> {
+    const resolvedPath = path.resolve(filePath);
+    await this.assertSafePath(resolvedPath);
     try {
-      await access(path.resolve(filePath));
+      await access(resolvedPath);
       return true;
     } catch {
       return false;
@@ -48,7 +76,9 @@ export class FileStore {
   }
 
   async list(dirPath: string): Promise<string[]> {
-    const entries = await readdir(path.resolve(dirPath));
+    const resolvedPath = path.resolve(dirPath);
+    await this.assertSafePath(resolvedPath);
+    const entries = await readdir(resolvedPath);
     return entries.sort((left, right) => left.localeCompare(right));
   }
 }

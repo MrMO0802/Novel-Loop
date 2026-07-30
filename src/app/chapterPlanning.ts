@@ -110,7 +110,7 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
   await ensurePlanningPrerequisites(paths, fileStore);
   await fileStore.ensureDir(paths.chapterDir(input.chapterNumber));
 
-  const promptService = createPromptService(input, fileStore);
+  const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
   const chapterQueue = await fileStore.readJson(path.join(paths.planningDir(), 'chapter_queue.json'), ChapterQueueSchema);
@@ -190,7 +190,7 @@ export async function generatePlanCandidates(
   const paths = createPaths(input);
   await ensurePlanningPrerequisites(paths, fileStore);
   const mission = await fileStore.readJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), ChapterMissionSchema);
-  const promptService = createPromptService(input, fileStore);
+  const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const promptId = input.provider === 'codex-text' ? 'planning.generate_plan_candidates_slim' : 'planning.generate_plan_candidates';
   const renderedPrompt =
@@ -263,7 +263,7 @@ export async function rankPlanCandidates(input: ChapterPlanningInput, fileStore 
     candidateContentBlocks.push(`<candidate file="${candidateFile}">\n${candidateText}\n</candidate>`);
   }
 
-  const promptService = createPromptService(input, fileStore);
+  const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const promptId = input.provider === 'codex-text' ? 'planning.rank_plan_candidates_slim' : 'planning.rank_plan_candidates';
   const candidateIds = candidateFiles.map((file) => file.replace(/\.md$/, ''));
@@ -559,9 +559,9 @@ function createPaths(input: Pick<ChapterPlanningInput, 'projectId' | 'projectsRo
   return new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
 }
 
-function createPromptService(input: Pick<ChapterPlanningInput, 'promptRoot' | 'provider'>, fileStore: FileStore): PromptService {
+function createPromptService(input: Pick<ChapterPlanningInput, 'promptRoot' | 'provider'>): PromptService {
   const root = input.provider === 'codex-text' ? path.join(input.promptRoot ?? DEFAULT_PROMPT_ROOT, 'codex-text') : input.promptRoot ?? DEFAULT_PROMPT_ROOT;
-  return new PromptService(root, fileStore);
+  return new PromptService(root, new FileStore());
 }
 
 function createLlmClient(

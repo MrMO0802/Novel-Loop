@@ -25,6 +25,19 @@ import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
 import { createRunId } from '../utils/ids.js';
 
+export type ChapterPlanningProgressStage =
+  | 'preparing'
+  | 'mission'
+  | 'plan_candidates'
+  | 'ranking'
+  | 'finalizing'
+  | 'completed';
+
+export interface ChapterPlanningProgressEvent {
+  stage: ChapterPlanningProgressStage;
+  state: 'started' | 'completed';
+}
+
 export interface ChapterPlanningInput {
   projectId: string;
   projectsRoot?: string;
@@ -50,6 +63,8 @@ export interface GeneratePlanCandidatesInput extends ChapterPlanningInput {
 
 export interface ChapterDryRunInput extends ChapterPlanningInput {
   candidates?: number;
+  onProgress?: (event: ChapterPlanningProgressEvent) => void | Promise<void>;
+  shouldStop?: () => boolean | Promise<boolean>;
 }
 
 export interface ChapterPlanningStepResult<T> {
@@ -315,6 +330,11 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
   });
 
   try {
+    await emitProgress(input.onProgress, { stage: 'preparing', state: 'started' });
+    await emitProgress(input.onProgress, { stage: 'preparing', state: 'completed' });
+
+    await emitProgress(input.onProgress, { stage: 'mission', state: 'started' });
+    await stopIfRequested(input, 'CHAPTER_PLANNING_CANCELLED');
     await queueStore.markStageStart(input.chapterNumber, 'planning', 'mission', runId);
     const mission = await reuseJsonArtifact(
       fileStore,
@@ -330,8 +350,11 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
     recordArtifact(artifacts, mission.artifact, mission.reused ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, mission.artifact, mission.reused ? 'reused' : 'generated');
     await queueStore.markStageComplete(input.chapterNumber, 'planning', 'mission', runId);
+    await emitProgress(input.onProgress, { stage: 'mission', state: 'completed' });
 
     activeStage = 'plan_candidates';
+    await emitProgress(input.onProgress, { stage: 'plan_candidates', state: 'started' });
+    await stopIfRequested(input, 'CHAPTER_PLANNING_CANCELLED');
     await queueStore.markStageStart(input.chapterNumber, 'planning', 'plan_candidates', runId);
     const planCandidates = await reusePlanCandidates(
       fileStore,
@@ -349,8 +372,11 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
       await runLogger.recordArtifact(runId, artifact, planCandidates.reused ? 'reused' : 'generated');
     }
     await queueStore.markStageComplete(input.chapterNumber, 'planning', 'plan_candidates', runId);
+    await emitProgress(input.onProgress, { stage: 'plan_candidates', state: 'completed' });
 
     activeStage = 'ranking';
+    await emitProgress(input.onProgress, { stage: 'ranking', state: 'started' });
+    await stopIfRequested(input, 'CHAPTER_PLANNING_CANCELLED');
     await queueStore.markStageStart(input.chapterNumber, 'planning', 'ranking', runId);
     const ranking = await reuseRanking(
       fileStore,
@@ -366,7 +392,12 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
       recordArtifact(artifacts, artifact, ranking.reused ? reusedArtifacts : generatedArtifacts);
       await runLogger.recordArtifact(runId, artifact, ranking.reused ? 'reused' : 'generated');
     }
+    await emitProgress(input.onProgress, { stage: 'ranking', state: 'completed' });
+
+    await emitProgress(input.onProgress, { stage: 'finalizing', state: 'started' });
     const finalQueueItem = await queueStore.markStageComplete(input.chapterNumber, 'planned_ready', 'ranking', runId);
+    await emitProgress(input.onProgress, { stage: 'finalizing', state: 'completed' });
+    await emitProgress(input.onProgress, { stage: 'completed', state: 'completed' });
 
     await runLogger.endRun(runId, 'completed');
     return {
@@ -383,13 +414,30 @@ export async function runChapterDryRun(input: ChapterDryRunInput, fileStore = ne
     };
   } catch (error) {
     await queueStore.markFailed(input.chapterNumber, activeStage, runId, error);
+    const cancelled = error instanceof AppError && error.code === 'CHAPTER_PLANNING_CANCELLED';
     await runLogger.recordError(runId, {
-      code: 'CHAPTER_DRY_RUN_FAILED',
-      message: getErrorMessage(error),
-      recoverable: false
+      code: cancelled ? error.code : 'CHAPTER_DRY_RUN_FAILED',
+      message: cancelled ? error.message : getErrorMessage(error),
+      recoverable: cancelled
     });
     await runLogger.endRun(runId, 'failed');
     throw error;
+  }
+}
+
+async function emitProgress(
+  callback: ChapterDryRunInput['onProgress'],
+  event: ChapterPlanningProgressEvent
+): Promise<void> {
+  await callback?.(event);
+}
+
+async function stopIfRequested(
+  input: Pick<ChapterDryRunInput, 'shouldStop'>,
+  code: 'CHAPTER_PLANNING_CANCELLED' | 'CHAPTER_DRAFT_CANCELLED'
+): Promise<void> {
+  if (await input.shouldStop?.()) {
+    throw new AppError(code, 'Chapter task stopped before the next generation step.', 2);
   }
 }
 

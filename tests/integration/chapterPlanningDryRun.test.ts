@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -6,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { buildBible } from '../../src/app/buildBible.js';
 import { initProject } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
-import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
+import { runChapterDryRun, type ChapterPlanningProgressEvent } from '../../src/app/chapterPlanning.js';
 import { ChapterMissionSchema, ChapterPlanRankingSchema, RunManifestSchema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
@@ -31,6 +32,39 @@ afterEach(async () => {
 });
 
 describe('chapter dry-run planning', () => {
+  test('reports ordered lifecycle stages and leaves Story State unchanged', async () => {
+    const paths = new ProjectPaths(tempRoot, 'demo-novel');
+    const beforeStateHash = sha256(await new FileStore().readText(paths.storyState()));
+    const events: ChapterPlanningProgressEvent[] = [];
+
+    await runChapterDryRun({
+      projectId: 'demo-novel',
+      projectsRoot: tempRoot,
+      chapterNumber: 1,
+      candidates: 3,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_chapter_dry_run_lifecycle_test',
+      onProgress: (event) => events.push(event)
+    });
+
+    expect(events.map((event) => `${event.stage}:${event.state}`)).toEqual([
+      'preparing:started',
+      'preparing:completed',
+      'mission:started',
+      'mission:completed',
+      'plan_candidates:started',
+      'plan_candidates:completed',
+      'ranking:started',
+      'ranking:completed',
+      'finalizing:started',
+      'finalizing:completed',
+      'completed:completed'
+    ]);
+    expect(sha256(await new FileStore().readText(paths.storyState()))).toBe(beforeStateHash);
+  });
+
   test('creates mission, candidates, ranking, and selected plan without writing prose or updating state', async () => {
     const paths = new ProjectPaths(tempRoot, 'demo-novel');
     const store = new FileStore();
@@ -88,3 +122,7 @@ describe('chapter dry-run planning', () => {
     expect(JSON.stringify(manifest.artifacts)).toContain('chapters/chapter_001/selected_plan.md');
   });
 });
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}

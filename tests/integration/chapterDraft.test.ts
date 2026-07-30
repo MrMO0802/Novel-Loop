@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,7 +8,7 @@ import { buildBible } from '../../src/app/buildBible.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
 import { initProject } from '../../src/app/initProject.js';
 import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
-import { runChapterUntilDraft } from '../../src/app/chapterDrafting.js';
+import { runChapterUntilDraft, type ChapterDraftProgressEvent } from '../../src/app/chapterDrafting.js';
 import { RunManifestSchema, SceneCardsSchema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
@@ -42,6 +43,46 @@ afterEach(async () => {
 });
 
 describe('chapter draft generation', () => {
+  test('reports scene draft progress through every scene and leaves Story State unchanged', async () => {
+    const paths = new ProjectPaths(tempRoot, 'demo-novel');
+    const store = new FileStore();
+    const beforeStateHash = sha256(await store.readText(paths.storyState()));
+    const events: ChapterDraftProgressEvent[] = [];
+
+    await runChapterUntilDraft({
+      projectId: 'demo-novel',
+      projectsRoot: tempRoot,
+      chapterNumber: 1,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_chapter_draft_lifecycle_test',
+      onProgress: (event) => events.push(event)
+    });
+
+    expect(events.map((event) => `${event.stage}:${event.state}`)).toEqual([
+      'preparing:started',
+      'preparing:completed',
+      'scene_cards:started',
+      'scene_cards:completed',
+      'scene_drafts:started',
+      'scene_drafts:progress',
+      'scene_drafts:progress',
+      'scene_drafts:completed',
+      'draft_assembly:started',
+      'draft_assembly:completed',
+      'finalizing:started',
+      'finalizing:completed',
+      'completed:completed'
+    ]);
+    expect(events.filter((event) => event.stage === 'scene_drafts' && event.state === 'progress')).toEqual([
+      { stage: 'scene_drafts', state: 'progress', current: 1, total: 2 },
+      { stage: 'scene_drafts', state: 'progress', current: 2, total: 2 }
+    ]);
+    expect(sha256(await store.readText(paths.storyState()))).toBe(beforeStateHash);
+    await expect(store.exists(paths.chapterArtifact(1, 'final.md'))).resolves.toBe(false);
+  });
+
   test('creates scene cards, scene drafts, and draft_v1 without committing state', async () => {
     const paths = new ProjectPaths(tempRoot, 'demo-novel');
     const store = new FileStore();
@@ -100,3 +141,7 @@ describe('chapter draft generation', () => {
     expect(JSON.stringify(manifest.artifacts)).toContain('chapters/chapter_001/draft_v1.md');
   });
 });
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}

@@ -274,7 +274,11 @@ describe('chapter narrative reference integrity', () => {
     ]));
   }, 30_000);
 
-  test('rejects schema-valid reused scene cards with an undeclared character before draft fan-out', async () => {
+  test.each([
+    'characters',
+    'povCharacterId',
+    'characterDelta'
+  ] as const)('rejects schema-valid reused scene cards with an undeclared %s reference before draft fan-out', async (field) => {
     const fake = await writeFakeCodex(projectsRoot, 'codex-scene-non-default-character');
     await preparePlan(fake.codexBin, 'codex-scene-non-default-character');
     await runChapterUntilDraft({
@@ -289,7 +293,21 @@ describe('chapter narrative reference integrity', () => {
     const cardsPath = paths.chapterArtifact(1, 'scene_cards.json');
     const cards = await store.readJson(cardsPath, SceneCardsSchema);
     await store.writeJson(cardsPath, cards.map((card, index) => (
-      index === 0 ? { ...card, characters: ['char_unknown'] } : card
+      index === 0
+        ? {
+            ...card,
+            ...(field === 'characters'
+              ? { characters: ['char_unknown'] }
+              : field === 'povCharacterId'
+                ? { povCharacterId: 'char_unknown' }
+                : {
+                    characterDelta: [{
+                      characterId: 'char_unknown',
+                      change: 'Appears without being declared.'
+                    }]
+                  })
+          }
+        : card
     )), SceneCardsSchema);
     const callsBefore = await store.readText(fake.argsLogPath);
     const stateBefore = await sha256(paths.storyState());
@@ -301,7 +319,7 @@ describe('chapter narrative reference integrity', () => {
       provider: 'codex-text',
       promptRoot,
       codexBin: fake.codexBin,
-      runId: 'reused_scene_reference_rejected'
+      runId: `reused_scene_${field}_reference_rejected`
     })).rejects.toMatchObject({
       code: 'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT'
     });

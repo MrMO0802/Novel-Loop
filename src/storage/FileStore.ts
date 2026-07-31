@@ -1,4 +1,4 @@
-import { access, mkdir, readdir, readFile } from 'node:fs/promises';
+import { access, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 
@@ -56,7 +56,7 @@ export class FileStore {
     const resolvedPath = path.resolve(dirPath);
     await this.assertSafePath(resolvedPath);
     await beforeProjectOperationWrite(resolvedPath);
-    await mkdir(resolvedPath, { recursive: true });
+    await this.writer.ensureDir(resolvedPath);
     await this.assertSafePath(resolvedPath);
   }
 

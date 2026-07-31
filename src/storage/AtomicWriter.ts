@@ -58,10 +58,9 @@ export class AtomicWriter {
 
     await this.pathGuard?.(resolvedTargetPath);
     await this.pathGuard?.(targetDir);
-    await this.fileSystem.mkdir(targetDir, { recursive: true });
-    await this.pathGuard?.(targetDir);
 
     if (this.canUseAnchoredProjectWrite(resolvedTargetPath)) {
+      await this.ensureDirectoryAnchored(targetDir);
       await this.pathGuard?.(tempPath);
       await this.writeTextAnchored(
         resolvedTargetPath,
@@ -70,6 +69,9 @@ export class AtomicWriter {
       );
       return;
     }
+
+    await this.fileSystem.mkdir(targetDir, { recursive: true });
+    await this.pathGuard?.(targetDir);
 
     try {
       await this.pathGuard?.(tempPath);
@@ -89,10 +91,9 @@ export class AtomicWriter {
 
     await this.pathGuard?.(resolvedTargetPath);
     await this.pathGuard?.(targetDir);
-    await this.fileSystem.mkdir(targetDir, { recursive: true });
-    await this.pathGuard?.(targetDir);
 
     if (this.canUseAnchoredProjectWrite(resolvedTargetPath)) {
+      await this.ensureDirectoryAnchored(targetDir);
       const handles = await this.openAnchoredDirectory(targetDir);
       try {
         const anchoredTarget = anchoredPath(
@@ -118,11 +119,26 @@ export class AtomicWriter {
       return;
     }
 
+    await this.fileSystem.mkdir(targetDir, { recursive: true });
+    await this.pathGuard?.(targetDir);
     await this.fileSystem.appendFile(
       resolvedTargetPath,
       content,
       { encoding: 'utf8' }
     );
+  }
+
+  async ensureDir(dirPath: string): Promise<void> {
+    const resolvedDirPath = path.resolve(dirPath);
+    await this.pathGuard?.(resolvedDirPath);
+
+    if (this.canUseAnchoredProjectWrite(resolvedDirPath)) {
+      await this.ensureDirectoryAnchored(resolvedDirPath);
+      return;
+    }
+
+    await this.fileSystem.mkdir(resolvedDirPath, { recursive: true });
+    await this.pathGuard?.(resolvedDirPath);
   }
 
   private canUseAnchoredProjectWrite(targetPath: string): boolean {
@@ -168,6 +184,18 @@ export class AtomicWriter {
   }
 
   private async openAnchoredDirectory(targetDir: string): Promise<FileHandle[]> {
+    return this.openAnchoredDirectorySegments(targetDir, false);
+  }
+
+  private async ensureDirectoryAnchored(targetDir: string): Promise<void> {
+    const handles = await this.openAnchoredDirectorySegments(targetDir, true);
+    await closeHandles(handles);
+  }
+
+  private async openAnchoredDirectorySegments(
+    targetDir: string,
+    createMissing: boolean
+  ): Promise<FileHandle[]> {
     const projectRoot = this.projectRoot;
     if (projectRoot === undefined) {
       throw new Error('Anchored project writes require a project root.');
@@ -182,7 +210,22 @@ export class AtomicWriter {
       let current = await openDirectoryNoFollow(projectRoot);
       handles.push(current);
       for (const segment of relative.split(path.sep).filter(Boolean)) {
-        current = await openDirectoryNoFollow(anchoredPath(current, segment));
+        const nextPath = anchoredPath(current, segment);
+        try {
+          current = await openDirectoryNoFollow(nextPath);
+        } catch (error) {
+          if (!createMissing || !hasCode(error, 'ENOENT')) {
+            throw error;
+          }
+          try {
+            await mkdir(nextPath, { mode: 0o700 });
+          } catch (mkdirError) {
+            if (!hasCode(mkdirError, 'EEXIST')) {
+              throw mkdirError;
+            }
+          }
+          current = await openDirectoryNoFollow(nextPath);
+        }
         handles.push(current);
       }
       return handles;
@@ -221,4 +264,11 @@ function isWithin(root: string, candidate: string): boolean {
     || (!relative.startsWith(`..${path.sep}`)
       && relative !== '..'
       && !path.isAbsolute(relative));
+}
+
+function hasCode(error: unknown, code: string): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && (error as { code?: unknown }).code === code;
 }

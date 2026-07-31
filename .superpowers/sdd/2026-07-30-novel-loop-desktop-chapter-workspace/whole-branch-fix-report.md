@@ -633,6 +633,39 @@ The scene-card prompt now explicitly describes the bounded character map as the
 union of committed Story State characters and mission-declared provisional
 characters. It forbids invention outside that map.
 
+## Second Follow-Up Review: Anchored Directory Creation
+
+Status: **CLOSED**
+
+The second follow-up review found that file writes were descriptor-anchored,
+but the preceding recursive directory creation still used a checked pathname.
+An attacker could replace an existing ancestor after the directory guard and
+cause `mkdir({ recursive: true })` to create a missing descendant outside the
+project before the post-check rejected the path.
+
+On Linux, project-scoped directory creation now starts from an opened,
+`O_NOFOLLOW` project-root descriptor and processes every relative segment
+individually. Missing segments are created through the stable parent descriptor
+and immediately reopened with `O_DIRECTORY | O_NOFOLLOW`. `FileStore.ensureDir`,
+atomic writes, and append writes share this path. The deterministic adversarial
+test replaces an ancestor after the final pathname guard and proves that no
+missing directory is created under the external target.
+
+## Second Follow-Up Review: Complete Scene Character References
+
+Status: **CLOSED**
+
+The second follow-up review found that scene validation covered
+`characters[]`, but not optional `povCharacterId` or
+`characterDelta[].characterId` references. The shared semantic validator now
+checks all three reference locations against committed and mission-declared
+character IDs.
+
+Direct unit tests reject unknown POV and character-delta references. Resume
+integration tests independently corrupt each of `characters[]`,
+`povCharacterId`, and `characterDelta[]`; all three fail before the write-scene
+provider is invoked and leave Story State unchanged.
+
 ## Follow-Up GREEN Evidence
 
 ```text
@@ -646,10 +679,10 @@ corepack pnpm exec vitest run \
   tests/e2e/codexCli.test.ts \
   tests/integration/chapterNarrativeReferences.test.ts \
   tests/unit/chapterReferenceValidation.test.ts
-PASS: 6 files, 30 tests
+PASS: focused security and reference tests
 
 corepack pnpm test
-PASS: 187 files, 507 tests
+PASS: 187 files, 512 tests
 
 corepack pnpm --dir apps/desktop test
 PASS: 32 files, 381 tests

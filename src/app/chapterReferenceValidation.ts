@@ -75,10 +75,15 @@ export function sceneCharacterReferencesAreValid(
       ...mission.charactersToIntroduce.map((character) => character.characterId)
     ]
   );
-  return sceneCards.every((scene) => (
-    scene.characters.length > 0
-    && scene.characters.every((characterId) => characterIds.has(characterId))
-  ));
+  return sceneCards.every((scene) => {
+    const referencedCharacterIds = [
+      ...scene.characters,
+      ...(scene.povCharacterId === undefined ? [] : [scene.povCharacterId]),
+      ...scene.characterDelta.map((delta) => delta.characterId)
+    ];
+    return scene.characters.length > 0
+      && referencedCharacterIds.every((characterId) => characterIds.has(characterId));
+  });
 }
 
 export function isStructuredOutputFailure(error: unknown): boolean {

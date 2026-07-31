@@ -81,4 +81,29 @@ describe('chapter character reference validation', () => {
     expect(missionCharacterReferencesAreValid(duplicateMission, storyState)).toBe(false);
     expect(missionCharacterReferencesAreValid(unknownDeltaMission, storyState)).toBe(false);
   });
+
+  test.each([
+    ['point-of-view character', {
+      ...validSceneCard,
+      characters: ['char_lincheng'],
+      povCharacterId: 'char_unknown'
+    }],
+    ['character delta', {
+      ...validSceneCard,
+      characters: ['char_lincheng'],
+      characterDelta: [{
+        characterId: 'char_unknown',
+        change: 'Appears without being declared.'
+      }]
+    }]
+  ])('rejects an undeclared %s reference in a scene card', (_label, sceneCard) => {
+    const storyState = StoryStateSchema.parse(validStoryState);
+    const mission = ChapterMissionSchema.parse({
+      ...validChapterMission,
+      charactersToIntroduce: []
+    });
+    const sceneCards = SceneCardsSchema.parse([sceneCard]);
+
+    expect(sceneCharacterReferencesAreValid(sceneCards, storyState, mission)).toBe(false);
+  });
 });

@@ -111,6 +111,34 @@ describe('AtomicWriter', () => {
       await expect(readFile(path.join(externalDir, 'result.txt'), 'utf8')).rejects.toThrow();
     }
   );
+
+  test.skipIf(process.platform !== 'linux')(
+    'does not create missing directories through an ancestor replaced after its directory guard',
+    async () => {
+      const projectRoot = path.join(tempRoot, 'project');
+      const ancestorDir = path.join(projectRoot, 'artifacts');
+      const targetDir = path.join(ancestorDir, 'nested');
+      const target = path.join(targetDir, 'result.txt');
+      const externalDir = path.join(tempRoot, 'external');
+      await mkdir(ancestorDir, { recursive: true });
+      await mkdir(externalDir, { recursive: true });
+      const guard = new ProjectPathGuard(projectRoot);
+      let replaced = false;
+      const writer = new AtomicWriter({}, async (filePath) => {
+        await guard.assertSafePath(filePath);
+        if (!replaced && filePath === targetDir) {
+          await rm(ancestorDir, { recursive: true, force: true });
+          await symlink(externalDir, ancestorDir, 'dir');
+          replaced = true;
+        }
+      }, projectRoot);
+
+      await expect(writer.writeText(target, 'must stay in project')).rejects.toThrow();
+
+      expect(replaced).toBe(true);
+      await expect(realpath(path.join(externalDir, 'nested'))).rejects.toThrow();
+    }
+  );
 });
 
 describe('FileStore', () => {

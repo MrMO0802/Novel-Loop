@@ -4,6 +4,7 @@ import type { z } from 'zod';
 import { ChapterQueueStore } from './chapterQueue.js';
 import {
   isStructuredOutputFailure,
+  missionCharacterReferencesAreValid,
   missionDebtReferencesAreValid
 } from './chapterReferenceValidation.js';
 import { normalizeCodexOutput } from './codexNormalization.js';
@@ -126,6 +127,7 @@ const MAX_MISSION_CHARACTER_NAME_LENGTH = 120;
 const MAX_MISSION_CHARACTER_STATE_LENGTH = 180;
 const MAX_MISSION_CHARACTER_GOAL_LENGTH = 180;
 const MAX_MISSION_STORY_STATE_SUMMARY_LENGTH = 3600;
+const MAX_MISSION_BRIEF_SUMMARY_LENGTH = 1200;
 
 export async function planChapterMission(input: ChapterPlanningInput, fileStore = new FileStore()): Promise<ChapterPlanningStepResult<ChapterMission>> {
   const paths = createPaths(input);
@@ -140,6 +142,9 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
     input.provider === 'codex-text' && input.chapterNumber > 1
       ? await readPreviousChapterSummary(paths, fileStore, input.chapterNumber - 1)
       : undefined;
+  const projectBriefSummary = input.provider === 'codex-text'
+    ? await readProjectBriefSummary(paths, fileStore)
+    : undefined;
   const promptId = input.provider === 'codex-text' ? 'planning.plan_chapter_mission_slim' : 'planning.plan_chapter_mission';
   const queueItem = chapterQueue.chapters.find((chapter) => chapter.chapterNumber === input.chapterNumber);
   const renderedPrompt =
@@ -149,6 +154,7 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
           STORY_STATE_SUMMARY: summarizeJson({
             latestCommittedChapter: storyState.latestCommittedChapter,
             characters: summarizeMissionCharacters(storyState.characters),
+            ...(projectBriefSummary === undefined ? {} : { projectBriefSummary }),
             openDebts: storyState.narrativeDebts.filter((debt) => debt.status !== 'resolved').slice(0, 8),
             readerExpectations: storyState.readerState.readerExpectations.slice(0, 8),
             ...(previousChapterSummary === undefined ? {} : { previousChapterSummary })
@@ -195,11 +201,11 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
           })
         : response.json;
     parsedMission = ChapterMissionSchema.parse(missionJson);
-    if (input.provider === 'codex-text') {
-      validateMissionCharacterReferences(parsedMission, storyState.characters, input.chapterNumber);
-    }
-    if (!missionDebtReferencesAreValid(parsedMission, storyState)) {
-      throw new Error('Mission narrative debt references are invalid.');
+    if (
+      !missionCharacterReferencesAreValid(parsedMission, storyState)
+      || !missionDebtReferencesAreValid(parsedMission, storyState)
+    ) {
+      throw new Error('Mission narrative references are invalid.');
     }
   } catch {
     throw invalidMissionProviderOutput(input.chapterNumber);
@@ -219,6 +225,17 @@ async function readPreviousChapterSummary(paths: ProjectPaths, fileStore: FileSt
   } catch {
     return undefined;
   }
+}
+
+async function readProjectBriefSummary(
+  paths: ProjectPaths,
+  fileStore: FileStore
+): Promise<string | undefined> {
+  if (!(await fileStore.exists(paths.brief()))) return undefined;
+  const brief = (await fileStore.readText(paths.brief())).replace(/\s+/g, ' ').trim();
+  return brief.length === 0
+    ? undefined
+    : brief.slice(0, MAX_MISSION_BRIEF_SUMMARY_LENGTH);
 }
 
 export async function generatePlanCandidates(
@@ -910,26 +927,6 @@ function summarizeMissionCharacters(
 function boundedMissionContextText(value: string | undefined, maxLength: number, fallback: string): string {
   const normalized = value?.trim();
   return (normalized === undefined || normalized.length === 0 ? fallback : normalized).slice(0, maxLength);
-}
-
-function validateMissionCharacterReferences(
-  mission: ChapterMission,
-  characters: z.infer<typeof StoryStateSchema>['characters'],
-  chapterNumber: number
-): void {
-  const knownCharacterIds = new Set(characters.map((character) => character.id));
-  const hasUnknownCharacter = mission.characterDeltas.some((delta) => !knownCharacterIds.has(delta.characterId));
-  if (!hasUnknownCharacter) return;
-
-  throw new AppError(
-    'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT',
-    `Chapter ${chapterNumber} mission references a character that is not present in Story State.`,
-    2,
-    {
-      chapterNumber,
-      stage: 'mission'
-    }
-  );
 }
 
 function invalidMissionProviderOutput(chapterNumber: number): AppError {

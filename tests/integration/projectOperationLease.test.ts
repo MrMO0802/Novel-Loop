@@ -21,7 +21,6 @@ import {
 } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
-import { validCharacterState } from '../fixtures/schemas/valid.js';
 import { writeFakeCodex } from '../helpers/fakeCodex.js';
 
 const promptRoot = path.resolve('prompts');
@@ -53,15 +52,6 @@ beforeEach(async () => {
     promptRoot,
     runId: 'operation_lease_plan'
   });
-  const state = await store.readJson(paths.storyState(), StoryStateSchema);
-  await store.writeJson(paths.storyState(), {
-    ...state,
-    characters: [{
-      ...validCharacterState,
-      knowledge: [],
-      lastUpdatedChapter: 0
-    }]
-  }, StoryStateSchema);
 });
 
 afterEach(async () => {

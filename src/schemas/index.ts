@@ -36,8 +36,16 @@ export type {
   WorldRule
 } from './storyState.js';
 
-export { ChapterMissionSchema, ChapterObjectiveSchema } from './chapterMission.js';
-export type { ChapterMission, ChapterObjective } from './chapterMission.js';
+export {
+  ChapterCharacterIntroductionSchema,
+  ChapterMissionSchema,
+  ChapterObjectiveSchema
+} from './chapterMission.js';
+export type {
+  ChapterCharacterIntroduction,
+  ChapterMission,
+  ChapterObjective
+} from './chapterMission.js';
 
 export { SceneCardSchema, SceneCardsSchema, SceneIdSchema } from './sceneCard.js';
 export type { SceneCard, SceneCards } from './sceneCard.js';

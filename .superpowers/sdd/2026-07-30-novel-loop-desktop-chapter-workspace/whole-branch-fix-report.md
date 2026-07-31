@@ -1,6 +1,6 @@
 # Whole-Branch Fix Report
 
-Date: 2026-07-30
+Date: 2026-07-31
 
 Branch: `codex/desktop-chapter-workspace`
 
@@ -272,19 +272,39 @@ Together with the I3 cases, the first focused run reported seven failed tests.
 
 ### Production Fix
 
-- Added bounded canonical character ID/name context and mission character
-  references to the slim scene-card prompt.
-- Explicitly disallowed new-character creation in this flow.
+- Added bounded committed and mission-declared character ID/name context plus
+  mission character references to the slim scene-card prompt.
+- Added `charactersToIntroduce` to the Chapter Mission schema, provider output
+  schemas, normalizer, prompt, mock fixtures, and desktop author summaries.
+  A declared character remains provisional through drafting and can enter
+  Story State only through the existing Canon Patch commit path.
 - Removed the hard-coded normalizer fallback and required at least one
   character per scene in both provider and local schemas.
-- Required every scene character to be a canonical Story State ID before
-  writing `scene_cards.json`.
+- Required every scene character to be either a committed Story State ID or an
+  explicitly declared Chapter Mission ID before writing `scene_cards.json`.
 - Rejected unknown IDs, display names, and empty lists before creating scenes
   or `draft_v1.md`.
-- Updated mock and fake fixtures to use canonical IDs and seeded canonical
-  character state in focused legacy drafting tests.
+- Rejected provisional IDs that collide with committed IDs or duplicate
+  another declaration.
+- Updated mock and fake fixtures to declare first-use character IDs instead of
+  pre-seeding Story State in fresh-project tests.
 - Recorded `CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT` with a bounded queue
   failure reason while preserving Story State.
+
+### First-Chapter Regression Closure
+
+The first I4 implementation allowed only already-committed characters. Because
+new projects intentionally begin with an empty character list, that rule made
+real Chapter 1 generation impossible. A new integration test reproduced the
+failure from an empty Story State and required the mission to declare
+`char_lincheng` before any scene could reference it.
+
+The first full-suite rerun then found eight legacy tests that pre-seeded
+`char_lincheng`, causing the new declaration to collide with committed state.
+Those preconditions were removed so cancellation, recovery, workload, lease,
+drafting, and Electron tests now exercise the real fresh-project path. The
+Electron fake was also updated to enforce the current prompt and output-schema
+contract instead of returning an obsolete mission shape.
 
 ### GREEN Evidence
 
@@ -479,18 +499,11 @@ and the fake Codex received a second mission call.
 ### Regression Fixture Alignment
 
 The required commit and Electron regressions exposed old I4 fixtures rather
-than lease failures:
-
-- legacy commit tests had no canonical character while mock scene cards used
-  `char_lincheng`;
-- the default chapter-one patch attempted a whole-character replacement after
-  the character was correctly present in Story State;
-- the Electron fake still returned display names and required the pre-I4
-  scene-card prompt marker.
-
-The fixtures now seed the canonical character, use targeted character updates,
-return canonical IDs, and verify the new character map and mission-reference
-prompt blocks. Production character grounding was not relaxed.
+than lease failures. Fresh projects now leave Story State untouched, Chapter 1
+missions explicitly declare `char_lincheng`, scene cards use that declared ID,
+and the default Canon Patch creates the full canonical character only during
+commit. The Electron fake verifies the current mission declaration, character
+map, mission-reference blocks, and canonical scene IDs.
 
 The first required Electron E2E rerun retained fake-Codex stderr and identified
 the exact remaining rejection: the fake still required the old
@@ -544,8 +557,14 @@ PASS: 6 files, 84 tests
 corepack pnpm build
 PASS
 
+corepack pnpm test
+PASS: 186 files, 501 tests
+
 corepack pnpm --dir apps/desktop check
 PASS
+
+corepack pnpm --dir apps/desktop test
+PASS: 32 files, 381 tests
 
 corepack pnpm --dir apps/desktop build
 PASS

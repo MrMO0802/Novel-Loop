@@ -40,12 +40,40 @@ export function missionDebtReferencesAreValid(
   return true;
 }
 
-export function sceneCharacterReferencesAreValid(
-  sceneCards: SceneCards,
+export function missionCharacterReferencesAreValid(
+  mission: ChapterMission,
   storyState: StoryState
 ): boolean {
-  const characterIds = new Set(
+  const committedCharacterIds = new Set(
     storyState.characters.map((character) => character.id)
+  );
+  const introducedCharacterIds = new Set<string>();
+  for (const character of mission.charactersToIntroduce) {
+    if (
+      committedCharacterIds.has(character.characterId)
+      || introducedCharacterIds.has(character.characterId)
+    ) {
+      return false;
+    }
+    introducedCharacterIds.add(character.characterId);
+  }
+
+  return mission.characterDeltas.every((delta) => (
+    committedCharacterIds.has(delta.characterId)
+    || introducedCharacterIds.has(delta.characterId)
+  ));
+}
+
+export function sceneCharacterReferencesAreValid(
+  sceneCards: SceneCards,
+  storyState: StoryState,
+  mission: ChapterMission
+): boolean {
+  const characterIds = new Set(
+    [
+      ...storyState.characters.map((character) => character.id),
+      ...mission.charactersToIntroduce.map((character) => character.characterId)
+    ]
   );
   return sceneCards.every((scene) => (
     scene.characters.length > 0

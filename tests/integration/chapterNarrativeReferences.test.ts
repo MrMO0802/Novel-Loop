@@ -10,6 +10,7 @@ import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
 import {
+  ChapterMissionSchema,
   ChapterQueueSchema,
   RunManifestSchema,
   SceneCardsSchema,
@@ -86,6 +87,54 @@ afterEach(async () => {
 });
 
 describe('chapter narrative reference integrity', () => {
+  test('allows an explicitly declared first-chapter character without mutating Story State', async () => {
+    const state = await store.readJson(paths.storyState(), StoryStateSchema);
+    await store.writeJson(paths.storyState(), {
+      ...state,
+      characters: []
+    }, StoryStateSchema);
+    const stateBefore = await sha256(paths.storyState());
+    const fake = await writeFakeCodex(projectsRoot, 'valid');
+
+    await runChapterDryRun({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot,
+      codexBin: fake.codexBin,
+      runId: 'introduced_character_plan'
+    });
+    await runChapterUntilDraft({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot,
+      codexBin: fake.codexBin,
+      runId: 'introduced_character_draft'
+    });
+
+    const mission = await store.readJson(
+      paths.chapterArtifact(1, 'mission.json'),
+      ChapterMissionSchema
+    );
+    expect(mission.charactersToIntroduce).toEqual([{
+      characterId: 'char_lincheng',
+      name: 'Lin Cheng',
+      role: 'protagonist'
+    }]);
+    const cards = await store.readJson(
+      paths.chapterArtifact(1, 'scene_cards.json'),
+      SceneCardsSchema
+    );
+    expect(cards.every((card) => (
+      card.characters.length > 0
+      && card.characters.every((characterId) => characterId === 'char_lincheng')
+    ))).toBe(true);
+    expect(await sha256(paths.storyState())).toBe(stateBefore);
+  }, 30_000);
+
   test.each([
     ['unknown', 'codex-mission-unknown-debt'],
     ['duplicate', 'codex-mission-duplicate-debt'],

@@ -246,7 +246,13 @@ function characterDeltasForAuthor(
   storyState: ReturnType<typeof StoryStateSchema.parse>
 ): string[] {
   const characterNames = new Map(
-    storyState.characters.map((character) => [character.id, character.name])
+    [
+      ...storyState.characters.map((character) => [character.id, character.name] as const),
+      ...mission.charactersToIntroduce.map((character) => [
+        character.characterId,
+        character.name
+      ] as const)
+    ]
   );
   return uniqueAuthorText(mission.characterDeltas.map((delta) => {
     const name = characterNames.get(delta.characterId) ?? '相关人物';

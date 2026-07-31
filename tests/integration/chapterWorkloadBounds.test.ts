@@ -12,13 +12,9 @@ import {
 } from '../../src/app/chapterPlanning.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
-import {
-  ChapterQueueSchema,
-  StoryStateSchema
-} from '../../src/schemas/index.js';
+import { ChapterQueueSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
-import { validCharacterState } from '../fixtures/schemas/valid.js';
 import { writeFakeCodex } from '../helpers/fakeCodex.js';
 
 const projectId = 'chapter-workload-bounds';
@@ -52,11 +48,6 @@ beforeEach(async () => {
     fixturesRoot,
     runId: 'workload_global_plan'
   });
-  const state = await store.readJson(paths.storyState(), StoryStateSchema);
-  await store.writeJson(paths.storyState(), {
-    ...state,
-    characters: [validCharacterState]
-  }, StoryStateSchema);
 });
 
 afterEach(async () => {

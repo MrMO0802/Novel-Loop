@@ -167,6 +167,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       : mode === 'codex-mission-unknown-character'
         ? 'char_unknown'
         : missionCharacterFromPrompt(stdin);
+  const effectiveMissionCharacterId = missionCharacterId ?? 'char_lincheng';
   const missionDebts =
     mode === 'codex-mission-unknown-debt'
       ? ['debt_unknown']
@@ -288,8 +289,13 @@ function jsonFor(promptId, mode, repairMode, stdin) {
         promise: 'Why does the radio speak without power?',
         importance: 8
       }],
-      characterDeltas: missionCharacterId === undefined ? [] : [{
-        characterId: missionCharacterId,
+      charactersToIntroduce: missionCharacterId === undefined ? [{
+        characterId: 'char_lincheng',
+        name: 'Lin Cheng',
+        role: 'protagonist'
+      }] : [],
+      characterDeltas: [{
+        characterId: effectiveMissionCharacterId,
         from: 'skeptical',
         to: 'alert',
         evidenceRequired: 'He hears the broadcast without a power source.'
@@ -468,6 +474,11 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       ],
       debtsToPayOrAdvance: [],
       debtsToIntroduce: [{ type: 'mystery', promise: 'Why does the radio speak without power?', importance: 8 }],
+      charactersToIntroduce: [{
+        characterId: 'char_lincheng',
+        name: 'Lin Cheng',
+        role: 'protagonist'
+      }],
       characterDeltas: [{ characterId: 'char_lincheng', from: 'skeptical', to: 'alert', evidenceRequired: 'He hears the broadcast.' }],
       readerInformationDelta: { newKnowledge: ['The radio can speak without power.'], newSuspicions: ['The voice is tied to an old building.'], questionsToMaintain: ['Who is calling?'], questionsToAnswer: [] },
       forbiddenMoves: ['Do not reveal the caller identity.'],
@@ -644,9 +655,9 @@ function chapterFromPrompt(stdin) {
 function missionCharacterFromPrompt(stdin) {
   const summary = /<story_state_summary>\\s*([\\s\\S]*?)\\s*<\\/story_state_summary>/i.exec(stdin);
   if (!summary) return undefined;
-  const charactersStart = summary[1].indexOf('"characters"');
-  if (charactersStart === -1) return undefined;
-  const characterId = /"id"\\s*:\\s*"([^"]+)"/.exec(summary[1].slice(charactersStart));
+  const characters = /"characters"\\s*:\\s*\\[([\\s\\S]*?)\\]\\s*,\\s*"(?:projectBriefSummary|openDebts)"/.exec(summary[1]);
+  if (!characters) return undefined;
+  const characterId = /"id"\\s*:\\s*"([^"]+)"/.exec(characters[1]);
   return characterId ? characterId[1] : undefined;
 }
 

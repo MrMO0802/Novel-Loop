@@ -7,6 +7,12 @@ export const ChapterObjectiveSchema = z.object({
   priority: z.enum(['must', 'should', 'could'])
 });
 
+export const ChapterCharacterIntroductionSchema = z.object({
+  characterId: z.string().trim().min(1).max(200),
+  name: z.string().trim().min(1).max(120),
+  role: z.string().trim().min(1).max(120)
+}).strict();
+
 export const ChapterMissionSchema = z.object({
   id: z.string(),
   chapterNumber: z.number().int().positive(),
@@ -32,6 +38,10 @@ export const ChapterMissionSchema = z.object({
       })
     )
     .default([]),
+  charactersToIntroduce: z
+    .array(ChapterCharacterIntroductionSchema)
+    .max(8)
+    .default([]),
   readerInformationDelta: z.object({
     newKnowledge: z.array(z.string()).default([]),
     newSuspicions: z.array(z.string()).default([]),
@@ -44,4 +54,5 @@ export const ChapterMissionSchema = z.object({
 });
 
 export type ChapterObjective = z.infer<typeof ChapterObjectiveSchema>;
+export type ChapterCharacterIntroduction = z.infer<typeof ChapterCharacterIntroductionSchema>;
 export type ChapterMission = z.infer<typeof ChapterMissionSchema>;

@@ -30,6 +30,13 @@
       "importance": 8
     }
   ],
+  "charactersToIntroduce": [
+    {
+      "characterId": "char_property_guard",
+      "name": "物业值班员",
+      "role": "supporting"
+    }
+  ],
   "characterDeltas": [
     {
       "characterId": "char_lincheng",

@@ -14,6 +14,7 @@ describe('Codex slim chapter mission normalization', () => {
         promise: 'Why does the radio speak without power?',
         importance: 8
       }],
+      charactersToIntroduce: [],
       characterDeltas: [{
         characterId: 'char_lincheng',
         from: 'skeptical',

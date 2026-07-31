@@ -70,6 +70,11 @@ const SlimMissionSchema = z.object({
     promise: z.string().trim().min(1).max(2_000),
     importance: z.number().min(1).max(10)
   }).strict()).max(100).default([]),
+  charactersToIntroduce: z.array(z.object({
+    characterId: z.string().trim().min(1).max(200),
+    name: z.string().trim().min(1).max(120),
+    role: z.string().trim().min(1).max(120)
+  }).strict()).max(8).default([]),
   characterDeltas: z.array(z.object({
     characterId: z.string().trim().min(1).max(200),
     from: z.string().trim().min(1).max(1_000),
@@ -307,6 +312,7 @@ export function normalizeMission(value: unknown, context: CodexNormalizationCont
     })),
     debtsToPayOrAdvance: slim.debtsToPayOrAdvance,
     debtsToIntroduce: slim.debtsToIntroduce,
+    charactersToIntroduce: slim.charactersToIntroduce,
     characterDeltas: slim.characterDeltas,
     readerInformationDelta: {
       newKnowledge: slim.readerKnowledge,

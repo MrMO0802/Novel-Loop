@@ -12,7 +12,6 @@ import { runChapterUntilDraft, type ChapterDraftProgressEvent } from '../../src/
 import { RunManifestSchema, SceneCardsSchema, StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
-import { validCharacterState } from '../fixtures/schemas/valid.js';
 
 let tempRoot: string;
 let briefPath: string;
@@ -27,13 +26,6 @@ beforeEach(async () => {
   await initProject({ projectId: 'demo-novel', briefPath, projectsRoot: tempRoot });
   await buildBible({ projectId: 'demo-novel', projectsRoot: tempRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_build_bible_test' });
   await planGlobal({ projectId: 'demo-novel', projectsRoot: tempRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_plan_global_test' });
-  const paths = new ProjectPaths(tempRoot, 'demo-novel');
-  const store = new FileStore();
-  const initialState = await store.readJson(paths.storyState(), StoryStateSchema);
-  await store.writeJson(paths.storyState(), {
-    ...initialState,
-    characters: [validCharacterState]
-  }, StoryStateSchema);
   await runChapterDryRun({
     projectId: 'demo-novel',
     projectsRoot: tempRoot,

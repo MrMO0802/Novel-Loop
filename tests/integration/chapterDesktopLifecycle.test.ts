@@ -9,10 +9,9 @@ import { runChapterUntilDraft } from '../../src/app/chapterDrafting.js';
 import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { initProject } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
-import { RunManifestSchema, StoryStateSchema } from '../../src/schemas/index.js';
+import { RunManifestSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
-import { validCharacterState } from '../fixtures/schemas/valid.js';
 
 const projectId = 'chapter-desktop-lifecycle';
 const promptRoot = path.resolve('prompts');
@@ -29,11 +28,6 @@ beforeEach(async () => {
   await initProject({ projectId, briefPath, projectsRoot });
   await buildBible({ projectId, projectsRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_chapter_lifecycle_bible' });
   await planGlobal({ projectId, projectsRoot, provider: 'mock', promptRoot, fixturesRoot, runId: 'run_chapter_lifecycle_plan' });
-  const initialState = await store.readJson(paths.storyState(), StoryStateSchema);
-  await store.writeJson(paths.storyState(), {
-    ...initialState,
-    characters: [validCharacterState]
-  }, StoryStateSchema);
 });
 
 afterEach(async () => {

@@ -30,6 +30,13 @@
       "importance": 9
     }
   ],
+  "charactersToIntroduce": [
+    {
+      "characterId": "char_lincheng",
+      "name": "林澈",
+      "role": "protagonist"
+    }
+  ],
   "characterDeltas": [
     {
       "characterId": "char_lincheng",

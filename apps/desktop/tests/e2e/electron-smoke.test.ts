@@ -15,8 +15,6 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
 
-import { validCharacterState } from '../../../../tests/fixtures/schemas/valid.js';
-
 const electronExecutable = require('electron') as string;
 const desktopRoot = path.resolve(__dirname, '../..');
 const repositoryRoot = path.resolve(desktopRoot, '../..');
@@ -309,17 +307,6 @@ test('authors can create chapter one through planning review and initial draft w
       'state',
       'story_state.json'
     );
-    const initialStoryState = JSON.parse(
-      await readFile(storyStatePath, 'utf8')
-    ) as Record<string, unknown>;
-    await writeFile(storyStatePath, `${JSON.stringify({
-      ...initialStoryState,
-      characters: [{
-        ...validCharacterState,
-        knowledge: [],
-        lastUpdatedChapter: 0
-      }]
-    }, null, 2)}\n`);
 
     const protectedArtifactsBefore = await listProtectedArtifacts(projectRoot);
     const storyStateHashBefore = await sha256(
@@ -1241,7 +1228,7 @@ const promptContracts = {
       'Return only JSON that matches the provided output schema.',
       'Create a minimal chapter mission.',
       'Use exactly these top-level keys:',
-      'Do not invent debt or character IDs.'
+      'Do not invent undeclared debt or character IDs.'
     ],
     requiredBlocks: [
       'chapter_number',
@@ -1401,7 +1388,17 @@ const outputs = {
       promise: 'Why does the radio speak without power?',
       importance: 8
     }],
-    characterDeltas: [],
+    charactersToIntroduce: [{
+      characterId: 'char_lincheng',
+      name: 'Lin Cheng',
+      role: 'protagonist'
+    }],
+    characterDeltas: [{
+      characterId: 'char_lincheng',
+      from: 'skeptical',
+      to: 'alert',
+      evidenceRequired: 'He hears the broadcast without a power source.'
+    }],
     readerKnowledge: ['The radio speaks while disconnected from power.'],
     readerQuestions: ['Who is sending the old building address?'],
     forbiddenMoves: ['Do not reveal the final caller identity.']

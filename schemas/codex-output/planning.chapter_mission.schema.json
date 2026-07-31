@@ -20,6 +20,20 @@
     },
     "debtsToPayOrAdvance": { "type": "array", "items": { "type": "string" } },
     "debtsToIntroduce": { "type": "array" },
+    "charactersToIntroduce": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["characterId", "name", "role"],
+        "properties": {
+          "characterId": { "type": "string" },
+          "name": { "type": "string" },
+          "role": { "type": "string" }
+        },
+        "additionalProperties": false
+      }
+    },
     "characterDeltas": { "type": "array" },
     "readerInformationDelta": { "type": "object" },
     "forbiddenMoves": { "type": "array", "items": { "type": "string" } },

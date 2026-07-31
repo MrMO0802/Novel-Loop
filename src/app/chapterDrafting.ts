@@ -189,7 +189,7 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
     ) {
       throw new Error('Scene-card workload exceeds desktop limits.');
     }
-    if (!sceneCharacterReferencesAreValid(parsedSceneCards, storyState)) {
+    if (!sceneCharacterReferencesAreValid(parsedSceneCards, storyState, mission)) {
       throw new Error('Scene character references are invalid.');
     }
   } catch {
@@ -798,7 +798,10 @@ function summarizeText(text: string, maxLength = 1800): string {
 
 function missionCharacterReferences(mission: z.infer<typeof ChapterMissionSchema>): string[] {
   return [...new Set(
-    mission.characterDeltas.map((delta) => delta.characterId)
+    [
+      ...mission.characterDeltas.map((delta) => delta.characterId),
+      ...mission.charactersToIntroduce.map((character) => character.characterId)
+    ]
   )].slice(0, MAX_SCENE_CHARACTER_CONTEXT);
 }
 
@@ -855,10 +858,20 @@ function sceneCharacterContext(
   const charactersById = new Map(
     storyState.characters.map((character) => [character.id, character])
   );
+  const introducedCharactersById = new Map(
+    mission.charactersToIntroduce.map((character) => [
+      character.characterId,
+      {
+        id: character.characterId,
+        name: character.name
+      }
+    ])
+  );
   const included = new Set<string>();
   const context: Array<{ id: string; name: string }> = [];
   for (const characterId of orderedIds) {
-    const character = charactersById.get(characterId);
+    const character = charactersById.get(characterId)
+      ?? introducedCharactersById.get(characterId);
     if (
       character === undefined
       || included.has(characterId)

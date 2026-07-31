@@ -1,6 +1,6 @@
 {
   "type": "object",
-  "required": ["chapterNumber", "chapterFunction", "objectives", "debtsToPayOrAdvance", "debtsToIntroduce", "characterDeltas", "readerKnowledge", "readerQuestions", "forbiddenMoves"],
+  "required": ["chapterNumber", "chapterFunction", "objectives", "debtsToPayOrAdvance", "debtsToIntroduce", "charactersToIntroduce", "characterDeltas", "readerKnowledge", "readerQuestions", "forbiddenMoves"],
   "properties": {
     "chapterNumber": { "type": "integer", "minimum": 1 },
     "chapterFunction": { "type": "string", "minLength": 1, "maxLength": 2000 },
@@ -25,6 +25,20 @@
           "type": { "type": "string", "minLength": 1, "maxLength": 100 },
           "promise": { "type": "string", "minLength": 1, "maxLength": 2000 },
           "importance": { "type": "number", "minimum": 1, "maximum": 10 }
+        },
+        "additionalProperties": false
+      }
+    },
+    "charactersToIntroduce": {
+      "type": "array",
+      "maxItems": 8,
+      "items": {
+        "type": "object",
+        "required": ["characterId", "name", "role"],
+        "properties": {
+          "characterId": { "type": "string", "minLength": 1, "maxLength": 200 },
+          "name": { "type": "string", "minLength": 1, "maxLength": 120 },
+          "role": { "type": "string", "minLength": 1, "maxLength": 120 }
         },
         "additionalProperties": false
       }

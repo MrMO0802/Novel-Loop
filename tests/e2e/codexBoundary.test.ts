@@ -91,6 +91,15 @@ describe('M21 Codex execution boundary', () => {
     expect(result.safety.storyStateCommitAllowed).toBe(false);
     expect(result.safety.workspaceWriteAllowed).toBe(false);
     expect(result.safety.shellCommandsAllowed).toBe(false);
+    const execArgs = (await readFile(fake.argsLogPath, 'utf8')).trim().split(/\s+/);
+    const outputArgument = execArgs[execArgs.indexOf('--output-last-message') + 1];
+    expect(outputArgument).toBeDefined();
+    expect(path.resolve(outputArgument!)).not.toBe(fixture.paths.projectRoot);
+    expect(path.resolve(outputArgument!).startsWith(`${fixture.paths.projectRoot}${path.sep}`)).toBe(false);
+    await expect(store.exists(path.resolve(outputArgument!))).resolves.toBe(false);
+    await expect(
+      store.exists(fixture.paths.projectArtifact(result.finalOutputPath))
+    ).resolves.toBe(true);
     expect(await store.readJson(fixture.paths.storyState(), StoryStateSchema)).toEqual(stateBefore);
     const audit = await auditProject({ projectId, projectsRoot: tempRoot, strict: true, fixIndex: true }, store);
     expect(audit.exitCode).toBe(0);

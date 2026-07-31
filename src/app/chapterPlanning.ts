@@ -445,6 +445,13 @@ async function runChapterDryRunWithinLease(input: ChapterDryRunInput, fileStore:
         return planChapterMission({ ...input, runId }, fileStore);
       }
     );
+    const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+    if (
+      !missionCharacterReferencesAreValid(mission.value, storyState)
+      || !missionDebtReferencesAreValid(mission.value, storyState)
+    ) {
+      throw invalidMissionProviderOutput(input.chapterNumber);
+    }
     recordArtifact(artifacts, mission.artifact, mission.reused ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, mission.artifact, mission.reused ? 'reused' : 'generated');
     await queueStore.markStageComplete(

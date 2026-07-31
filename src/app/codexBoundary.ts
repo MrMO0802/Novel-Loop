@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, mkdtemp, rm } from 'node:fs/promises';
 import { constants } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
 
@@ -315,12 +316,21 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
     provenanceNote: 'prompt copied for Codex execution boundary'
   });
 
-  const args = buildCodexExecArgs({
-    outputFile: paths.projectArtifact(finalOutputPath),
-    promptText: input.promptText,
-    ...(input.schemaPath === undefined ? {} : { schemaPath: input.schemaPath })
-  });
+  let privateOutputDir: string | undefined;
   try {
+    privateOutputDir = await mkdtemp(
+      path.join(os.tmpdir(), 'novel-loop-codex-output-')
+    );
+    const privateOutputPath = path.join(
+      privateOutputDir,
+      path.basename(finalOutputPath)
+    );
+    const boundaryFileStore = new FileStore();
+    const args = buildCodexExecArgs({
+      outputFile: privateOutputPath,
+      promptText: input.promptText,
+      ...(input.schemaPath === undefined ? {} : { schemaPath: input.schemaPath })
+    });
     const commandResult = await runCodexExecCommand(binaryPath, args, input, input.promptText);
     await recordTimingEvents(runLogger, runId, commandResult.timingEvents ?? []);
     const endedAt = new Date().toISOString();
@@ -334,39 +344,34 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
         reason: `timeoutMs=${input.timeoutMs ?? DEFAULT_TIMEOUT_MS}`
       });
     }
+    const privateOutputExists = await boundaryFileStore.exists(privateOutputPath);
+    const privateFinalText = privateOutputExists
+      ? await boundaryFileStore.readText(privateOutputPath)
+      : '';
     if (commandResult.exitCode !== 0) {
-      if (await fileStore.exists(paths.projectArtifact(finalOutputPath))) {
-        const failedFinalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
+      if (privateOutputExists) {
         await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
-        await fileStore.writeText(paths.projectArtifact(finalOutputPath), redactSensitive(failedFinalText));
+        await fileStore.writeText(
+          paths.projectArtifact(finalOutputPath),
+          redactSensitive(privateFinalText)
+        );
         await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
       }
       throw new AppError('CODEX_EXEC_FAILED', `Codex CLI command failed: ${stderrExcerpt || 'non-zero exit; inspect redacted raw JSONL'}`, 1, {
         reason: `exit=${commandResult.exitCode}`
       });
     }
-    if (!(await fileStore.exists(paths.projectArtifact(finalOutputPath)))) {
-      const extracted = extractFinalMessage(commandResult.stdout);
-      if (extracted.trim().length === 0) {
-        if (commandResult.exitCode !== 0) {
-          throw new AppError('CODEX_EXEC_FAILED', `Codex CLI command failed: ${stderrExcerpt || 'non-zero exit without final output'}`, 1, {
-            reason: `exit=${commandResult.exitCode}`
-          });
-        }
-        throw new AppError('CODEX_OUTPUT_MISSING', 'Codex CLI did not produce a final output file or final message.', 1, {
-          reason: stderrExcerpt || 'missing final output'
-        });
-      }
-      await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
-      await fileStore.writeText(paths.projectArtifact(finalOutputPath), extracted);
-      await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
-    } else {
-      const finalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
-      await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
-      await fileStore.writeText(paths.projectArtifact(finalOutputPath), finalText.trim().length === 0 ? extractFinalMessage(commandResult.stdout) : redactSensitive(finalText));
-      await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
+    const finalText = privateFinalText.trim().length === 0
+      ? extractFinalMessage(commandResult.stdout)
+      : redactSensitive(privateFinalText);
+    if (finalText.trim().length === 0) {
+      throw new AppError('CODEX_OUTPUT_MISSING', 'Codex CLI did not produce a final output file or final message.', 1, {
+        reason: stderrExcerpt || 'missing final output'
+      });
     }
-    const finalText = await fileStore.readText(paths.projectArtifact(finalOutputPath));
+    await recordArtifactWriteEvent(runLogger, runId, 'started', finalOutputPath, 'final_output');
+    await fileStore.writeText(paths.projectArtifact(finalOutputPath), finalText);
+    await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
     const latencyMs = Math.max(0, Date.now() - startedAtMs);
     const schemaBytes = input.schemaPath === undefined
       ? 0
@@ -438,6 +443,10 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
     });
     await runLogger.endRun(runId, 'failed');
     throw error;
+  } finally {
+    if (privateOutputDir !== undefined) {
+      await rm(privateOutputDir, { recursive: true, force: true });
+    }
   }
 }
 

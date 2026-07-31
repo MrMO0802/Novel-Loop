@@ -352,6 +352,22 @@ async function runChapterUntilDraftWithinLease(input: ChapterDraftingInput, file
         return generateSceneCards({ ...input, runId }, fileStore);
       }
     );
+    const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+    const mission = await fileStore.readJson(
+      paths.chapterArtifact(input.chapterNumber, 'mission.json'),
+      ChapterMissionSchema
+    );
+    if (
+      (input.provider === 'codex-text'
+        && !desktopSlimSceneCardsWithinBounds(sceneCardResult.sceneCards))
+      || !sceneCharacterReferencesAreValid(
+        sceneCardResult.sceneCards,
+        storyState,
+        mission
+      )
+    ) {
+      throw invalidSceneCardsProviderOutput(input.chapterNumber);
+    }
     recordArtifact(artifacts, sceneCardResult.artifact, sceneCardResult.reused ? reusedArtifacts : generatedArtifacts);
     await runLogger.recordArtifact(runId, sceneCardResult.artifact, sceneCardResult.reused ? 'reused' : 'generated');
     await queueStore.markStageComplete(

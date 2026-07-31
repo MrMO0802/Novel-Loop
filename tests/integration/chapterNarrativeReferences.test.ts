@@ -173,6 +173,34 @@ describe('chapter narrative reference integrity', () => {
     ]));
   }, 30_000);
 
+  test('rejects a schema-valid reused mission with stale narrative references before provider fan-out', async () => {
+    const fake = await writeFakeCodex(projectsRoot, 'codex-mission-non-default-character');
+    await preparePlan(fake.codexBin, 'codex-mission-non-default-character');
+    const missionPath = paths.chapterArtifact(1, 'mission.json');
+    const mission = await store.readJson(missionPath, ChapterMissionSchema);
+    await store.writeJson(missionPath, {
+      ...mission,
+      debtsToPayOrAdvance: ['debt_unknown']
+    }, ChapterMissionSchema);
+    const callsBefore = await store.readText(fake.argsLogPath);
+    const stateBefore = await sha256(paths.storyState());
+
+    await expect(runChapterDryRun({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot,
+      codexBin: fake.codexBin,
+      runId: 'reused_mission_reference_rejected'
+    })).rejects.toMatchObject({
+      code: 'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT'
+    });
+
+    expect(await store.readText(fake.argsLogPath)).toBe(callsBefore);
+    expect(await sha256(paths.storyState())).toBe(stateBefore);
+  }, 30_000);
+
   test('supplies canonical character context and accepts only its non-default ID in scene cards', async () => {
     const mode: FakeCodexMode = 'codex-scene-non-default-character';
     const fake = await writeFakeCodex(projectsRoot, mode);
@@ -244,6 +272,42 @@ describe('chapter narrative reference integrity', () => {
     expect(manifest.errors).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT' })
     ]));
+  }, 30_000);
+
+  test('rejects schema-valid reused scene cards with an undeclared character before draft fan-out', async () => {
+    const fake = await writeFakeCodex(projectsRoot, 'codex-scene-non-default-character');
+    await preparePlan(fake.codexBin, 'codex-scene-non-default-character');
+    await runChapterUntilDraft({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot,
+      codexBin: fake.codexBin,
+      runId: 'reused_scene_reference_prerequisite'
+    });
+    const cardsPath = paths.chapterArtifact(1, 'scene_cards.json');
+    const cards = await store.readJson(cardsPath, SceneCardsSchema);
+    await store.writeJson(cardsPath, cards.map((card, index) => (
+      index === 0 ? { ...card, characters: ['char_unknown'] } : card
+    )), SceneCardsSchema);
+    const callsBefore = await store.readText(fake.argsLogPath);
+    const stateBefore = await sha256(paths.storyState());
+
+    await expect(runChapterUntilDraft({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot,
+      codexBin: fake.codexBin,
+      runId: 'reused_scene_reference_rejected'
+    })).rejects.toMatchObject({
+      code: 'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT'
+    });
+
+    expect(await store.readText(fake.argsLogPath)).toBe(callsBefore);
+    expect(await sha256(paths.storyState())).toBe(stateBefore);
   }, 30_000);
 });
 

@@ -138,7 +138,7 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
       const page = await application.firstWindow();
       await expect(page.getByText('Novel Loop').first()).toBeVisible();
 
-      const mainBoundary = await application.evaluate(
+      const evaluateMainBoundary = () => application.evaluate(
         ({ app, BrowserWindow }) => {
           const window = BrowserWindow.getAllWindows()[0];
           if (window === undefined) {
@@ -168,6 +168,19 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
           };
         }
       );
+      let mainBoundary: Awaited<ReturnType<typeof evaluateMainBoundary>>;
+      try {
+        mainBoundary = await evaluateMainBoundary();
+      } catch (error) {
+        if (
+          !(error instanceof Error)
+          || !error.message.includes('Resulting promise was garbage collected')
+        ) {
+          throw error;
+        }
+        await page.waitForTimeout(100);
+        mainBoundary = await evaluateMainBoundary();
+      }
       expect(mainBoundary).toEqual({
         commandLine: {
           disableSetuidSandbox: false,
@@ -446,7 +459,10 @@ test('authors can create chapter one through planning review and initial draft w
     expect(calls.map((call) => call.promptId)).toEqual(FULL_DRAFT_PROMPT_IDS);
     expect(calls).toHaveLength(FULL_DRAFT_PROMPT_IDS.length);
     for (const call of calls) {
-      expect(call.outputPath.startsWith(`${projectRoot}${path.sep}`)).toBe(true);
+      expect(call.outputPath.startsWith(`${projectRoot}${path.sep}`)).toBe(false);
+      expect(path.basename(path.dirname(call.outputPath))).toMatch(
+        /^novel-loop-codex-output-/
+      );
       expect(call.args).toContain('--sandbox');
       expect(call.args[call.args.indexOf('--sandbox') + 1]).toBe('read-only');
       expect(call.args).toContain('--ask-for-approval');
@@ -685,8 +701,16 @@ test('chapter-flow fake Codex rejects unknown commands, prompts, schemas, operat
     path.join(tmpdir(), 'novel-loop-electron-fake-codex-')
   );
   const projectRoot = path.join(temporaryRoot, 'projects', 'desktop-planning-e2e');
-  const outputPath = path.join(projectRoot, 'codex', 'runs', 'test', 'final_output.md');
-  const jsonOutputPath = path.join(projectRoot, 'codex', 'runs', 'test-json', 'final_output.json');
+  const outputPath = path.join(
+    temporaryRoot,
+    'novel-loop-codex-output-negative-command',
+    'final_output.md'
+  );
+  const jsonOutputPath = path.join(
+    temporaryRoot,
+    'novel-loop-codex-output-negative-json',
+    'final_output.json'
+  );
   const untrustedSchemaPath = path.join(
     temporaryRoot,
     'untrusted',
@@ -954,11 +978,7 @@ function fakeOutputPath(
 ): string {
   return path.join(
     root,
-    'projects',
-    'desktop-planning-e2e',
-    'codex',
-    'runs',
-    `negative-${index}`,
+    `novel-loop-codex-output-negative-${index}`,
     schemaName === undefined ? 'final_output.md' : 'final_output.json'
   );
 }
@@ -1264,7 +1284,9 @@ const promptContracts = {
       'Return only JSON that matches the provided output schema.',
       'Create two concise scene cards for the selected chapter plan.',
       'Include a non-empty characters array for every scene.',
-      'characters may contain only canonical IDs from character_id_name_map.',
+      'characters may contain only IDs from character_id_name_map.',
+      'character_id_name_map includes committed Story State characters and any provisional characters explicitly declared by the Chapter Mission.',
+      'Do not invent character IDs beyond the supplied map.',
       'Never use a display name in characters.'
     ],
     requiredBlocks: [
@@ -1353,18 +1375,14 @@ if (!commonArgumentsAreExact || (!textArgumentsAreExact && !jsonArgumentsAreExac
 }
 const outputIndex = 8;
 const outputPath = path.resolve(args[outputIndex + 1]);
-if (outputPath !== expectedProjectRoot && !outputPath.startsWith(expectedProjectRoot + path.sep)) {
-  process.stderr.write('Codex output artifact path is outside the temporary project');
+if (outputPath === expectedProjectRoot || outputPath.startsWith(expectedProjectRoot + path.sep)) {
+  process.stderr.write('Codex output path must not be inside the project');
   process.exit(2);
 }
-const outputParts = path.relative(expectedProjectRoot, outputPath).split(path.sep);
 const expectedOutputName = schemaName === undefined ? 'final_output.md' : 'final_output.json';
 if (
-  outputParts.length !== 4
-  || outputParts[0] !== 'codex'
-  || outputParts[1] !== 'runs'
-  || outputParts[2].length === 0
-  || outputParts[3] !== expectedOutputName
+  !path.basename(path.dirname(outputPath)).startsWith('novel-loop-codex-output-')
+  || path.basename(outputPath) !== expectedOutputName
 ) {
   process.stderr.write('Unexpected Codex output artifact path');
   process.exit(2);

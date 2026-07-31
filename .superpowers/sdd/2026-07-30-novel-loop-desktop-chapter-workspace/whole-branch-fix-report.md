@@ -576,6 +576,91 @@ git diff --check
 PASS
 ```
 
+## Follow-Up Review: C1 Check/Use Race
+
+Status: **CLOSED**
+
+The follow-up review correctly identified that repeated pathname checks alone
+did not close a directory-replacement race. It also found that Codex still
+received a project-local `--output-last-message` path and could therefore hold
+that pathname across a long-running child process.
+
+The production boundary now:
+
+- creates the Codex last-message target in a private operating-system temporary
+  directory outside the project;
+- reads and redacts that private output only after Codex exits;
+- writes the final project artifact through the guarded `FileStore`;
+- removes the private temporary directory in `finally`;
+- uses Linux directory-file-descriptor anchored writes for project files;
+- opens every descendant directory and target with `O_NOFOLLOW`;
+- performs the atomic rename through `/proc/self/fd/<directory-fd>` so replacing
+  a checked directory cannot redirect the write outside the project;
+- routes append-only event-log writes through the same anchored writer.
+
+The Linux adversarial unit test replaces a checked project directory with an
+external symlink before the write. The external sentinel and directory remain
+unchanged. The Codex boundary test also verifies that the child output path is
+outside the project and is removed after completion.
+
+## Follow-Up Review: Resume Semantic Validation
+
+Status: **CLOSED**
+
+The follow-up review correctly identified that resume paths accepted
+schema-valid `mission.json` and `scene_cards.json` artifacts without rerunning
+the semantic reference checks used for newly generated artifacts.
+
+Resumed missions now revalidate narrative-debt and character references against
+the current Story State before provider fan-out. Resumed scene cards now
+revalidate workload limits and character references against the current Story
+State plus the mission's declared provisional characters before scene writing.
+Focused tests prove stale debt and undeclared-character artifacts fail before
+the downstream provider is called.
+
+## Follow-Up Review: Provisional Character Contract
+
+Status: **CLOSED**
+
+Direct unit coverage now proves that:
+
+- mission-declared provisional character IDs are accepted by scene cards;
+- provisional IDs cannot collide with committed character IDs;
+- provisional IDs cannot be duplicated;
+- character deltas cannot reference undeclared IDs.
+
+The scene-card prompt now explicitly describes the bounded character map as the
+union of committed Story State characters and mission-declared provisional
+characters. It forbids invention outside that map.
+
+## Follow-Up GREEN Evidence
+
+```text
+corepack pnpm build
+PASS
+
+corepack pnpm exec vitest run \
+  tests/unit/storage/fileInfrastructure.test.ts \
+  tests/e2e/codexBoundary.test.ts \
+  tests/e2e/codexProvenance.test.ts \
+  tests/e2e/codexCli.test.ts \
+  tests/integration/chapterNarrativeReferences.test.ts \
+  tests/unit/chapterReferenceValidation.test.ts
+PASS: 6 files, 30 tests
+
+corepack pnpm test
+PASS: 187 files, 507 tests
+
+corepack pnpm --dir apps/desktop test
+PASS: 32 files, 381 tests
+
+corepack pnpm --dir apps/desktop build
+PASS
+
+corepack pnpm --dir apps/desktop test:e2e:required
+PASS: 6 tests
+```
+
 ## Remaining Findings
 
-All eight findings from `whole-branch-review.md` are closed.
+All original and follow-up findings are closed.

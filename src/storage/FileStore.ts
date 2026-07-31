@@ -1,4 +1,4 @@
-import { access, appendFile, mkdir, readdir, readFile } from 'node:fs/promises';
+import { access, mkdir, readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 
@@ -18,7 +18,11 @@ export class FileStore {
   static forProject(projectRoot: string): FileStore {
     const guard = new ProjectPathGuard(projectRoot);
     return new FileStore(
-      new AtomicWriter({}, (filePath) => guard.assertSafePath(filePath)),
+      new AtomicWriter(
+        {},
+        (filePath) => guard.assertSafePath(filePath),
+        guard.projectRoot
+      ),
       guard
     );
   }
@@ -45,10 +49,7 @@ export class FileStore {
     const resolvedPath = path.resolve(filePath);
     await this.assertSafePath(resolvedPath);
     await beforeProjectOperationWrite(resolvedPath);
-    await mkdir(path.dirname(resolvedPath), { recursive: true });
-    await this.assertSafePath(path.dirname(resolvedPath));
-    await this.assertSafePath(resolvedPath);
-    await appendFile(resolvedPath, content, 'utf8');
+    await this.writer.appendText(resolvedPath, content);
   }
 
   async ensureDir(dirPath: string): Promise<void> {

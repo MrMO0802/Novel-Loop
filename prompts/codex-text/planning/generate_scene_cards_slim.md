@@ -15,9 +15,10 @@ Rules:
 - No explanation.
 - No extra fields.
 - Include a non-empty characters array for every scene.
-- characters may contain only canonical IDs from character_id_name_map.
+- characters may contain only IDs from character_id_name_map.
+- character_id_name_map includes committed Story State characters and any provisional characters explicitly declared by the Chapter Mission.
 - Never use a display name in characters.
-- New characters are not supported in this workflow; do not invent character IDs.
+- Do not invent character IDs beyond the supplied map.
 - Prefer mission_character_refs when the mission names participating characters.
 
 <chapter_number>

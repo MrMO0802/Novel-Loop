@@ -4,7 +4,11 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { buildBible } from '../../src/app/buildBible.js';
+import { runChapterUntilDraft } from '../../src/app/chapterDrafting.js';
+import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
+import { planGlobal } from '../../src/app/planGlobal.js';
 import {
   AuthorEditInvalidationReportSchema,
   ChapterDirectionSelectionSchema,
@@ -15,12 +19,15 @@ import {
   StoryStateSchema
 } from '../../src/schemas/index.js';
 import { selectDesktopChapterDirection } from '../../src/desktop/index.js';
+import { inspectDesktopNextChapter } from '../../src/desktop/chapterWorkspace.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 
 let projectsRoot: string;
 let paths: ProjectPaths;
 let store: FileStore;
+const promptRoot = path.resolve('prompts');
+const fixturesRoot = path.resolve('fixtures/llm');
 
 beforeEach(async () => {
   projectsRoot = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-direction-selection-'));
@@ -97,7 +104,60 @@ describe('desktop chapter direction selection', () => {
     for (const artifact of invalidation.archivedArtifacts) {
       await expect(store.exists(paths.projectArtifact(artifact.archivedPath))).resolves.toBe(true);
     }
+    await expectActiveDownstreamArtifacts(false);
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      available: true,
+      phase: 'plan_ready'
+    });
   });
+
+  test('regenerates direction downstream artifacts instead of reusing archived outputs', async () => {
+    await prepareGeneratedChapter();
+    const rankingValue = await store.readJson(
+      paths.chapterArtifact(1, 'ranking.json'),
+      ChapterPlanRankingSchema
+    );
+    const alternative = rankingValue.candidates.find(
+      ({ candidateId }) => candidateId !== rankingValue.selectedCandidateId
+    )!;
+    const stateBefore = await store.readText(paths.storyState());
+
+    await selectDesktopChapterDirection({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: alternative.candidateId,
+      expectedReviewHash: await reviewHash()
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      available: true,
+      phase: 'plan_ready'
+    });
+    await expectActiveDownstreamArtifacts(false);
+
+    const regenerated = await runChapterUntilDraft({
+      projectId: paths.projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_direction_regenerated',
+      enforceDesktopQueueTransitions: true
+    });
+
+    expect(regenerated.reusedArtifacts.some(isChapterDownstreamArtifact)).toBe(false);
+    expect(regenerated.generatedArtifacts).toEqual(expect.arrayContaining([
+      'chapters/chapter_001/scene_cards.json',
+      'chapters/chapter_001/draft_v1.md'
+    ]));
+    await expectActiveDownstreamArtifacts(true);
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      available: true,
+      phase: 'draft_ready'
+    });
+    expect(await store.readText(paths.storyState())).toBe(stateBefore);
+  }, 30_000);
 
   test('preserves the first model recommendation across later author selections', async () => {
     await selectDesktopChapterDirection({
@@ -235,6 +295,74 @@ async function writeChapterFixture(): Promise<void> {
   await store.ensureDir(paths.chapterArtifact(1, 'scenes'));
   await store.writeText(paths.chapterArtifact(1, 'scenes', 'scene_001.md'), '# 事故现场\n\n旧场景。\n');
   await store.writeText(paths.chapterArtifact(1, 'draft_v1.md'), '# 第一章\n\n旧草稿。\n');
+}
+
+async function prepareGeneratedChapter(): Promise<void> {
+  await rm(paths.projectRoot, { recursive: true, force: true });
+  await initProjectFromBriefText({
+    projectId: paths.projectId,
+    projectsRoot,
+    brief: '# Direction Selection\n\nChoose an author-controlled chapter direction.\n'
+  });
+  store = FileStore.forProject(paths.projectRoot);
+  await buildBible({
+    projectId: paths.projectId,
+    projectsRoot,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_direction_bible'
+  });
+  await planGlobal({
+    projectId: paths.projectId,
+    projectsRoot,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_direction_global'
+  });
+  const queue = await store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+  await store.writeJson(paths.chapterQueue(), {
+    ...queue,
+    projectId: paths.projectId
+  }, ChapterQueueSchema);
+  await runChapterDryRun({
+    projectId: paths.projectId,
+    projectsRoot,
+    chapterNumber: 1,
+    candidates: 3,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_direction_planning',
+    enforceDesktopQueueTransitions: true
+  });
+  await runChapterUntilDraft({
+    projectId: paths.projectId,
+    projectsRoot,
+    chapterNumber: 1,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_direction_initial_draft',
+    enforceDesktopQueueTransitions: true
+  });
+}
+
+async function expectActiveDownstreamArtifacts(expected: boolean): Promise<void> {
+  for (const artifactPath of [
+    paths.chapterArtifact(1, 'scene_cards.json'),
+    paths.chapterArtifact(1, 'scenes'),
+    paths.chapterArtifact(1, 'draft_v1.md')
+  ]) {
+    await expect(store.exists(artifactPath)).resolves.toBe(expected);
+  }
+}
+
+function isChapterDownstreamArtifact(artifactPath: string): boolean {
+  return artifactPath === 'chapters/chapter_001/scene_cards.json'
+    || artifactPath.startsWith('chapters/chapter_001/scenes/')
+    || artifactPath === 'chapters/chapter_001/draft_v1.md';
 }
 
 function candidateMarkdown(): Record<'plan_001' | 'plan_002' | 'plan_003', string> {

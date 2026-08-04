@@ -4,10 +4,15 @@ import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 
+import { buildBible } from '../../src/app/buildBible.js';
+import { runChapterUntilDraft } from '../../src/app/chapterDrafting.js';
+import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
+import { planGlobal } from '../../src/app/planGlobal.js';
 import {
   AuthorEditInvalidationReportSchema,
   AuthorRevisionRecordSchema,
+  ChapterDirectionSelectionSchema,
   ChapterMissionSchema,
   ChapterPlanRankingSchema,
   ChapterQueueSchema,
@@ -18,12 +23,15 @@ import {
   createDesktopChapterPlanRevision,
   selectDesktopChapterDirection
 } from '../../src/desktop/index.js';
+import { inspectDesktopNextChapter } from '../../src/desktop/chapterWorkspace.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 
 let projectsRoot: string;
 let paths: ProjectPaths;
 let store: FileStore;
+const promptRoot = path.resolve('prompts');
+const fixturesRoot = path.resolve('fixtures/llm');
 
 beforeEach(async () => {
   projectsRoot = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-author-invalidation-'));
@@ -112,6 +120,99 @@ describe('chapter author invalidation', () => {
       'chapters/chapter_001/scenes/scene_001.md',
       'chapters/chapter_001/draft_v1.md'
     ]);
+    await expectActiveDownstreamArtifacts(false);
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      available: true,
+      phase: 'plan_ready'
+    });
+  });
+
+  test('regenerates plan-adoption downstream artifacts instead of reusing archived outputs', async () => {
+    await prepareGeneratedChapter();
+    const rankingValue = await store.readJson(
+      paths.chapterArtifact(1, 'ranking.json'),
+      ChapterPlanRankingSchema
+    );
+    const alternative = rankingValue.candidates.find(
+      ({ candidateId }) => candidateId !== rankingValue.selectedCandidateId
+    )!;
+    const stateBefore = await store.readText(paths.storyState());
+    const revision = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: alternative.candidateId,
+      expectedReviewHash: await reviewHash(),
+      markdown: '# 作者采用的替代方向\n\n重新生成下游。\n'
+    });
+
+    await adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: revision.record.revisionId,
+      expectedSourceHash: revision.record.sourceHash
+    });
+
+    await expect(inspectDesktopNextChapter({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      available: true,
+      phase: 'plan_ready'
+    });
+    await expectActiveDownstreamArtifacts(false);
+    const regenerated = await runChapterUntilDraft({
+      projectId: paths.projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'mock',
+      promptRoot,
+      fixturesRoot,
+      runId: 'run_plan_adoption_regenerated',
+      enforceDesktopQueueTransitions: true
+    });
+
+    expect(regenerated.reusedArtifacts.some(isChapterDownstreamArtifact)).toBe(false);
+    expect(regenerated.generatedArtifacts).toEqual(expect.arrayContaining([
+      'chapters/chapter_001/scene_cards.json',
+      'chapters/chapter_001/draft_v1.md'
+    ]));
+    await expectActiveDownstreamArtifacts(true);
+    expect(await store.readText(paths.storyState())).toBe(stateBefore);
+  }, 30_000);
+
+  test('records the original model recommendation before the first alternative revision switch', async () => {
+    const created = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_002',
+      expectedReviewHash: await reviewHash(),
+      markdown: '# 交通事故调查\n'
+    });
+    await adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    });
+
+    const adoptionSelection = await store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'direction_selection_v1.json'),
+      ChapterDirectionSelectionSchema
+    );
+    expect(adoptionSelection).toMatchObject({
+      previousCandidateId: 'plan_001',
+      selectedCandidateId: 'plan_002',
+      modelRecommendedCandidateId: 'plan_001'
+    });
+
+    await selectDesktopChapterDirection({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_003',
+      expectedReviewHash: await reviewHash()
+    });
+    const laterSelection = await store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'direction_selection_v2.json'),
+      ChapterDirectionSelectionSchema
+    );
+    expect(laterSelection.modelRecommendedCandidateId).toBe('plan_001');
   });
 
   test('supersedes the previous adopted plan revision', async () => {
@@ -150,6 +251,41 @@ describe('chapter author invalidation', () => {
       paths.projectArtifact(second.relativeRecordPath),
       AuthorRevisionRecordSchema
     )).state).toBe('adopted');
+  });
+
+  test('rejects repeated adoption before touching the immutable archive', async () => {
+    const created = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_001',
+      expectedReviewHash: await reviewHash(),
+      markdown: '# 已采用作者计划\n'
+    });
+    await adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    });
+    const record = await store.readJson(
+      paths.projectArtifact(created.relativeRecordPath),
+      AuthorRevisionRecordSchema
+    );
+    const archivedSourcePath = paths.projectArtifact(record.sourceArtifactPath);
+    const archiveBefore = await store.readText(archivedSourcePath);
+    const archiveHashBefore = sha256(archiveBefore);
+    const archiveEntriesBefore = await store.list(path.dirname(archivedSourcePath));
+
+    await expect(adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    })).rejects.toMatchObject({ code: 'DESKTOP_CHAPTER_REVISION_ALREADY_ADOPTED' });
+
+    expect(await store.readText(archivedSourcePath)).toBe(archiveBefore);
+    expect(sha256(await store.readText(archivedSourcePath))).toBe(archiveHashBefore);
+    expect(await store.list(path.dirname(archivedSourcePath))).toEqual(archiveEntriesBefore);
   });
 
   test('restores ranking, selected plan, and queue when active replacement fails', async () => {
@@ -199,6 +335,64 @@ describe('chapter author invalidation', () => {
     )).state).toBe('ready');
     await expect(store.exists(paths.chapterArtifact(1, 'author_revisions', 'edit_invalidation_report_v1.json')))
       .resolves.toBe(false);
+  });
+
+  test('restores revision metadata and adoption provenance when the target record write fails', async () => {
+    const first = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_001',
+      expectedReviewHash: await reviewHash(),
+      markdown: '# 第一版已采用计划\n'
+    });
+    await adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: first.record.revisionId,
+      expectedSourceHash: first.record.sourceHash
+    });
+    const second = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_002',
+      expectedReviewHash: await reviewHash(),
+      markdown: '# 第二版替代计划\n'
+    });
+    const firstRecordPath = paths.projectArtifact(first.relativeRecordPath);
+    const secondRecordPath = paths.projectArtifact(second.relativeRecordPath);
+    const before = {
+      firstRecord: await store.readText(firstRecordPath),
+      secondRecord: await store.readText(secondRecordPath),
+      ranking: await store.readText(paths.chapterArtifact(1, 'ranking.json')),
+      selectedPlan: await store.readText(paths.chapterArtifact(1, 'selected_plan.md')),
+      queue: await store.readText(paths.chapterQueue()),
+      storyState: await store.readText(paths.storyState())
+    };
+    const failingStore = new FailOnceFileStore(secondRecordPath);
+
+    await expect(adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: second.record.sourceHash
+    }, failingStore)).rejects.toThrow('injected selected-plan write failure');
+
+    expect(await store.readText(firstRecordPath)).toBe(before.firstRecord);
+    expect(await store.readText(secondRecordPath)).toBe(before.secondRecord);
+    expect(await store.readText(paths.chapterArtifact(1, 'ranking.json'))).toBe(before.ranking);
+    expect(await store.readText(paths.chapterArtifact(1, 'selected_plan.md'))).toBe(before.selectedPlan);
+    expect(await store.readText(paths.chapterQueue())).toBe(before.queue);
+    expect(await store.readText(paths.storyState())).toBe(before.storyState);
+    await expect(store.exists(paths.chapterArtifact(1, 'author_revisions', 'direction_selection_v1.json')))
+      .resolves.toBe(false);
+    await expect(store.exists(paths.chapterArtifact(1, 'author_revisions', 'edit_invalidation_report_v2.json')))
+      .resolves.toBe(false);
+    await expect(store.exists(paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'archive',
+      second.record.revisionId
+    ))).resolves.toBe(false);
   });
 });
 
@@ -295,6 +489,74 @@ async function writeChapterFixture(): Promise<void> {
   await store.ensureDir(paths.chapterArtifact(1, 'scenes'));
   await store.writeText(paths.chapterArtifact(1, 'scenes', 'scene_001.md'), '# 旧场景\n');
   await store.writeText(paths.chapterArtifact(1, 'draft_v1.md'), '# 旧草稿\n');
+}
+
+async function prepareGeneratedChapter(): Promise<void> {
+  await rm(paths.projectRoot, { recursive: true, force: true });
+  await initProjectFromBriefText({
+    projectId: paths.projectId,
+    projectsRoot,
+    brief: '# Author Invalidation\n\nAdopt revisions conservatively.\n'
+  });
+  store = FileStore.forProject(paths.projectRoot);
+  await buildBible({
+    projectId: paths.projectId,
+    projectsRoot,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_adoption_bible'
+  });
+  await planGlobal({
+    projectId: paths.projectId,
+    projectsRoot,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_adoption_global'
+  });
+  const queue = await store.readJson(paths.chapterQueue(), ChapterQueueSchema);
+  await store.writeJson(paths.chapterQueue(), {
+    ...queue,
+    projectId: paths.projectId
+  }, ChapterQueueSchema);
+  await runChapterDryRun({
+    projectId: paths.projectId,
+    projectsRoot,
+    chapterNumber: 1,
+    candidates: 3,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_adoption_planning',
+    enforceDesktopQueueTransitions: true
+  });
+  await runChapterUntilDraft({
+    projectId: paths.projectId,
+    projectsRoot,
+    chapterNumber: 1,
+    provider: 'mock',
+    promptRoot,
+    fixturesRoot,
+    runId: 'run_adoption_initial_draft',
+    enforceDesktopQueueTransitions: true
+  });
+}
+
+async function expectActiveDownstreamArtifacts(expected: boolean): Promise<void> {
+  for (const artifactPath of [
+    paths.chapterArtifact(1, 'scene_cards.json'),
+    paths.chapterArtifact(1, 'scenes'),
+    paths.chapterArtifact(1, 'draft_v1.md')
+  ]) {
+    await expect(store.exists(artifactPath)).resolves.toBe(expected);
+  }
+}
+
+function isChapterDownstreamArtifact(artifactPath: string): boolean {
+  return artifactPath === 'chapters/chapter_001/scene_cards.json'
+    || artifactPath.startsWith('chapters/chapter_001/scenes/')
+    || artifactPath === 'chapters/chapter_001/draft_v1.md';
 }
 
 function candidateMarkdown() {

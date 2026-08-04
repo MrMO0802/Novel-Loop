@@ -6,11 +6,13 @@ import {
   archiveAuthorChapterArtifacts,
   createAuthorRevision,
   readAuthorRevision,
+  type ArchiveInvalidatedChapterArtifactsResult,
   type CreateAuthorRevisionResult
 } from '../app/chapterAuthorRevision.js';
 import { withProjectChapterOperationLease } from '../app/projectOperationLease.js';
 import {
   AuthorEditInvalidationReportSchema,
+  AuthorRevisionRecordSchema,
   ChapterDirectionSelectionSchema,
   ChapterMissionSchema,
   ChapterPlanRankingSchema,
@@ -107,6 +109,19 @@ interface ChapterAuthoringSnapshot {
   storyState: StoryState;
   candidates: Map<string, string>;
   reviewHash: string;
+  sceneDraftsDirectoryExisted: boolean;
+}
+
+interface RevisionRecordSnapshot {
+  path: string;
+  content: string;
+}
+
+interface AuthoringTransaction {
+  snapshot: ChapterAuthoringSnapshot;
+  archive: ArchiveInvalidatedChapterArtifactsResult | null;
+  revisionRecords: RevisionRecordSnapshot[];
+  createdProvenancePaths: string[];
 }
 
 export async function selectDesktopChapterDirection(
@@ -168,12 +183,6 @@ export async function selectDesktopChapterDirection(
       rationale: `作者选择：${selectedTitle}`
     });
     const queueAfter = queueAtRanking(snapshot.queue, input.chapterNumber, generatedAt);
-    const archive = await archiveWithRollback({
-      snapshot,
-      store,
-      archiveId: selectionId
-    });
-
     const selection = ChapterDirectionSelectionSchema.parse({
       schemaVersion: '1.0',
       selectionId,
@@ -189,26 +198,39 @@ export async function selectDesktopChapterDirection(
       invalidationReportPath: relativeReportPath,
       storyStateMutated: false
     });
-    const report = AuthorEditInvalidationReportSchema.parse({
-      schemaVersion: '1.0',
-      reportId: `edit_invalidation_ch${padChapter(input.chapterNumber)}_v${reportVersion}`,
-      projectId: snapshot.paths.projectId,
-      chapterNumber: input.chapterNumber,
-      revisionId: selectionId,
-      editedNode: 'ranking',
-      invalidatedNodes: [...DIRECTION_INVALIDATED_NODES],
-      retainedArtifacts: retainedCandidateReferences(snapshot),
-      archivedArtifacts: archive.archivedArtifacts,
-      missingArtifactPaths: archive.missingArtifactPaths,
-      queueBefore: queueSnapshot(snapshot.queueItem),
-      queueAfter: { status: 'planned_ready', stage: 'ranking' },
-      reason: `作者将章节方向从 ${snapshot.ranking.selectedCandidateId} 改为 ${input.candidateId}。`,
-      nextStep: '重新生成场景卡、场景草稿和章节草稿。',
-      generatedAt,
-      storyStateMutated: false
-    });
-
+    const transaction: AuthoringTransaction = {
+      snapshot,
+      archive: null,
+      revisionRecords: [],
+      createdProvenancePaths: [selectionPath, reportPath]
+    };
     try {
+      const archive = await archiveAuthorChapterArtifacts({
+        projectRoot,
+        chapterNumber: input.chapterNumber,
+        archiveId: selectionId,
+        nodes: [...ARCHIVE_NODES]
+      }, store);
+      transaction.archive = archive;
+      await removeInvalidatedDownstream(snapshot, store);
+      const report = AuthorEditInvalidationReportSchema.parse({
+        schemaVersion: '1.0',
+        reportId: `edit_invalidation_ch${padChapter(input.chapterNumber)}_v${reportVersion}`,
+        projectId: snapshot.paths.projectId,
+        chapterNumber: input.chapterNumber,
+        revisionId: selectionId,
+        editedNode: 'ranking',
+        invalidatedNodes: [...DIRECTION_INVALIDATED_NODES],
+        retainedArtifacts: retainedCandidateReferences(snapshot),
+        archivedArtifacts: archive.archivedArtifacts,
+        missingArtifactPaths: archive.missingArtifactPaths,
+        queueBefore: queueSnapshot(snapshot.queueItem),
+        queueAfter: { status: 'planned_ready', stage: 'ranking' },
+        reason: `作者将章节方向从 ${snapshot.ranking.selectedCandidateId} 改为 ${input.candidateId}。`,
+        nextStep: '重新生成场景卡、场景草稿和章节草稿。',
+        generatedAt,
+        storyStateMutated: false
+      });
       await store.writeJson(selectionPath, selection, ChapterDirectionSelectionSchema);
       await store.writeJson(reportPath, report, AuthorEditInvalidationReportSchema);
       await store.writeJson(
@@ -222,7 +244,7 @@ export async function selectDesktopChapterDirection(
       );
       await store.writeJson(snapshot.paths.chapterQueue(), queueAfter, ChapterQueueSchema);
     } catch (error) {
-      await restoreActiveArtifacts(snapshot, store, error);
+      await rollbackAuthoringTransaction(transaction, store, error);
       throw error;
     }
 
@@ -307,6 +329,13 @@ export async function adoptDesktopChapterPlanRevision(
       revisionId: input.revisionId,
       expectedSourceHash: input.expectedSourceHash
     }, store);
+    if (revision.record.state === 'adopted') {
+      throw new AppError(
+        'DESKTOP_CHAPTER_REVISION_ALREADY_ADOPTED',
+        `Author revision is already adopted: ${revision.record.revisionId}`,
+        2
+      );
+    }
     if (revision.record.artifactKind !== 'selected_plan') {
       throw new AppError(
         'DESKTOP_CHAPTER_REVISION_KIND_INVALID',
@@ -344,49 +373,97 @@ export async function adoptDesktopChapterPlanRevision(
       rationale: `作者采用计划修订：${selectedTitle}`
     });
     const queueAfter = queueAtRanking(snapshot.queue, input.chapterNumber, generatedAt);
-    const archive = await archiveWithRollback({
+    const directionChanged = sourceCandidateId !== snapshot.ranking.selectedCandidateId;
+    const selectionVersion = directionChanged
+      ? await nextArtifactVersion(
+          snapshot.paths,
+          store,
+          input.chapterNumber,
+          DIRECTION_SELECTION_PATTERN
+        )
+      : null;
+    const selectionPath = selectionVersion === null
+      ? null
+      : snapshot.paths.chapterArtifact(
+          input.chapterNumber,
+          'author_revisions',
+          `direction_selection_v${selectionVersion}.json`
+        );
+    const modelRecommendedCandidateId = directionChanged
+      ? await firstModelRecommendation(snapshot, store)
+      : snapshot.ranking.selectedCandidateId;
+    const selection = selectionVersion === null
+      ? null
+      : ChapterDirectionSelectionSchema.parse({
+          schemaVersion: '1.0',
+          selectionId: `direction_selection_ch${padChapter(input.chapterNumber)}_v${selectionVersion}`,
+          projectId: snapshot.paths.projectId,
+          chapterNumber: input.chapterNumber,
+          previousCandidateId: snapshot.ranking.selectedCandidateId,
+          selectedCandidateId: sourceCandidateId,
+          modelRecommendedCandidateId,
+          differsFromModelRecommendation: sourceCandidateId !== modelRecommendedCandidateId,
+          sourceReviewHash: snapshot.reviewHash,
+          selectedPlanHash: sha256(revision.content),
+          generatedAt,
+          invalidationReportPath: relativeReportPath,
+          storyStateMutated: false
+        });
+    const transaction: AuthoringTransaction = {
       snapshot,
-      store,
-      archiveId: revision.record.revisionId
-    });
-    const archivedActiveSource = revision.record.sourceArtifactPath
-      === selectedPlanRelativePath(input.chapterNumber)
-      ? archive.archivedArtifacts.find(
-          ({ sourcePath }) => sourcePath === selectedPlanRelativePath(input.chapterNumber)
-        )?.archivedPath
-      : undefined;
-    if (
-      revision.record.sourceArtifactPath === selectedPlanRelativePath(input.chapterNumber)
-      && archivedActiveSource === undefined
-    ) {
-      await restoreActiveArtifacts(snapshot, store, new Error('Active selected plan was not archived.'));
-      throw new AppError(
-        'DESKTOP_CHAPTER_ARCHIVE_INVALID',
-        'The active selected plan was not archived.',
-        2
-      );
-    }
-
-    const report = AuthorEditInvalidationReportSchema.parse({
-      schemaVersion: '1.0',
-      reportId: `edit_invalidation_ch${padChapter(input.chapterNumber)}_v${reportVersion}`,
-      projectId: snapshot.paths.projectId,
-      chapterNumber: input.chapterNumber,
-      revisionId: revision.record.revisionId,
-      editedNode: 'selected_plan',
-      invalidatedNodes: [...PLAN_INVALIDATED_NODES],
-      retainedArtifacts: retainedCandidateReferences(snapshot),
-      archivedArtifacts: archive.archivedArtifacts,
-      missingArtifactPaths: archive.missingArtifactPaths,
-      queueBefore: queueSnapshot(snapshot.queueItem),
-      queueAfter: { status: 'planned_ready', stage: 'ranking' },
-      reason: `作者采用计划修订 ${revision.record.revisionId}。`,
-      nextStep: '重新生成场景卡、场景草稿和章节草稿。',
-      generatedAt,
-      storyStateMutated: false
-    });
-
+      archive: null,
+      revisionRecords: await snapshotPlanRevisionRecords(snapshot, store),
+      createdProvenancePaths: [
+        reportPath,
+        ...(selectionPath === null ? [] : [selectionPath])
+      ]
+    };
     try {
+      const archive = await archiveAuthorChapterArtifacts({
+        projectRoot,
+        chapterNumber: input.chapterNumber,
+        archiveId: revision.record.revisionId,
+        nodes: [...ARCHIVE_NODES]
+      }, store);
+      transaction.archive = archive;
+      await removeInvalidatedDownstream(snapshot, store);
+      const archivedActiveSource = revision.record.sourceArtifactPath
+        === selectedPlanRelativePath(input.chapterNumber)
+        ? archive.archivedArtifacts.find(
+            ({ sourcePath }) => sourcePath === selectedPlanRelativePath(input.chapterNumber)
+          )?.archivedPath
+        : undefined;
+      if (
+        revision.record.sourceArtifactPath === selectedPlanRelativePath(input.chapterNumber)
+        && archivedActiveSource === undefined
+      ) {
+        throw new AppError(
+          'DESKTOP_CHAPTER_ARCHIVE_INVALID',
+          'The active selected plan was not archived.',
+          2
+        );
+      }
+      const report = AuthorEditInvalidationReportSchema.parse({
+        schemaVersion: '1.0',
+        reportId: `edit_invalidation_ch${padChapter(input.chapterNumber)}_v${reportVersion}`,
+        projectId: snapshot.paths.projectId,
+        chapterNumber: input.chapterNumber,
+        revisionId: revision.record.revisionId,
+        editedNode: 'selected_plan',
+        invalidatedNodes: [...PLAN_INVALIDATED_NODES],
+        retainedArtifacts: retainedCandidateReferences(snapshot),
+        archivedArtifacts: archive.archivedArtifacts,
+        missingArtifactPaths: archive.missingArtifactPaths,
+        queueBefore: queueSnapshot(snapshot.queueItem),
+        queueAfter: { status: 'planned_ready', stage: 'ranking' },
+        reason: `作者采用计划修订 ${revision.record.revisionId}。`,
+        nextStep: '重新生成场景卡、场景草稿和章节草稿。',
+        generatedAt,
+        storyStateMutated: false
+      });
+      if (selection !== null && selectionPath !== null) {
+        await store.writeJson(selectionPath, selection, ChapterDirectionSelectionSchema);
+      }
       await store.writeJson(reportPath, report, AuthorEditInvalidationReportSchema);
       await store.writeJson(
         snapshot.paths.chapterArtifact(input.chapterNumber, 'ranking.json'),
@@ -409,7 +486,7 @@ export async function adoptDesktopChapterPlanRevision(
           : { sourceArtifactPathOverride: archivedActiveSource })
       }, store);
     } catch (error) {
-      await restoreActiveArtifacts(snapshot, store, error);
+      await rollbackAuthoringTransaction(transaction, store, error);
       throw error;
     }
 
@@ -445,11 +522,12 @@ async function readChapterAuthoringSnapshot(
   const rankingPath = paths.chapterArtifact(chapterNumber, 'ranking.json');
   const selectedPlanPath = paths.chapterArtifact(chapterNumber, 'selected_plan.md');
   const queuePath = paths.chapterQueue();
-  const [missionText, rankingText, selectedPlanText, queueText] = await Promise.all([
+  const [missionText, rankingText, selectedPlanText, queueText, sceneDraftsDirectoryExisted] = await Promise.all([
     store.readText(missionPath),
     store.readText(rankingPath),
     store.readText(selectedPlanPath),
-    store.readText(queuePath)
+    store.readText(queuePath),
+    store.exists(paths.chapterArtifact(chapterNumber, 'scenes'))
   ]);
   const mission = parseJson(missionText, ChapterMissionSchema, 'chapter mission');
   const ranking = parseJson(rankingText, ChapterPlanRankingSchema, 'chapter ranking');
@@ -465,11 +543,6 @@ async function readChapterAuthoringSnapshot(
   if (queueItems.length !== 1) {
     throw new AppError('DESKTOP_CHAPTER_EDIT_INVALID', 'Chapter queue target is not unique.', 2);
   }
-  const expectedSelectedPlanPath = selectedPlanRelativePath(chapterNumber);
-  if (ranking.selectedPlanPath !== expectedSelectedPlanPath) {
-    throw new AppError('DESKTOP_CHAPTER_EDIT_INVALID', 'Selected plan path is not canonical.', 2);
-  }
-
   const candidateIds = ranking.candidates.map(({ candidateId }) => candidateId);
   if (
     new Set(candidateIds).size !== candidateIds.length
@@ -498,6 +571,15 @@ async function readChapterAuthoringSnapshot(
       await store.readText(paths.projectArtifact(expectedPath))
     );
   }
+  const rankedSelectedCandidate = ranking.candidates.find(
+    ({ candidateId }) => candidateId === ranking.selectedCandidateId
+  )!;
+  if (
+    ranking.selectedPlanPath !== selectedPlanRelativePath(chapterNumber)
+    && ranking.selectedPlanPath !== rankedSelectedCandidate.planPath
+  ) {
+    throw new AppError('DESKTOP_CHAPTER_EDIT_INVALID', 'Selected plan path is not canonical.', 2);
+  }
   const candidateHashes = [...candidates.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([candidateId, markdown]) => ({ candidateId, hash: sha256(markdown) }));
@@ -524,7 +606,8 @@ async function readChapterAuthoringSnapshot(
     storyStateText,
     storyState,
     candidates,
-    reviewHash
+    reviewHash,
+    sceneDraftsDirectoryExisted
   };
 }
 
@@ -552,31 +635,14 @@ function assertUncommitted(snapshot: ChapterAuthoringSnapshot): void {
   }
 }
 
-async function archiveWithRollback(input: {
-  snapshot: ChapterAuthoringSnapshot;
-  store: FileStore;
-  archiveId: string;
-}) {
-  try {
-    return await archiveAuthorChapterArtifacts({
-      projectRoot: input.snapshot.projectRoot,
-      chapterNumber: input.snapshot.ranking.chapterNumber,
-      archiveId: input.archiveId,
-      nodes: [...ARCHIVE_NODES]
-    }, input.store);
-  } catch (error) {
-    await restoreActiveArtifacts(input.snapshot, input.store, error);
-    throw error;
-  }
-}
-
-async function restoreActiveArtifacts(
-  snapshot: ChapterAuthoringSnapshot,
+async function rollbackAuthoringTransaction(
+  transaction: AuthoringTransaction,
   store: FileStore,
   originalError: unknown
 ): Promise<void> {
+  const snapshot = transaction.snapshot;
   const rollbackErrors: string[] = [];
-  for (const restore of [
+  const restoreSteps: Array<() => Promise<unknown>> = [
     () => store.writeText(
       snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'ranking.json'),
       snapshot.rankingText
@@ -586,7 +652,48 @@ async function restoreActiveArtifacts(
       snapshot.selectedPlanText
     ),
     () => store.writeText(snapshot.paths.chapterQueue(), snapshot.queueText)
-  ]) {
+  ];
+  if (transaction.archive !== null) {
+    for (const artifact of transaction.archive.archivedArtifacts) {
+      if (artifact.node === 'selected_plan') continue;
+      restoreSteps.push(async () => {
+        const content = await store.readText(snapshot.paths.projectArtifact(artifact.archivedPath));
+        if (
+          sha256(content) !== artifact.hash
+          || Buffer.byteLength(content, 'utf8') !== artifact.byteSize
+        ) {
+          throw new AppError(
+            'DESKTOP_CHAPTER_ARCHIVE_INVALID',
+            `Archived rollback source is invalid: ${artifact.archivedPath}`,
+            2
+          );
+        }
+        await store.writeText(snapshot.paths.projectArtifact(artifact.sourcePath), content);
+      });
+    }
+    if (snapshot.sceneDraftsDirectoryExisted) {
+      restoreSteps.push(() => store.ensureDir(
+        snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scenes')
+      ));
+    }
+  }
+  for (const record of transaction.revisionRecords) {
+    restoreSteps.push(() => store.writeText(record.path, record.content));
+  }
+  for (const provenancePath of transaction.createdProvenancePaths) {
+    restoreSteps.push(async () => {
+      if (await store.exists(provenancePath)) await store.removePath(provenancePath);
+    });
+  }
+  if (transaction.archive !== null) {
+    restoreSteps.push(async () => {
+      const archiveDir = snapshot.paths.projectArtifact(transaction.archive!.relativeArchiveDir);
+      if (await store.exists(archiveDir)) {
+        await store.removePath(archiveDir, { recursive: true });
+      }
+    });
+  }
+  for (const restore of restoreSteps) {
     try {
       await restore();
     } catch (error) {
@@ -600,6 +707,52 @@ async function restoreActiveArtifacts(
       2
     );
   }
+}
+
+async function removeInvalidatedDownstream(
+  snapshot: ChapterAuthoringSnapshot,
+  store: FileStore
+): Promise<void> {
+  for (const artifact of [
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scene_cards.json'), recursive: false },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scenes'), recursive: true },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'draft_v1.md'), recursive: false }
+  ]) {
+    if (await store.exists(artifact.path)) {
+      await store.removePath(artifact.path, { recursive: artifact.recursive });
+    }
+  }
+}
+
+async function snapshotPlanRevisionRecords(
+  snapshot: ChapterAuthoringSnapshot,
+  store: FileStore
+): Promise<RevisionRecordSnapshot[]> {
+  const revisionDir = snapshot.paths.chapterArtifact(
+    snapshot.ranking.chapterNumber,
+    'author_revisions'
+  );
+  if (!(await store.exists(revisionDir))) return [];
+  const records: RevisionRecordSnapshot[] = [];
+  for (const fileName of await store.list(revisionDir)) {
+    if (!/^plan_revision_v[1-9]\d*\.json$/u.test(fileName)) continue;
+    const recordPath = path.join(revisionDir, fileName);
+    const content = await store.readText(recordPath);
+    const record = AuthorRevisionRecordSchema.parse(JSON.parse(content) as unknown);
+    if (
+      record.projectId !== snapshot.paths.projectId
+      || record.chapterNumber !== snapshot.ranking.chapterNumber
+      || record.artifactKind !== 'selected_plan'
+    ) {
+      throw new AppError(
+        'DESKTOP_CHAPTER_EDIT_INVALID',
+        `Plan revision metadata has invalid scope: ${fileName}`,
+        2
+      );
+    }
+    records.push({ path: recordPath, content });
+  }
+  return records;
 }
 
 async function firstModelRecommendation(

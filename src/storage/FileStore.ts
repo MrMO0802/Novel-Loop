@@ -1,4 +1,4 @@
-import { access, readdir, readFile } from 'node:fs/promises';
+import { access, readdir, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import type { z } from 'zod';
 
@@ -58,6 +58,19 @@ export class FileStore {
     await beforeProjectOperationWrite(resolvedPath);
     await this.writer.ensureDir(resolvedPath);
     await this.assertSafePath(resolvedPath);
+  }
+
+  async removePath(
+    filePath: string,
+    options: { recursive?: boolean } = {}
+  ): Promise<void> {
+    const resolvedPath = path.resolve(filePath);
+    await this.assertSafePath(resolvedPath);
+    await beforeProjectOperationWrite(resolvedPath);
+    await rm(resolvedPath, {
+      recursive: options.recursive ?? false,
+      force: false
+    });
   }
 
   async readJson<T>(filePath: string, schema: z.ZodType<T>): Promise<T> {

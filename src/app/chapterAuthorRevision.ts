@@ -340,18 +340,30 @@ export async function archiveAuthorChapterArtifacts(
     const archivedArtifacts: AuthorArchivedArtifactReference[] = [];
     const missingArtifactPaths: string[] = [];
 
+    if (await store.exists(archiveDir)) {
+      throw new AppError(
+        'AUTHOR_REVISION_ARCHIVE_EXISTS',
+        `Author archive already exists: ${input.archiveId}`,
+        2
+      );
+    }
     await store.ensureDir(archiveDir);
-    for (const node of input.nodes) {
-      await archiveOptionalPath({
-        projectRoot,
-        store,
-        chapterDir,
-        archiveDir,
-        sourcePath: path.join(chapterDir, archivePathForNode(node)),
-        node,
-        archivedArtifacts,
-        missingArtifactPaths
-      });
+    try {
+      for (const node of input.nodes) {
+        await archiveOptionalPath({
+          projectRoot,
+          store,
+          chapterDir,
+          archiveDir,
+          sourcePath: path.join(chapterDir, archivePathForNode(node)),
+          node,
+          archivedArtifacts,
+          missingArtifactPaths
+        });
+      }
+    } catch (error) {
+      await store.removePath(archiveDir, { recursive: true }).catch(() => undefined);
+      throw error;
     }
     return {
       relativeArchiveDir: toProjectRelativePath(projectRoot, archiveDir),
@@ -548,7 +560,22 @@ async function archiveOptionalPath(input: {
   const relativeToChapter = path.relative(input.chapterDir, input.sourcePath);
   const archivedPath = path.join(input.archiveDir, relativeToChapter);
   await input.store.ensureDir(path.dirname(archivedPath));
+  if (await input.store.exists(archivedPath)) {
+    throw new AppError(
+      'AUTHOR_REVISION_ARCHIVE_EXISTS',
+      `Archived artifact already exists: ${toProjectRelativePath(input.projectRoot, archivedPath)}`,
+      2
+    );
+  }
   await input.store.writeText(archivedPath, content);
+  const archivedContent = await input.store.readText(archivedPath);
+  if (archivedContent !== content) {
+    throw new AppError(
+      'AUTHOR_REVISION_ARCHIVE_VERIFY_FAILED',
+      `Archived artifact verification failed: ${toProjectRelativePath(input.projectRoot, archivedPath)}`,
+      2
+    );
+  }
   input.archivedArtifacts.push({
     node: input.node,
     sourcePath: toProjectRelativePath(input.projectRoot, input.sourcePath),

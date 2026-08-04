@@ -19,13 +19,7 @@ type Objective = MissionDraft['requiredObjectives'][number];
 type CharacterDelta = MissionDraft['characterDeltas'][number];
 type NewParticipant = MissionDraft['newParticipants'][number];
 type ReaderInformation = MissionDraft['readerInformation'];
-
-interface PromiseRow {
-  importance: number;
-  itemToken: string | null;
-  promise: string;
-  type: MissionDraft['debtsToIntroduce'][number]['type'];
-}
+type IntroducedDebt = MissionDraft['debtsToIntroduce'][number];
 
 interface ParticipantRow {
   name: string;
@@ -53,8 +47,10 @@ export function ChapterMissionEditor({
 }: ChapterMissionEditorProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
   const compareTriggerRef = useRef<HTMLButtonElement>(null);
+  const directAdoptTriggerRef = useRef<HTMLButtonElement>(null);
   const editGeneration = useRef(0);
   const restoreCompareFocus = useRef(false);
+  const restoreDirectAdoptFocus = useRef(false);
   const initialDraft = useMemo(() => createInitialDraft(mission), [mission]);
   const [chapterFunction, setChapterFunction] = useState(
     initialDraft.chapterFunction
@@ -62,8 +58,8 @@ export function ChapterMissionEditor({
   const [objectives, setObjectives] = useState<Objective[]>(
     initialDraft.requiredObjectives
   );
-  const [promises, setPromises] = useState<PromiseRow[]>(
-    createPromiseRows(mission)
+  const [introducedDebts, setIntroducedDebts] = useState<IntroducedDebt[]>(
+    mission.introducedDebts.map((debt) => ({ ...debt }))
   );
   const [characterDeltas, setCharacterDeltas] = useState<CharacterDelta[]>(
     initialDraft.characterDeltas
@@ -102,9 +98,14 @@ export function ChapterMissionEditor({
   }, []);
 
   useEffect(() => {
-    if (!compareMode && restoreCompareFocus.current) {
-      restoreCompareFocus.current = false;
-      compareTriggerRef.current?.focus();
+    if (!compareMode) {
+      if (restoreDirectAdoptFocus.current) {
+        restoreDirectAdoptFocus.current = false;
+        directAdoptTriggerRef.current?.focus();
+      } else if (restoreCompareFocus.current) {
+        restoreCompareFocus.current = false;
+        compareTriggerRef.current?.focus();
+      }
     }
   }, [compareMode]);
 
@@ -147,13 +148,9 @@ export function ChapterMissionEditor({
       requiredObjectives: objectives
         .filter(({ text }) => text.trim() !== '')
         .map((objective) => ({ ...objective, text: objective.text.trim() })),
-      debtTokens: promises
-        .filter(({ itemToken }) => itemToken !== null)
-        .map(({ itemToken }) => itemToken!),
-      debtsToIntroduce: promises
-        .filter(({ itemToken, promise }) => (
-          itemToken === null && promise.trim() !== ''
-        ))
+      debtTokens: mission.debtItems.map(({ itemToken }) => itemToken),
+      debtsToIntroduce: introducedDebts
+        .filter(({ promise }) => promise.trim() !== '')
         .map(({ type, promise, importance }) => ({
           type,
           promise: promise.trim(),
@@ -187,9 +184,7 @@ export function ChapterMissionEditor({
     const saveGeneration = editGeneration.current;
     const summary = missionDraftSummary({
       draft,
-      newParticipants,
-      participants,
-      promises
+      mission
     });
     setSaving(true);
     setLocalError(null);
@@ -239,27 +234,13 @@ export function ChapterMissionEditor({
     }
   };
 
-  if (compareMode && savedDraft && savedSummary) {
-    return (
-      <ChapterRevisionCompare
-        artifactKind="mission"
-        candidate={savedSummary}
-        onAdopt={adopt}
-        onBack={() => {
-          restoreCompareFocus.current = true;
-          setCompareMode(null);
-        }}
-        source={missionReviewSummary(mission)}
-        startConfirming={compareMode === 'confirm'}
-      />
-    );
-  }
-
   return (
-    <section
-      aria-labelledby="chapter-mission-editor-title"
-      className="nl-chapter-editor"
-    >
+    <>
+      <section
+        aria-labelledby="chapter-mission-editor-title"
+        className="nl-chapter-editor"
+        hidden={compareMode !== null}
+      >
       <div className="nl-editor-heading">
         <div>
           <p className="nl-section-label">{t('chapter.mission.label')}</p>
@@ -326,34 +307,13 @@ export function ChapterMissionEditor({
           rows={objectives.map(({ text }) => text)}
         />
 
-        <TextRows
-          addLabel={t('chapter.mission.addPromise')}
-          label={t('chapter.review.narrativePromises')}
-          onChange={(rows, changedIndex, action) => {
+        <NarrativeDebtRows
+          boundDebts={mission.debtItems}
+          introducedDebts={introducedDebts}
+          onChange={(rows) => {
             markDirty();
-            if (action === 'remove' && changedIndex !== undefined) {
-              setPromises((current) => current.filter((_, index) => (
-                index !== changedIndex
-              )));
-            } else if (action === 'add') {
-              setPromises((current) => [...current, {
-                importance: 5,
-                itemToken: null,
-                promise: '',
-                type: 'promise'
-              }]);
-            } else if (changedIndex !== undefined) {
-              setPromises((current) => current.map((promise, index) => (
-                index === changedIndex
-                  ? {
-                      ...promise,
-                      promise: rows[index] ?? ''
-                    }
-                  : promise
-              )));
-            }
+            setIntroducedDebts(rows);
           }}
-          rows={promises.map(({ promise }) => promise)}
         />
 
         <CharacterDeltaRows
@@ -522,6 +482,7 @@ export function ChapterMissionEditor({
           className="nl-secondary-action"
           disabled={!revisionToken}
           onClick={() => setCompareMode('confirm')}
+          ref={directAdoptTriggerRef}
           type="button"
         >
           <CheckCircle aria-hidden size={18} />
@@ -537,7 +498,33 @@ export function ChapterMissionEditor({
           {saving ? t('chapter.editor.saving') : t('chapter.editor.save')}
         </button>
       </div>
-    </section>
+      </section>
+      {compareMode && savedDraft && savedSummary && (
+        <ChapterRevisionCompare
+          artifactKind="mission"
+          candidate={savedSummary}
+          onAdopt={adopt}
+          onBack={() => {
+            if (compareMode === 'confirm') {
+              restoreDirectAdoptFocus.current = true;
+            } else {
+              restoreCompareFocus.current = true;
+            }
+            setCompareMode(null);
+          }}
+          {...(compareMode === 'confirm'
+            ? {
+                onCancelConfirmation: () => {
+                  restoreDirectAdoptFocus.current = true;
+                  setCompareMode(null);
+                }
+              }
+            : {})}
+          source={missionReviewSummary(mission)}
+          startConfirming={compareMode === 'confirm'}
+        />
+      )}
+    </>
   );
 }
 
@@ -597,6 +584,79 @@ function TextRows({
       >
         <Plus aria-hidden size={18} />
         {addLabel}
+      </button>
+    </fieldset>
+  );
+}
+
+function NarrativeDebtRows({
+  boundDebts,
+  introducedDebts,
+  onChange
+}: {
+  boundDebts: Mission['debtItems'];
+  introducedDebts: IntroducedDebt[];
+  onChange: (rows: IntroducedDebt[]) => void;
+}) {
+  return (
+    <fieldset className="nl-repeatable-field">
+      <legend>{t('chapter.review.narrativePromises')}</legend>
+      {boundDebts.length > 0 && (
+        <>
+          <p className="nl-canonical-debt-note">
+            {t('chapter.mission.boundPromisesNote')}
+          </p>
+          <section
+            aria-label={t('chapter.mission.boundPromises')}
+            className="nl-canonical-debt-list"
+          >
+            <h3>{t('chapter.mission.boundPromises')}</h3>
+            <ul>
+              {boundDebts.map(({ itemToken, promise }) => (
+                <li key={itemToken}>{promise}</li>
+              ))}
+            </ul>
+          </section>
+        </>
+      )}
+      <div className="nl-repeatable-list">
+        {introducedDebts.map((debt, index) => (
+          <div className="nl-repeatable-row" key={`introduced-debt-${index}`}>
+            <textarea
+              aria-label={`${t('chapter.mission.newPromise')} ${index + 1}`}
+              onChange={(event) => onChange(introducedDebts.map((row, rowIndex) => (
+                rowIndex === index
+                  ? { ...row, promise: event.currentTarget.value }
+                  : row
+              )))}
+              rows={2}
+              value={debt.promise}
+            />
+            <button
+              aria-label={`移除${t('chapter.mission.newPromise')} ${index + 1}`}
+              className="nl-icon-action"
+              onClick={() => onChange(introducedDebts.filter((_, rowIndex) => (
+                rowIndex !== index
+              )))}
+              title={`移除${t('chapter.mission.newPromise')} ${index + 1}`}
+              type="button"
+            >
+              <Trash aria-hidden size={18} />
+            </button>
+          </div>
+        ))}
+      </div>
+      <button
+        className="nl-secondary-action"
+        onClick={() => onChange([...introducedDebts, {
+          importance: 5,
+          promise: '',
+          type: 'promise'
+        }])}
+        type="button"
+      >
+        <Plus aria-hidden size={18} />
+        {t('chapter.mission.addPromise')}
       </button>
     </fieldset>
   );
@@ -749,21 +809,6 @@ function createInitialDraft(mission: Mission): MissionDraft {
   };
 }
 
-function createPromiseRows(mission: Mission): PromiseRow[] {
-  return [
-    ...mission.debtItems.map((debt) => ({
-      importance: 5,
-      itemToken: debt.itemToken,
-      promise: debt.promise,
-      type: 'promise' as const
-    })),
-    ...mission.introducedDebts.map((debt) => ({
-      ...debt,
-      itemToken: null
-    }))
-  ];
-}
-
 function mapReaderInformation(reader: ReaderInformation): ReaderInformation {
   return {
     newKnowledge: cleanTextRows(reader.newKnowledge),
@@ -800,32 +845,40 @@ function missionReviewSummary(mission: Mission): string {
 
 function missionDraftSummary({
   draft,
-  newParticipants,
-  participants,
-  promises
+  mission
 }: {
   draft: MissionDraft;
-  newParticipants: NewParticipant[];
-  participants: ParticipantRow[];
-  promises: PromiseRow[];
+  mission: Mission;
 }): string {
+  const debtByToken = new Map(mission.debtItems.map(({ itemToken, promise }) => (
+    [itemToken, promise]
+  )));
+  const participantByToken = new Map(mission.participantOptions.map(({
+    participantToken,
+    name,
+    role
+  }) => [participantToken, `${name}（${role}）`]));
   const selectedParticipantTokens = new Set(draft.participantTokens);
   const participantLabels = [
-    ...participants
-      .filter(({ participantToken }) => selectedParticipantTokens.has(
-        participantToken
-      ))
-      .map(({ name, role }) => `${name}（${role}）`),
-    ...newParticipants
-      .filter(({ name, role }) => name.trim() !== '' && role.trim() !== '')
-      .map(({ name, role }) => `${name.trim()}（${role.trim()}）`)
+    ...mission.participantOptions
+      .filter(({ participantToken }) => selectedParticipantTokens.has(participantToken))
+      .flatMap(({ participantToken }) => {
+        const label = participantByToken.get(participantToken);
+        return label ? [label] : [];
+      }),
+    ...draft.newParticipants.map(({ name, role }) => `${name}（${role}）`)
+  ];
+  const narrativePromises = [
+    ...draft.debtTokens.flatMap((itemToken) => {
+      const promise = debtByToken.get(itemToken);
+      return promise ? [promise] : [];
+    }),
+    ...draft.debtsToIntroduce.map(({ promise }) => promise)
   ];
   const sections = [
     ['本章目的', [draft.chapterFunction]],
     ['必须完成', draft.requiredObjectives.map(({ text }) => text)],
-    ['推进的悬念与承诺', promises
-      .map(({ promise }) => promise.trim())
-      .filter(Boolean)],
+    ['推进的悬念与承诺', narrativePromises],
     ['人物变化', draft.characterDeltas.map(({ from, to, evidenceRequired }) => (
       `${from} → ${to}；${evidenceRequired}`
     ))],

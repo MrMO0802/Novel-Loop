@@ -11,6 +11,7 @@ interface ChapterRevisionCompareProps {
   fallbackTitle?: string;
   onAdopt: () => Promise<boolean>;
   onBack: () => void;
+  onCancelConfirmation?: () => void;
   source: string;
   startConfirming?: boolean;
 }
@@ -21,6 +22,7 @@ export function ChapterRevisionCompare({
   fallbackTitle,
   onAdopt,
   onBack,
+  onCancelConfirmation,
   source,
   startConfirming = false
 }: ChapterRevisionCompareProps) {
@@ -29,6 +31,18 @@ export function ChapterRevisionCompare({
   const adoptTriggerRef = useRef<HTMLButtonElement>(null);
   const [confirming, setConfirming] = useState(startConfirming);
   const [adopting, setAdopting] = useState(false);
+  const sourceLabel = t(artifactKind === 'mission'
+    ? 'chapter.revision.missionSource'
+    : 'chapter.revision.planSource');
+  const candidateLabel = t(artifactKind === 'mission'
+    ? 'chapter.revision.missionCandidate'
+    : 'chapter.revision.planCandidate');
+  const confirmTitle = t(artifactKind === 'mission'
+    ? 'chapter.revision.missionConfirmTitle'
+    : 'chapter.revision.planConfirmTitle');
+  const confirmNote = t(artifactKind === 'mission'
+    ? 'chapter.revision.missionConfirmNote'
+    : 'chapter.revision.planConfirmNote');
 
   useEffect(() => {
     if (confirming) confirmationHeadingRef.current?.focus();
@@ -36,6 +50,10 @@ export function ChapterRevisionCompare({
   }, [confirming]);
 
   const cancelConfirmation = () => {
+    if (onCancelConfirmation) {
+      onCancelConfirmation();
+      return;
+    }
     setConfirming(false);
     window.setTimeout(() => adoptTriggerRef.current?.focus(), 0);
   };
@@ -73,15 +91,15 @@ export function ChapterRevisionCompare({
         </button>
       </div>
       <div className="nl-revision-compare__columns">
-        <section aria-label={t('chapter.revision.source')}>
-          <h3>{t('chapter.revision.source')}</h3>
+        <section aria-label={sourceLabel}>
+          <h3>{sourceLabel}</h3>
           <SafeChapterMarkdown
             {...(fallbackTitle === undefined ? {} : { fallbackTitle })}
             markdown={source}
           />
         </section>
-        <section aria-label={t('chapter.revision.candidate')}>
-          <h3>{t('chapter.revision.candidate')}</h3>
+        <section aria-label={candidateLabel}>
+          <h3>{candidateLabel}</h3>
           <SafeChapterMarkdown
             {...(fallbackTitle === undefined ? {} : { fallbackTitle })}
             markdown={candidate}
@@ -112,9 +130,9 @@ export function ChapterRevisionCompare({
               ref={confirmationHeadingRef}
               tabIndex={-1}
             >
-              {t('chapter.revision.confirmTitle')}
+              {confirmTitle}
             </h3>
-            <p>{t('chapter.invalidation.note')}</p>
+            <p>{confirmNote}</p>
             <p className="nl-invalidation-list">
               {artifactKind === 'mission'
                 ? t('chapter.invalidation.missionNodes')
@@ -138,7 +156,7 @@ export function ChapterRevisionCompare({
             >
               {adopting
                 ? t('chapter.revision.adopting')
-                : t('chapter.revision.confirm')}
+                : confirmTitle}
             </button>
           </div>
         </div>

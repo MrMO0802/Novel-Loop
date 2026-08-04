@@ -135,6 +135,12 @@ export function ChapterDirectionChooser({
         {directions.map((direction, index) => {
           const title = authorDirectionTitle(direction.title, index);
           const titleId = `chapter-direction-title-${index}`;
+          const recommendationId = `chapter-direction-recommendation-${index}`;
+          const activeId = `chapter-direction-active-${index}`;
+          const descriptionIds = [
+            direction.aiRecommended ? recommendationId : null,
+            direction.active ? activeId : null
+          ].filter((id): id is string => id !== null);
           return (
             <article
               className={`nl-direction-option${direction.active
@@ -144,6 +150,9 @@ export function ChapterDirectionChooser({
             >
               <div
                 aria-checked={direction.active}
+                aria-describedby={descriptionIds.length > 0
+                  ? descriptionIds.join(' ')
+                  : undefined}
                 aria-labelledby={titleId}
                 className="nl-direction-option__radio"
                 onClick={(event) => requestSelection(
@@ -171,13 +180,16 @@ export function ChapterDirectionChooser({
                   </div>
                   <div className="nl-direction-option__badges">
                     {direction.aiRecommended && (
-                      <span className="nl-direction-badge">
+                      <span className="nl-direction-badge" id={recommendationId}>
                         <Sparkle aria-hidden size={15} weight="fill" />
                         {t('chapter.direction.aiRecommended')}
                       </span>
                     )}
                     {direction.active && (
-                      <span className="nl-direction-badge nl-direction-badge--active">
+                      <span
+                        className="nl-direction-badge nl-direction-badge--active"
+                        id={activeId}
+                      >
                         <CheckCircle aria-hidden size={15} weight="fill" />
                         {t('chapter.direction.active')}
                       </span>

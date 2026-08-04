@@ -229,6 +229,17 @@ describe('chapter plan review', () => {
     );
   });
 
+  test('includes the AI recommendation in the radio description', async () => {
+    installApi();
+    render(<App />);
+    await openReview();
+
+    expect(screen.getByRole('radio', {
+      description: /AI 推荐/u,
+      name: '遗物中的异常报告'
+    })).toBeVisible();
+  });
+
   test('sanitizes an untitled direction in the chooser, editor, and preview', async () => {
     const api = installApi();
     api.chapter.readPlan.mockResolvedValue({
@@ -468,7 +479,9 @@ describe('chapter plan review', () => {
     fireEvent.click(screen.getByRole('button', {
       name: '确认设为本章方向'
     }));
-    fireEvent.click(screen.getByRole('button', { name: '确认采用此版' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认采用修订后的方向'
+    }));
 
     await act(async () => selection.resolve({ outcome: 'adopted' }));
     await waitFor(() => expect(api.chapter.readPlan).toHaveBeenCalledTimes(2));
@@ -576,7 +589,7 @@ describe('chapter plan review', () => {
     expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
   });
 
-  test('retains debt and participant tokens through mission comparison and adoption', async () => {
+  test('keeps bound debts canonical and compares exactly submitted debt values', async () => {
     const api = installApi();
     api.chapter.readPlan
       .mockResolvedValueOnce(completeChapterPlan)
@@ -585,10 +598,22 @@ describe('chapter plan review', () => {
     await openReview();
 
     fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
-    fireEvent.change(screen.getByRole('textbox', {
+    const canonicalDebt = '推进“谁在删除异常报告”的悬念';
+    expect(screen.getByRole('region', {
+      name: '已有悬念与承诺'
+    })).toHaveTextContent(canonicalDebt);
+    expect(screen.getByText(
+      '已有悬念与承诺来自当前故事状态，保存时会按原文保留。你可以在下方新增本章要引入的内容。'
+    )).toBeVisible();
+    expect(screen.queryByRole('textbox', {
       name: '推进的悬念与承诺 1'
+    })).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '添加悬念与承诺' }));
+    fireEvent.change(screen.getByRole('textbox', {
+      name: '新增悬念与承诺 1'
     }), {
-      target: { value: '推进“谁在改写异常报告”的悬念' }
+      target: { value: '建立林夕留下第二份报告的新悬念' }
     });
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
 
@@ -596,7 +621,11 @@ describe('chapter plan review', () => {
       .toHaveBeenCalledWith(expect.objectContaining({
         mission: expect.objectContaining({
           debtTokens: [availablePlan.mission.debtItems[0]!.itemToken],
-          debtsToIntroduce: [],
+          debtsToIntroduce: [{
+            importance: 5,
+            promise: '建立林夕留下第二份报告的新悬念',
+            type: 'promise'
+          }],
           characterDeltas: [{
             participantToken: availablePlan.mission.characterDeltaItems[0]!
               .participantToken,
@@ -609,19 +638,58 @@ describe('chapter plan review', () => {
     expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
 
     fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
-    expect(screen.getByRole('region', { name: '修改后' })).toHaveTextContent(
-      '推进“谁在改写异常报告”的悬念'
+    const comparison = screen.getByRole('region', { name: '对比修改' });
+    expect(within(comparison).getByRole('region', {
+      name: '本章任务'
+    })).toBeVisible();
+    const candidate = within(comparison).getByRole('region', {
+      name: '修订后的任务'
+    });
+    expect(candidate).toHaveTextContent(canonicalDebt);
+    expect(candidate).toHaveTextContent('建立林夕留下第二份报告的新悬念');
+    expect(candidate).not.toHaveTextContent(
+      '建立林夕可能仍在下一轮循环中的故事承诺'
     );
     fireEvent.click(screen.getByRole('button', { name: '采用此版' }));
+    expect(screen.getByRole('heading', {
+      name: '确认采用修订后的任务'
+    })).toHaveFocus();
+    expect(screen.getByText(
+      '采用后，方案候选、方向排序、选定方案、场景规划、场景草稿和章节初稿将按照修订后的任务重新构建。'
+    )).toBeVisible();
     expect(screen.getByText(
       '方案候选、方向排序、选定方案、场景规划、场景草稿、章节初稿'
     )).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '确认采用此版' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认采用修订后的任务'
+    }));
     await waitFor(() => expect(api.chapter.adoptRevision).toHaveBeenCalledWith({
       projectKey,
       revisionToken: `chapter_revision_${'8'.repeat(48)}`,
       confirmInvalidation: true
     }));
+  });
+
+  test('restores direct mission adoption cancel to the original editor trigger', async () => {
+    const api = installApi();
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await screen.findByText('已保存，等待采用');
+    const trigger = screen.getByRole('button', { name: '采用此版' });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    expect(screen.getByRole('heading', {
+      name: '确认采用修订后的任务'
+    })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+
+    await waitFor(() => expect(trigger).toHaveFocus());
+    expect(trigger).toBeInTheDocument();
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
   });
 
   test('rejects a partially blank character change with a field error', async () => {
@@ -743,10 +811,10 @@ describe('chapter plan review', () => {
     fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
 
     expect(screen.getByRole('heading', { name: '对比修改' })).toHaveFocus();
-    expect(screen.getByRole('region', { name: '原方向' })).toHaveTextContent(
+    expect(screen.getByRole('region', { name: '当前方向' })).toHaveTextContent(
       '林默先追查三日前重复发生的交通事故。'
     );
-    expect(screen.getByRole('region', { name: '修改后' })).toHaveTextContent(
+    expect(screen.getByRole('region', { name: '修订后的方向' })).toHaveTextContent(
       '林默提前到达事故现场。'
     );
     fireEvent.click(screen.getByRole('button', { name: '返回编辑' }));
@@ -754,9 +822,16 @@ describe('chapter plan review', () => {
     fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
     fireEvent.click(screen.getByRole('button', { name: '采用此版' }));
     expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
-    expect(screen.getByRole('heading', { name: '确认采用此版' })).toHaveFocus();
+    expect(screen.getByRole('heading', {
+      name: '确认采用修订后的方向'
+    })).toHaveFocus();
+    expect(screen.getByText(
+      '采用后，后续场景规划、场景草稿和章节初稿将按照修订后的方向重新准备。'
+    )).toBeVisible();
     expect(screen.getByText('场景规划、场景草稿、章节初稿')).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: '确认采用此版' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认采用修订后的方向'
+    }));
 
     await waitFor(() => expect(api.chapter.adoptRevision).toHaveBeenCalledWith({
       projectKey,
@@ -783,6 +858,10 @@ describe('chapter plan review', () => {
     [
       { outcome: 'invalid', messageKey: 'invalid_output' },
       'AI 返回的内容暂时无法使用，请调整意见后重试。'
+    ],
+    [
+      { outcome: 'invalid', messageKey: 'project_unavailable' },
+      '当前项目暂时无法读取，请返回作品库后重新打开。'
     ]
   ] satisfies Array<[ChapterAuthoringResult, string]>) (
     'maps authoring response %j to safe Chinese copy',
@@ -804,7 +883,9 @@ describe('chapter plan review', () => {
 
       expect(await screen.findByRole('alert')).toHaveTextContent(message);
       expect(editor).toHaveValue('# 保留草稿\n\n作者修改仍在这里。');
-      expect(document.body).not.toHaveTextContent(/stale_edit|generation_busy|invalid_output/i);
+      expect(document.body).not.toHaveTextContent(
+        /stale_edit|generation_busy|invalid_output|project_unavailable/i
+      );
     }
   );
 

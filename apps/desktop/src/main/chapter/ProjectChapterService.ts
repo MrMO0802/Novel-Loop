@@ -416,7 +416,7 @@ export class ProjectChapterService implements ChapterApplicationService {
             expectedSourceHash: pending.sourceHash
           });
         } catch (error) {
-          if (errorCode(error) === 'AUTHOR_REVISION_ROLLBACK_FAILED') {
+          if (isAuthorRevisionRecoveryErrorCode(errorCode(error))) {
             this.retireDraftAdoption(parsed.revisionToken);
           }
           throw error;
@@ -2044,10 +2044,16 @@ function mapDraftBoundaryError(error: unknown): Error & { code: string } {
   if (code === 'DRAFT_ADOPTION_UNAVAILABLE') {
     return draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
   }
-  if (code === 'AUTHOR_REVISION_ROLLBACK_FAILED') {
+  if (isAuthorRevisionRecoveryErrorCode(code)) {
     return draftBoundaryError('DRAFT_ADOPTION_RECOVERY_REQUIRED');
   }
   return draftBoundaryError('DRAFT_WORKING_COPY_UNAVAILABLE');
+}
+
+function isAuthorRevisionRecoveryErrorCode(code: string): boolean {
+  return code === 'AUTHOR_REVISION_ROLLBACK_FAILED'
+    || code === 'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN'
+    || code === 'AUTHOR_REVISION_RECOVERY_FAILED';
 }
 
 function sha256(value: string): string {

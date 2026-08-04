@@ -585,7 +585,13 @@ describe('ProjectChapterService', () => {
     }
   });
 
-  test('classifies an uncompensated adoption failure without exposing filesystem details', async () => {
+  test.each([
+    'AUTHOR_REVISION_ROLLBACK_FAILED',
+    'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN',
+    'AUTHOR_REVISION_RECOVERY_FAILED'
+  ])('classifies %s as recovery-required without exposing filesystem details', async (
+    adoptionErrorCode
+  ) => {
     const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-recovery-'));
     try {
       const workingCopies = new DraftWorkingCopyStore(userDataRoot);
@@ -597,7 +603,7 @@ describe('ProjectChapterService', () => {
       });
       gateway.draftAdoptionError = Object.assign(
         new Error(`/private/userData/working-copies/${projectKey}/draft.json`),
-        { code: 'AUTHOR_REVISION_ROLLBACK_FAILED' }
+        { code: adoptionErrorCode }
       );
 
       const failure = await service.adoptDraftRevision({

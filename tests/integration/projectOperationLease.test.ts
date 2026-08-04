@@ -1,9 +1,11 @@
 import { createHash } from 'node:crypto';
 import { spawn, type ChildProcess } from 'node:child_process';
 import {
+  mkdir,
   mkdtemp,
   readFile,
   rm,
+  utimes,
   writeFile
 } from 'node:fs/promises';
 import os from 'node:os';
@@ -15,6 +17,10 @@ import { commitChapterState } from '../../src/app/chapterCommit.js';
 import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
+import {
+  acquireProjectOperationLease,
+  PROJECT_OPERATION_LOCK_NAME
+} from '../../src/app/projectOperationLease.js';
 import {
   ChapterQueueSchema,
   StoryStateSchema
@@ -195,6 +201,44 @@ describe('project operation lease', () => {
     await expect(store.exists(paths.chapterArtifact(1, 'canon_patch.json'))).resolves.toBe(false);
     await expect(store.exists(paths.chapterArtifact(1, 'commit_report.json'))).resolves.toBe(false);
   }, 30_000);
+
+  test.skipIf(process.platform !== 'linux')(
+    'publishes a complete owner identity and rejects PID reuse as a live owner',
+    async () => {
+      const first = await acquireProjectOperationLease(paths.projectRoot);
+      const lockPath = path.join(paths.projectRoot, PROJECT_OPERATION_LOCK_NAME);
+      const owner = JSON.parse(await readFile(path.join(lockPath, 'owner.json'), 'utf8')) as {
+        processStartIdentity?: unknown;
+      };
+      expect(owner.processStartIdentity).toMatch(/^linux-proc-start:\d+$/u);
+      await first.release();
+
+      await mkdir(lockPath);
+      await writeFile(path.join(lockPath, 'owner.json'), `${JSON.stringify({
+        token: '11111111-1111-4111-8111-111111111111',
+        pid: process.pid,
+        processStartIdentity: 'linux-proc-start:0',
+        acquiredAt: new Date().toISOString()
+      })}\n`, 'utf8');
+
+      const replacement = await acquireProjectOperationLease(paths.projectRoot);
+      await expect(acquireProjectOperationLease(paths.projectRoot))
+        .rejects.toMatchObject({ code: 'PROJECT_OPERATION_LOCKED' });
+      await replacement.release();
+    }
+  );
+
+  test('repairs an ownerless canonical lock left by a pre-owner crash', async () => {
+    const lockPath = path.join(paths.projectRoot, PROJECT_OPERATION_LOCK_NAME);
+    await mkdir(lockPath);
+    const abandonedAt = new Date(Date.now() - 30_000);
+    await utimes(lockPath, abandonedAt, abandonedAt);
+
+    const lease = await acquireProjectOperationLease(paths.projectRoot);
+    await expect(acquireProjectOperationLease(paths.projectRoot))
+      .rejects.toMatchObject({ code: 'PROJECT_OPERATION_LOCKED' });
+    await lease.release();
+  });
 });
 
 async function waitForChildReady(process: ChildProcess): Promise<void> {

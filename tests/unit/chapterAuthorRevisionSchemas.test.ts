@@ -91,7 +91,9 @@ describe('chapter author revision schemas', () => {
   test('accepts nullable revision fields and enforces lowercase SHA-256 hashes', () => {
     expect(AuthorRevisionRecordSchema.parse({
       ...validRevision,
+      revisionId: 'author_revision_ch001_mission_v1',
       artifactKind: 'mission',
+      workingCopyPath: 'chapters/chapter_001/author_revisions/mission_revision_v1.md',
       sourceCandidateId: null,
       authorInstruction: 'Preserve the chapter promise.',
       adoptedAt: '2026-08-04T02:00:00.000Z',
@@ -228,5 +230,40 @@ describe('chapter author revision schemas', () => {
       ...journal,
       storyStateMutated: true
     })).toThrow();
+  });
+
+  test('rejects a revision identity bound to a noncanonical working-copy or record path', () => {
+    const forgedTarget = {
+      ...validRevision,
+      revisionId: 'author_revision_ch001_plan_v2',
+      workingCopyPath: 'planning/chapter_queue.md'
+    };
+    const forgedJournal = {
+      schemaVersion: '1.0',
+      journalId: 'author_adoption_ch001_plan_v2',
+      projectId: 'demo-novel',
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      targetRevisionId: forgedTarget.revisionId,
+      invalidationReportPath: null,
+      state: 'prepared',
+      mutations: [{
+        recordPath: 'planning/chapter_queue.json',
+        beforeRecord: forgedTarget,
+        intendedRecord: {
+          ...forgedTarget,
+          state: 'adopted',
+          adoptedAt: '2026-08-04T02:00:00.000Z'
+        }
+      }],
+      createdAt: '2026-08-04T02:00:00.000Z',
+      updatedAt: '2026-08-04T02:00:00.000Z',
+      recoveryReason: null,
+      storyStateMutated: false
+    };
+
+    expect(AuthorRevisionRecordSchema.safeParse(forgedTarget).success).toBe(false);
+    expect(AuthorRevisionAdoptionJournalSchema.safeParse(forgedJournal).success)
+      .toBe(false);
   });
 });

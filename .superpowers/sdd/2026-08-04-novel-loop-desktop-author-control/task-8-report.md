@@ -2,12 +2,13 @@
 
 ## Scope
 
-Completed Task 8 and reviewer fix rounds 1-3 for recoverable Chapter Draft
+Completed Task 8 and reviewer fix rounds 1-4 for recoverable Chapter Draft
 editing on `codex/novel-loop-desktop-prototype`.
 
 - Base implementation: `4763142de0844979bfcde85271271bd6a2ce0b46`
 - Fix round 1: `1486154474ee30ebb6bdf00847ea4a1f7050358e`
 - Fix round 2: `07cad6426fcb97c3a9867ad4f30f25f741061988`
+- Fix round 3: `4806191b669e351c56952e4af107c4d899efd1d0`
 
 The implementation remains inside the approved desktop boundary: no Story
 State or chapter-queue mutation, no diagnostics/final/canon-patch/commit work,
@@ -49,6 +50,50 @@ and no provider or renderer filesystem expansion.
 - The subprocess regression sends `SIGKILL` immediately after the old active
   revision is durably superseded. A fresh read restores the old adopted
   revision, marks the transaction recovered, and preserves provenance.
+
+### Round 4 Transaction Confinement And Durability
+
+- Revision IDs, working-copy paths, mutation record paths, journal project,
+  chapter, artifact kind, target, and filename are now one canonical identity.
+  Recovery derives each destination from that identity and never trusts a
+  journal-supplied path as a write destination.
+- Before recovery writes any record, it reads every mutation destination and
+  requires the current value to equal exactly either `beforeRecord` or
+  `intendedRecord`. Missing, malformed, unrelated, or ambiguous records fail
+  closed before the first write.
+- The malicious journal regression attempts to bind draft recovery to
+  `planning/chapter_queue.json`; Story State, chapter queue, generated
+  `draft_v1.md`, and an unrelated file remain byte-identical.
+- Atomic replacement now distinguishes a post-rename directory-sync failure
+  as durability-uncertain. If a committed terminal marker persisted before an
+  exception, adoption verifies the marker and intended records and never runs
+  compensation. An absent committed marker still follows the prepared
+  rollback path.
+- Verified terminal journals move out of the active scan into a bounded
+  archive. At most eight terminal records are retained; damaged archived
+  history cannot block reads, while damaged active/nonterminal recovery data
+  remains fail-closed.
+
+### Round 4 Project Lease And Renderer Recovery
+
+- Lease acquisition writes and syncs a complete owner record in a private
+  candidate directory before atomically publishing the canonical lock. There
+  is no published lock-directory window without owner metadata.
+- Owner identity contains both PID and Linux process-start identity. A reused
+  PID cannot make a dead owner look live, and a legacy ownerless stale lock is
+  repaired after a bounded grace period.
+- Stale takeover uses an exclusive transition claim, rechecks owner bytes and
+  directory device/inode identity, and renames only that observed directory.
+  The deterministic dual-reclaimer test pauses the first takeover while a
+  second competes and proves exactly one lease is acquired and a replacement
+  live lock cannot be removed.
+- Rollback failure, committed-marker durability uncertainty, and ambiguous
+  recovery all map to the same redacted renderer recovery boundary and retire
+  the uncertain adoption token while retaining invalidation provenance.
+- A successful “重新载入本章” performs fresh draft/working-copy reads and
+  remounts the editor state. Recovery-required mode blocks autosave, Ctrl+S,
+  Ctrl+Shift+P, edit/preview controls, discard, compare, and adoption until that
+  reload succeeds.
 
 ### Working-Copy Storage
 
@@ -131,6 +176,50 @@ changes:
 
 All round-3 cases now pass, including byte-identical generated draft, Story
 State, and chapter queue assertions across the crash/restart boundary.
+
+## Round 4 TDD Evidence
+
+The round-4 regressions were written before production changes and observed
+RED:
+
+- The initial root matrix reported `10` failures: canonical-path schema
+  binding, forged journal confinement, ambiguous-record rejection,
+  committed-marker durability handling, terminal retention, complete lease
+  owner identity, ownerless recovery, and deterministic dual-reclaimer
+  serialization.
+- After the renderer timing assertion was made deterministic, the desktop
+  matrix reported `4` failures across recovery error classification, Ctrl+S /
+  preview shortcut gating, and workspace editor reinitialization.
+- The AtomicWriter fault injection proved rename had completed while directory
+  sync threw. The adoption injections proved both a normal and a deliberately
+  failing compensation hook were never called after a persisted committed
+  marker.
+- A follow-up archive fault initially escaped as a generic error after the
+  committed marker. It now returns the same durability-uncertain recovery
+  boundary, retains provenance, performs zero compensation, and completes
+  terminal cleanup on the next read.
+
+The minimal production changes then made the same matrices GREEN.
+
+## Round 4 Changed Files
+
+- `src/schemas/chapterAuthorRevision.ts`
+- `src/app/chapterAuthorRevision.ts`
+- `src/app/projectOperationLease.ts`
+- `src/desktop/chapterAuthoring.ts`
+- `src/storage/AtomicWriter.ts`
+- `apps/desktop/src/main/chapter/ProjectChapterService.ts`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterDraftEditor.tsx`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterWorkspace.tsx`
+- `tests/unit/chapterAuthorRevisionSchemas.test.ts`
+- `tests/unit/storage/fileInfrastructure.test.ts`
+- `tests/integration/desktopDraftAdoption.test.ts`
+- `tests/integration/projectOperationLease.test.ts`
+- `tests/integration/projectOperationLeaseRace.test.ts`
+- `apps/desktop/tests/main/projectChapterService.test.ts`
+- `apps/desktop/tests/renderer/chapterDraftEditor.test.tsx`
+- `apps/desktop/tests/renderer/chapterWorkspace.test.tsx`
+- This Task 8 implementation report and progress record.
 
 ## Round 3 Changed Files
 
@@ -220,6 +309,20 @@ Final round-3 verification on 2026-08-05:
 - `corepack pnpm check:diff` and `git diff --check` passed after the report
   update.
 
+Final round-4 verification on 2026-08-05:
+
+- Root author-revision, invalidation, draft-adoption, atomic-write, and lease
+  focused matrix: `8` files, `90` tests passed, `0` failed.
+- Desktop recovery service/editor/workspace focused matrix: `3` files, `91`
+  tests passed, `0` failed.
+- Complete desktop suite with two workers: `36` files, `574` tests passed,
+  `0` failed.
+- `corepack pnpm build` passed.
+- `corepack pnpm --dir apps/desktop check` passed.
+- `corepack pnpm --dir apps/desktop build` passed.
+- `corepack pnpm check:diff` and `git diff --check` passed after the report
+  update.
+
 ## Safety Evidence
 
 - Draft adoption runs under a no-Story-State-write project/chapter lease.
@@ -232,6 +335,12 @@ Final round-3 verification on 2026-08-05:
   adoption token.
 - A process crash cannot leave a superseded-only revision set: a prepared
   journal restores a valid active revision before author content is returned.
+- Recovery can mutate only schema-bound canonical author revision records, and
+  only when every record is exactly a declared before/intended value.
+- A persisted committed marker is never compensated; the renderer is locked
+  until a fresh read resolves the durability-uncertain result.
+- Project lock publication and stale takeover are owner-complete,
+  process-start-bound, exclusive, and directory-identity-checked.
 - Electron sandboxing remains enabled before the single-instance policy runs.
 - `.playwright-mcp/` and the two unrelated readiness PNG files were neither
   modified nor staged.

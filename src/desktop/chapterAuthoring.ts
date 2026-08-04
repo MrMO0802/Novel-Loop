@@ -369,7 +369,11 @@ export async function adoptDesktopChapterDraft(
         invalidationReportPath: relativeReportPath
       }, store);
     } catch (error) {
-      if (!hasErrorCode(error, 'AUTHOR_REVISION_ROLLBACK_FAILED')) {
+      if (
+        !hasErrorCode(error, 'AUTHOR_REVISION_ROLLBACK_FAILED')
+        && !hasErrorCode(error, 'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN')
+        && !hasErrorCode(error, 'AUTHOR_REVISION_RECOVERY_FAILED')
+      ) {
         await store.removePath(reportPath).catch(() => undefined);
       }
       throw error;

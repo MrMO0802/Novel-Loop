@@ -14,7 +14,10 @@ import { z } from 'zod';
 
 import { RunManifestSchema, StoryStateSchema } from '../../../src/schemas/index.js';
 import { RunLogger } from '../../../src/logging/RunLogger.js';
-import { AtomicWriter } from '../../../src/storage/AtomicWriter.js';
+import {
+  AtomicWriteDurabilityUncertainError,
+  AtomicWriter
+} from '../../../src/storage/AtomicWriter.js';
 import { FileStore } from '../../../src/storage/FileStore.js';
 import { ProjectPathGuard } from '../../../src/storage/ProjectPathGuard.js';
 import { ProjectPaths } from '../../../src/storage/ProjectPaths.js';
@@ -137,6 +140,26 @@ describe('AtomicWriter', () => {
 
       expect(replaced).toBe(true);
       await expect(realpath(path.join(externalDir, 'nested'))).rejects.toThrow();
+    }
+  );
+
+  test.skipIf(process.platform !== 'linux')(
+    'classifies a directory-sync failure after rename as durability uncertain',
+    async () => {
+      const projectRoot = path.join(tempRoot, 'project');
+      const target = path.join(projectRoot, 'artifacts', 'result.txt');
+      await mkdir(path.dirname(target), { recursive: true });
+      await writeFile(target, 'before', 'utf8');
+      const writer = new AtomicWriter({
+        syncDirectory: async () => {
+          throw new Error('forced directory sync failure');
+        }
+      }, undefined, projectRoot);
+
+      await expect(writer.writeText(target, 'after')).rejects.toBeInstanceOf(
+        AtomicWriteDurabilityUncertainError
+      );
+      expect(await readFile(target, 'utf8')).toBe('after');
     }
   );
 });

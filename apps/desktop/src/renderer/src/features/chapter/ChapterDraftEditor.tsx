@@ -52,35 +52,47 @@ export function ChapterDraftEditor({
     if (
       saveState !== 'unsaved'
       || recoveryPending
+      || adoptionRecoveryRequired
       || dialog !== null
       || actionState !== 'idle'
     ) return;
     const timeout = window.setTimeout(() => { void save(); }, 750);
     return () => window.clearTimeout(timeout);
-  }, [actionState, dialog, markdown, recoveryPending, saveState]);
+  }, [
+    actionState,
+    adoptionRecoveryRequired,
+    dialog,
+    markdown,
+    recoveryPending,
+    saveState
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (
         event.ctrlKey
         && event.key.toLowerCase() === 's'
-        && !recoveryPending
-        && actionState === 'idle'
-        && dialog === null
       ) {
         event.preventDefault();
-        void save();
+        if (
+          !recoveryPending
+          && !adoptionRecoveryRequired
+          && actionState === 'idle'
+          && dialog === null
+        ) void save();
       }
       if (
         event.ctrlKey
         && event.shiftKey
         && event.key.toLowerCase() === 'p'
-        && !recoveryPending
-        && actionState === 'idle'
-        && dialog === null
       ) {
         event.preventDefault();
-        setPreview((value) => !value);
+        if (
+          !recoveryPending
+          && !adoptionRecoveryRequired
+          && actionState === 'idle'
+          && dialog === null
+        ) setPreview((value) => !value);
       }
       if (event.key === 'Escape' && dialog !== null && actionState === 'idle') {
         event.preventDefault();
@@ -98,6 +110,7 @@ export function ChapterDraftEditor({
   function save(): Promise<string | null> {
     if (
       recoveryPending
+      || adoptionRecoveryRequired
       || actionState !== 'idle'
       || dialog !== null
     ) return Promise.resolve(null);
@@ -157,7 +170,7 @@ export function ChapterDraftEditor({
   }
 
   async function discard(): Promise<void> {
-    if (actionState !== 'idle') return;
+    if (actionState !== 'idle' || adoptionRecoveryRequired) return;
     setActionState('discarding');
     setActionError(null);
     editVersion.current += 1;
@@ -177,7 +190,7 @@ export function ChapterDraftEditor({
   }
 
   async function adopt(): Promise<void> {
-    if (actionState !== 'idle') return;
+    if (actionState !== 'idle' || adoptionRecoveryRequired) return;
     setActionState('adopting');
     setActionError(null);
     let adoptionCompleted = false;
@@ -241,6 +254,7 @@ export function ChapterDraftEditor({
   }
 
   function openDialog(next: Exclude<DialogKind, null>, opener: HTMLButtonElement): void {
+    if (adoptionRecoveryRequired) return;
     openerRef.current = opener;
     setActionError(null);
     setDialog(next);

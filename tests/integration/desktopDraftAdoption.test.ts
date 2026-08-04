@@ -343,11 +343,13 @@ describe('desktop draft adoption', () => {
         markdown: expect.stringContaining('第一版。')
       });
     const revisionDir = paths.chapterArtifact(1, 'author_revisions');
-    const journalNames = (await store.list(revisionDir))
+    const journalNames = (await store.list(
+      path.join(revisionDir, 'adoption_journal_archive')
+    ))
       .filter((name) => /^draft_adoption_journal_v\d+\.json$/u.test(name));
     expect(journalNames).toHaveLength(2);
     await expect(store.readJson(
-      path.join(revisionDir, journalNames[1]!),
+      path.join(revisionDir, 'adoption_journal_archive', journalNames[1]!),
       AuthorRevisionAdoptionJournalSchema
     )).resolves.toMatchObject({
       state: 'recovered_rolled_back',
@@ -359,4 +361,367 @@ describe('desktop draft adoption', () => {
     expect(await readFile(paths.storyState())).toEqual(stateBefore);
     expect(await readFile(paths.chapterQueue())).toEqual(queueBefore);
   }, 30_000);
+
+  test('rejects a forged journal before it can overwrite canonical or unrelated files', async () => {
+    const store = new FileStore();
+    const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+    await store.ensureDir(revisionDir);
+    const unrelatedPath = path.join(paths.projectRoot, 'notes', 'operator-note.json');
+    await store.writeText(unrelatedPath, '{"kept":true}\n');
+    const stateBefore = await readFile(paths.storyState());
+    const queueBefore = await readFile(paths.chapterQueue());
+    const generatedBefore = await readFile(paths.chapterArtifact(1, 'draft_v1.md'));
+    const unrelatedBefore = await readFile(unrelatedPath);
+    const createdAt = '2026-08-04T02:00:00.000Z';
+    const target = forgedDraftRevision({
+      revisionId: 'author_revision_ch001_draft_v999',
+      workingCopyPath: 'planning/chapter_queue.md',
+      state: 'ready',
+      adoptedAt: null,
+      createdAt
+    });
+    const unrelated = forgedDraftRevision({
+      revisionId: 'author_revision_ch001_draft_v998',
+      workingCopyPath: 'notes/operator-note.md',
+      state: 'adopted',
+      adoptedAt: createdAt,
+      createdAt
+    });
+    await writeFile(
+      path.join(revisionDir, 'draft_adoption_journal_v999.json'),
+      `${JSON.stringify({
+        schemaVersion: '1.0',
+        journalId: 'author_adoption_ch001_draft_v999',
+        projectId,
+        chapterNumber: 1,
+        artifactKind: 'draft',
+        targetRevisionId: target.revisionId,
+        invalidationReportPath: null,
+        state: 'prepared',
+        mutations: [{
+          recordPath: 'planning/chapter_queue.json',
+          beforeRecord: target,
+          intendedRecord: { ...target, state: 'adopted', adoptedAt: createdAt }
+        }, {
+          recordPath: 'notes/operator-note.json',
+          beforeRecord: unrelated,
+          intendedRecord: { ...unrelated, state: 'superseded' }
+        }],
+        createdAt,
+        updatedAt: createdAt,
+        recoveryReason: null,
+        storyStateMutated: false
+      }, null, 2)}\n`,
+      'utf8'
+    );
+
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .rejects.toBeDefined();
+    expect(await readFile(paths.storyState())).toEqual(stateBefore);
+    expect(await readFile(paths.chapterQueue())).toEqual(queueBefore);
+    expect(await readFile(paths.chapterArtifact(1, 'draft_v1.md')))
+      .toEqual(generatedBefore);
+    expect(await readFile(unrelatedPath)).toEqual(unrelatedBefore);
+  }, 30_000);
+
+  test('fails closed when a prepared journal record is neither before nor intended', async () => {
+    const store = new FileStore();
+    const second = await prepareSecondDraftRevision(store);
+    const firstRecordPath = paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'draft_revision_v1.json'
+    );
+    const secondRecordPath = paths.projectArtifact(second.relativeRecordPath);
+    const firstBefore = await store.readJson(
+      firstRecordPath,
+      AuthorRevisionRecordSchema
+    );
+    const firstIntended = AuthorRevisionRecordSchema.parse({
+      ...firstBefore,
+      state: 'superseded'
+    });
+    const adoptedAt = '2026-08-04T03:00:00.000Z';
+    const secondIntended = AuthorRevisionRecordSchema.parse({
+      ...second.record,
+      state: 'adopted',
+      adoptedAt
+    });
+    const secondTampered = AuthorRevisionRecordSchema.parse({
+      ...second.record,
+      state: 'rejected'
+    });
+    await store.writeJson(firstRecordPath, firstIntended, AuthorRevisionRecordSchema);
+    await store.writeJson(secondRecordPath, secondTampered, AuthorRevisionRecordSchema);
+    const journal = AuthorRevisionAdoptionJournalSchema.parse({
+      schemaVersion: '1.0',
+      journalId: 'author_adoption_ch001_draft_v2',
+      projectId,
+      chapterNumber: 1,
+      artifactKind: 'draft',
+      targetRevisionId: second.record.revisionId,
+      invalidationReportPath: null,
+      state: 'prepared',
+      mutations: [{
+        recordPath: 'chapters/chapter_001/author_revisions/draft_revision_v1.json',
+        beforeRecord: firstBefore,
+        intendedRecord: firstIntended
+      }, {
+        recordPath: second.relativeRecordPath,
+        beforeRecord: second.record,
+        intendedRecord: secondIntended
+      }],
+      createdAt: adoptedAt,
+      updatedAt: adoptedAt,
+      recoveryReason: null,
+      storyStateMutated: false
+    });
+    await store.writeJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_adoption_journal_v2.json'),
+      journal,
+      AuthorRevisionAdoptionJournalSchema
+    );
+    const stateBefore = await readFile(paths.storyState());
+    const queueBefore = await readFile(paths.chapterQueue());
+    const generatedBefore = await readFile(paths.chapterArtifact(1, 'draft_v1.md'));
+
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .rejects.toMatchObject({ code: 'AUTHOR_REVISION_RECOVERY_FAILED' });
+    await expect(store.readJson(firstRecordPath, AuthorRevisionRecordSchema))
+      .resolves.toEqual(firstIntended);
+    await expect(store.readJson(secondRecordPath, AuthorRevisionRecordSchema))
+      .resolves.toEqual(secondTampered);
+    expect(await readFile(paths.storyState())).toEqual(stateBefore);
+    expect(await readFile(paths.chapterQueue())).toEqual(queueBefore);
+    expect(await readFile(paths.chapterArtifact(1, 'draft_v1.md')))
+      .toEqual(generatedBefore);
+  }, 30_000);
+
+  test('does not compensate a transaction after its committed marker persisted and then threw', async () => {
+    const store = new FileStore();
+    const second = await prepareSecondDraftRevision(store);
+    const writeJson = store.writeJson.bind(store);
+    let terminalPersisted = false;
+    let compensationAttempts = 0;
+    store.writeJson = async (filePath, value, schema) => {
+      const state = recordState(value);
+      if (
+        !terminalPersisted
+        && filePath.includes('_adoption_journal_')
+        && state === 'committed'
+      ) {
+        terminalPersisted = true;
+        await writeJson(filePath, value, schema);
+        throw new Error('forced directory sync failure after committed marker');
+      }
+      if (terminalPersisted && filePath.includes('_revision_') && state !== null) {
+        compensationAttempts += 1;
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: second.record.sourceHash
+    }, store)).rejects.toMatchObject({
+      code: 'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN'
+    });
+    expect(compensationAttempts).toBe(0);
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        available: true,
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('第二版。')
+      });
+  }, 30_000);
+
+  test('keeps committed recovery deterministic even when compensation would fail', async () => {
+    const store = new FileStore();
+    const second = await prepareSecondDraftRevision(store);
+    const writeJson = store.writeJson.bind(store);
+    let terminalPersisted = false;
+    let compensationAttempts = 0;
+    store.writeJson = async (filePath, value, schema) => {
+      const state = recordState(value);
+      if (
+        !terminalPersisted
+        && filePath.includes('_adoption_journal_')
+        && state === 'committed'
+      ) {
+        terminalPersisted = true;
+        await writeJson(filePath, value, schema);
+        throw new Error('forced directory sync failure after committed marker');
+      }
+      if (terminalPersisted && filePath.includes('_revision_') && state !== null) {
+        compensationAttempts += 1;
+        throw new Error('forced compensation failure');
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: second.record.sourceHash
+    }, store)).rejects.toMatchObject({
+      code: 'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN'
+    });
+    expect(compensationAttempts).toBe(0);
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        available: true,
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('第二版。')
+      });
+  }, 30_000);
+
+  test('classifies terminal archive failure after commit without compensating records', async () => {
+    const store = new FileStore();
+    const second = await prepareSecondDraftRevision(store);
+    const writeJson = store.writeJson.bind(store);
+    let committedPersisted = false;
+    let compensationAttempts = 0;
+    store.writeJson = async (filePath, value, schema) => {
+      const state = recordState(value);
+      if (filePath.includes('adoption_journal_archive') && state === 'committed') {
+        throw new Error('forced terminal archive failure');
+      }
+      if (
+        !filePath.includes('adoption_journal_archive')
+        && filePath.includes('_adoption_journal_')
+        && state === 'committed'
+      ) {
+        await writeJson(filePath, value, schema);
+        committedPersisted = true;
+        return;
+      }
+      if (committedPersisted && filePath.includes('_revision_') && state !== null) {
+        compensationAttempts += 1;
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: second.record.sourceHash
+    }, store)).rejects.toMatchObject({
+      code: 'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN'
+    });
+    expect(compensationAttempts).toBe(0);
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        available: true,
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('第二版。')
+      });
+  }, 30_000);
+
+  test('archives terminal journals, bounds retention, and ignores damaged history', async () => {
+    const store = new FileStore();
+    for (let version = 1; version <= 11; version += 1) {
+      const current = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+      if (!current.available) throw new Error('Expected an available draft.');
+      await adoptDesktopChapterDraft({
+        projectRoot: paths.projectRoot,
+        markdown: `${current.markdown}\n\n作者版本 ${version}。\n`,
+        expectedSourceHash: current.sourceHash
+      }, store);
+    }
+    const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+    const archiveDir = path.join(revisionDir, 'adoption_journal_archive');
+    const archived = (await store.list(archiveDir))
+      .filter((name) => /^draft_adoption_journal_v\d+\.json$/u.test(name));
+    expect(archived.length).toBeGreaterThan(0);
+    expect(archived.length).toBeLessThanOrEqual(8);
+    expect((await store.list(revisionDir)).filter(
+      (name) => /^draft_adoption_journal_v\d+\.json$/u.test(name)
+    )).toEqual([]);
+
+    await writeFile(path.join(archiveDir, archived[0]!), '{damaged terminal', 'utf8');
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        available: true,
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('作者版本 11。')
+      });
+  }, 30_000);
+
+  test('keeps a corrupt active nonterminal journal fail-closed', async () => {
+    const store = new FileStore();
+    const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+    await store.ensureDir(revisionDir);
+    await writeFile(
+      path.join(revisionDir, 'draft_adoption_journal_v1.json'),
+      '{not a terminal journal',
+      'utf8'
+    );
+
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .rejects.toBeDefined();
+  }, 30_000);
 });
+
+function forgedDraftRevision(input: {
+  revisionId: string;
+  workingCopyPath: string;
+  state: 'ready' | 'adopted';
+  adoptedAt: string | null;
+  createdAt: string;
+}) {
+  return {
+    schemaVersion: '1.0',
+    revisionId: input.revisionId,
+    projectId,
+    chapterNumber: 1,
+    artifactKind: 'draft',
+    mode: 'direct_edit',
+    sourceArtifactPath: 'chapters/chapter_001/draft_v1.md',
+    sourceCandidateId: null,
+    sourceHash: 'a'.repeat(64),
+    workingCopyPath: input.workingCopyPath,
+    workingCopyHash: 'b'.repeat(64),
+    state: input.state,
+    authorInstruction: null,
+    createdAt: input.createdAt,
+    adoptedAt: input.adoptedAt,
+    invalidationReportPath: null,
+    storyStateMutated: false
+  };
+}
+
+async function prepareSecondDraftRevision(store: FileStore) {
+  const initial = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+  if (!initial.available) throw new Error('Expected a generated draft.');
+  await adoptDesktopChapterDraft({
+    projectRoot: paths.projectRoot,
+    markdown: `${initial.markdown}\n\n第一版。\n`,
+    expectedSourceHash: initial.sourceHash
+  }, store);
+  const active = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+  if (!active.available) throw new Error('Expected an adopted draft.');
+  return createAuthorRevision({
+    projectRoot: paths.projectRoot,
+    chapterNumber: 1,
+    artifactKind: 'draft',
+    mode: 'direct_edit',
+    sourceArtifactPath: 'chapters/chapter_001/author_revisions/draft_revision_v1.md',
+    sourceCandidateId: null,
+    expectedSourceHash: active.sourceHash,
+    content: `${active.markdown}\n\n第二版。\n`,
+    authorInstruction: null
+  }, store);
+}
+
+function recordState(value: unknown): string | null {
+  return typeof value === 'object'
+    && value !== null
+    && 'state' in value
+    && typeof value.state === 'string'
+    ? value.state
+    : null;
+}

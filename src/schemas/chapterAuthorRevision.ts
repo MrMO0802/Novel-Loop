@@ -7,6 +7,8 @@ import { ChapterQueueStageSchema, ChapterQueueStatusSchema } from './planningArt
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u, 'Expected a lowercase SHA-256 hash.');
 const TimestampSchema = z.string().datetime({ offset: true });
 const IdentifierSchema = z.string().trim().min(1).max(240);
+const AuthorRevisionIdentityPattern =
+  /^author_revision_ch(\d{3})_(mission|plan|draft)_v([1-9]\d*)$/u;
 
 const ProjectRelativePathSchema = z.string().min(1).max(1024).superRefine((value, context) => {
   const normalized = path.posix.normalize(value);
@@ -84,6 +86,32 @@ export const AuthorRevisionRecordSchema = z.object({
   invalidationReportPath: ProjectRelativePathSchema.nullable(),
   storyStateMutated: z.literal(false)
 }).strict().superRefine((record, context) => {
+  const identity = AuthorRevisionIdentityPattern.exec(record.revisionId);
+  const expectedLabel = record.artifactKind === 'selected_plan'
+    ? 'plan'
+    : record.artifactKind;
+  const expectedChapter = String(record.chapterNumber).padStart(3, '0');
+  const expectedWorkingCopyPath = identity === null
+    ? null
+    : `chapters/chapter_${identity[1]}/author_revisions/${identity[2]}_revision_v${identity[3]}.md`;
+  if (
+    identity === null
+    || identity[1] !== expectedChapter
+    || identity[2] !== expectedLabel
+  ) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['revisionId'],
+      message: 'Revision identity does not match its chapter and artifact kind.'
+    });
+  }
+  if (expectedWorkingCopyPath === null || record.workingCopyPath !== expectedWorkingCopyPath) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['workingCopyPath'],
+      message: 'Revision working copy must use its canonical chapter revision path.'
+    });
+  }
   const requiresCandidate = record.artifactKind === 'selected_plan';
   if (requiresCandidate !== (record.sourceCandidateId !== null)) {
     context.addIssue({
@@ -159,6 +187,17 @@ export const AuthorRevisionAdoptionMutationSchema = z.object({
         message: 'An adoption transaction cannot change immutable revision data.'
       });
     }
+  }
+  const identity = AuthorRevisionIdentityPattern.exec(before.revisionId);
+  const expectedRecordPath = identity === null
+    ? null
+    : `chapters/chapter_${identity[1]}/author_revisions/${identity[2]}_revision_v${identity[3]}.json`;
+  if (expectedRecordPath === null || mutation.recordPath !== expectedRecordPath) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['recordPath'],
+      message: 'Adoption mutation must use the canonical revision record path.'
+    });
   }
 });
 

@@ -29,6 +29,7 @@ export function ChapterWorkspace({
   const [draft, setDraft] = useState<ChapterDraftReviewResult | null>(null);
   const [plan, setPlan] = useState<ChapterPlanReviewResult | null>(null);
   const [workingCopy, setWorkingCopy] = useState<ChapterDraftWorkingCopyResult | null>(null);
+  const [editorEpoch, setEditorEpoch] = useState(0);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
@@ -133,6 +134,7 @@ export function ChapterWorkspace({
             {workingCopy && (
               <ChapterDraftEditor
                 draft={availableDraft}
+                key={`${project.projectKey}:${availableDraft.chapterNumber}:${editorEpoch}`}
                 onAdopted={async () => {
                   const [draftResult, copyResult] = await Promise.all([
                     window.novelLoop.chapter.readDraft({ projectKey: project.projectKey }),
@@ -140,6 +142,8 @@ export function ChapterWorkspace({
                   ]);
                   setDraft(draftResult);
                   setWorkingCopy(copyResult);
+                  setFailed(!draftResult.available);
+                  setEditorEpoch((current) => current + 1);
                 }}
                 projectKey={project.projectKey}
                 workingCopy={workingCopy}

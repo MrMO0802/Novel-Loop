@@ -9,6 +9,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within
 } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -90,6 +91,7 @@ function installApi() {
     configurable: true,
     value: api
   });
+  return api;
 }
 
 async function openWorkspace() {
@@ -141,6 +143,47 @@ describe('initial chapter workspace', () => {
     expect(document.body).not.toHaveTextContent(
       /canon_patch|story_state|mutation|jsonl|runId|taskId|artifact path/i
     );
+  });
+
+  test('reinitializes the editor after adoption recovery before allowing another save and adoption', async () => {
+    if (!completeChapterDraft.available) {
+      throw new Error('Expected the complete chapter draft fixture to be available.');
+    }
+    const api = installApi();
+    api.chapter.adoptDraftRevision
+      .mockResolvedValueOnce({
+        outcome: 'recovery_required',
+        nextAction: 'reload_chapter'
+      })
+      .mockResolvedValueOnce({ outcome: 'adopted' });
+    render(<App />);
+    await openWorkspace();
+
+    const textbox = screen.getByRole('textbox', { name: '章节正文' });
+    fireEvent.change(textbox, {
+      target: { value: `${completeChapterDraft.markdown}\n\n第一次编辑。` }
+    });
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(api.chapter.saveDraftWorkingCopy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
+    expect(await screen.findByText('采用过程需要恢复后才能继续编辑。')).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: '重新载入本章' }));
+    await waitFor(() => {
+      expect(screen.queryByText('采用过程需要恢复后才能继续编辑。'))
+        .not.toBeInTheDocument();
+    });
+    const reloadedTextbox = screen.getByRole('textbox', { name: '章节正文' });
+    expect(reloadedTextbox).toBeEnabled();
+    fireEvent.change(reloadedTextbox, {
+      target: { value: `${completeChapterDraft.markdown}\n\n恢复后的编辑。` }
+    });
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(api.chapter.saveDraftWorkingCopy).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
+    await waitFor(() => expect(api.chapter.adoptDraftRevision).toHaveBeenCalledTimes(2));
   });
 
   test('uses stable responsive tracks without gradients or oversized radii', () => {

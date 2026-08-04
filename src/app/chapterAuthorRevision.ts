@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 
 import { withProjectChapterOperationLease } from './projectOperationLease.js';
 import {
@@ -32,6 +33,9 @@ const MAX_AUTHOR_INSTRUCTION_CHARACTERS = 4_000;
 
 const REVISION_FILE_PATTERN = /^(mission|plan|draft)_revision_v([1-9]\d*)\.json$/u;
 const ADOPTION_JOURNAL_FILE_PATTERN = /^(mission|plan|draft)_adoption_journal_v([1-9]\d*)\.json$/u;
+const REVISION_ID_PATTERN = /^author_revision_ch(\d{3})_(mission|plan|draft)_v([1-9]\d*)$/u;
+const ADOPTION_JOURNAL_ARCHIVE_DIR = 'adoption_journal_archive';
+const MAX_TERMINAL_ADOPTION_JOURNALS = 8;
 
 const ARCHIVED_JSON_SCHEMAS = {
   'mission.json': ChapterMissionSchema,
@@ -215,6 +219,12 @@ interface PreparedAdoptionJournal {
   absolutePath: string;
 }
 
+interface InspectedAdoptionMutation {
+  mutation: AuthorRevisionAdoptionMutation;
+  absolutePath: string;
+  currentState: 'before' | 'intended';
+}
+
 export async function createAuthorRevision(
   input: CreateAuthorRevisionInput,
   fileStore?: FileStore
@@ -378,43 +388,63 @@ export async function adoptAuthorRevision(
       createdAt: adoptedAt
     });
     try {
-      for (const mutation of mutations) {
-        await store.writeJson(
-          resolveProjectPath(projectRoot, mutation.recordPath),
-          mutation.intendedRecord,
-          AuthorRevisionRecordSchema
-        );
-      }
-      await store.writeJson(journal.absolutePath, {
-        ...journal.record,
-        state: 'committed',
-        updatedAt: new Date().toISOString()
-      }, AuthorRevisionAdoptionJournalSchema);
+      await applyPreparedAdoptionJournal(context, journal.record);
     } catch (error) {
-      let rollbackFailed = false;
-      for (const mutation of [...mutations].reverse()) {
-        await store.writeJson(
-          resolveProjectPath(projectRoot, mutation.recordPath),
-          mutation.beforeRecord,
-          AuthorRevisionRecordSchema
-        ).catch(() => {
-          rollbackFailed = true;
-        });
-      }
-      if (rollbackFailed) {
-        throw new AppError(
-          'AUTHOR_REVISION_ROLLBACK_FAILED',
-          'Author revision adoption failed and its prior state could not be fully restored.',
-          2
-        );
-      }
-      await store.writeJson(journal.absolutePath, {
-        ...journal.record,
-        state: 'recovered_rolled_back',
-        updatedAt: new Date().toISOString(),
+      await rollbackPreparedAdoptionJournal({
+        context,
+        journalPath: journal.absolutePath,
+        journal: journal.record,
         recoveryReason: 'in_process_failure'
-      }, AuthorRevisionAdoptionJournalSchema).catch(() => undefined);
+      });
       throw error;
+    }
+
+    const committedJournal = AuthorRevisionAdoptionJournalSchema.parse({
+      ...journal.record,
+      state: 'committed',
+      updatedAt: new Date().toISOString()
+    });
+    try {
+      await store.writeJson(
+        journal.absolutePath,
+        committedJournal,
+        AuthorRevisionAdoptionJournalSchema
+      );
+    } catch (error) {
+      const observed = await readAdoptionJournalIfValid(context, journal.absolutePath);
+      if (observed !== null && isDeepStrictEqual(observed, committedJournal)) {
+        await assertJournalRecordsMatch(context, committedJournal, 'intended');
+        await archiveTerminalAdoptionJournal(
+          context,
+          journal.absolutePath,
+          committedJournal
+        ).catch(() => undefined);
+        throw commitDurabilityUncertain();
+      }
+      if (observed !== null && isDeepStrictEqual(observed, journal.record)) {
+        await rollbackPreparedAdoptionJournal({
+          context,
+          journalPath: journal.absolutePath,
+          journal: journal.record,
+          recoveryReason: 'in_process_failure'
+        });
+        throw error;
+      }
+      throw new AppError(
+        'AUTHOR_REVISION_RECOVERY_FAILED',
+        'Author revision adoption terminal state is ambiguous and requires recovery.',
+        2
+      );
+    }
+    await assertJournalRecordsMatch(context, committedJournal, 'intended');
+    try {
+      await archiveTerminalAdoptionJournal(
+        context,
+        journal.absolutePath,
+        committedJournal
+      );
+    } catch {
+      throw commitDurabilityUncertain();
     }
     return adopted;
   });
@@ -852,7 +882,12 @@ async function nextAdoptionJournalVersion(
   label: 'mission' | 'plan' | 'draft'
 ): Promise<number> {
   if (!(await store.exists(revisionDir))) return 1;
-  return (await store.list(revisionDir)).reduce((highest, fileName) => {
+  const archiveDir = path.join(revisionDir, ADOPTION_JOURNAL_ARCHIVE_DIR);
+  const fileNames = [
+    ...await store.list(revisionDir),
+    ...(await store.exists(archiveDir) ? await store.list(archiveDir) : [])
+  ];
+  return fileNames.reduce((highest, fileName) => {
     const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
     return match?.[1] === label
       ? Math.max(highest, Number(match[2]))
@@ -889,28 +924,202 @@ async function recoverPreparedAdoptionJournals(
   }
 
   for (const journal of journals.sort((left, right) => right.version - left.version)) {
-    if (journal.record.state !== 'prepared') continue;
-    try {
-      for (const mutation of [...journal.record.mutations].reverse()) {
-        await context.store.writeJson(
-          resolveProjectPath(context.projectRoot, mutation.recordPath),
-          mutation.beforeRecord,
-          AuthorRevisionRecordSchema
-        );
-      }
-      await context.store.writeJson(journal.absolutePath, {
-        ...journal.record,
-        state: 'recovered_rolled_back',
-        updatedAt: new Date().toISOString(),
+    if (journal.record.state === 'prepared') {
+      await rollbackPreparedAdoptionJournal({
+        context,
+        journalPath: journal.absolutePath,
+        journal: journal.record,
         recoveryReason: 'read_time_recovery'
-      }, AuthorRevisionAdoptionJournalSchema);
-    } catch {
-      throw new AppError(
-        'AUTHOR_REVISION_RECOVERY_FAILED',
-        `Prepared author revision adoption could not be recovered: ${journal.fileName}`,
-        2
+      });
+    } else {
+      await archiveTerminalAdoptionJournal(
+        context,
+        journal.absolutePath,
+        journal.record
       );
     }
+  }
+}
+
+async function applyPreparedAdoptionJournal(
+  context: ProjectContext,
+  journal: AuthorRevisionAdoptionJournal
+): Promise<void> {
+  const inspected = await inspectAdoptionJournalMutations(context, journal);
+  if (inspected.some(({ currentState }) => currentState !== 'before')) {
+    throw recoveryFailed('Prepared adoption records changed before mutation began.');
+  }
+  for (const { mutation, absolutePath } of inspected) {
+    await context.store.writeJson(
+      absolutePath,
+      mutation.intendedRecord,
+      AuthorRevisionRecordSchema
+    );
+  }
+}
+
+async function rollbackPreparedAdoptionJournal(input: {
+  context: ProjectContext;
+  journalPath: string;
+  journal: AuthorRevisionAdoptionJournal;
+  recoveryReason: 'in_process_failure' | 'read_time_recovery';
+}): Promise<void> {
+  const inspected = await inspectAdoptionJournalMutations(input.context, input.journal);
+  let rollbackFailed = false;
+  for (const entry of [...inspected].reverse()) {
+    if (entry.currentState === 'before') continue;
+    await input.context.store.writeJson(
+      entry.absolutePath,
+      entry.mutation.beforeRecord,
+      AuthorRevisionRecordSchema
+    ).catch(() => {
+      rollbackFailed = true;
+    });
+  }
+  if (rollbackFailed) {
+    throw new AppError(
+      'AUTHOR_REVISION_ROLLBACK_FAILED',
+      'Author revision adoption failed and its prior state could not be fully restored.',
+      2
+    );
+  }
+  await assertJournalRecordsMatch(input.context, input.journal, 'before');
+  const recoveredJournal = AuthorRevisionAdoptionJournalSchema.parse({
+    ...input.journal,
+    state: 'recovered_rolled_back',
+    updatedAt: new Date().toISOString(),
+    recoveryReason: input.recoveryReason
+  });
+  try {
+    await input.context.store.writeJson(
+      input.journalPath,
+      recoveredJournal,
+      AuthorRevisionAdoptionJournalSchema
+    );
+  } catch {
+    const observed = await readAdoptionJournalIfValid(input.context, input.journalPath);
+    if (observed === null || !isDeepStrictEqual(observed, recoveredJournal)) {
+      throw recoveryFailed('Recovered adoption marker could not be verified.');
+    }
+  }
+  await archiveTerminalAdoptionJournal(
+    input.context,
+    input.journalPath,
+    recoveredJournal
+  ).catch(() => undefined);
+}
+
+async function inspectAdoptionJournalMutations(
+  context: ProjectContext,
+  journal: AuthorRevisionAdoptionJournal
+): Promise<InspectedAdoptionMutation[]> {
+  const inspected: InspectedAdoptionMutation[] = [];
+  for (const mutation of journal.mutations) {
+    const absolutePath = canonicalMutationRecordPath(context, journal, mutation);
+    let current: AuthorRevisionRecord;
+    try {
+      current = await context.store.readJson(absolutePath, AuthorRevisionRecordSchema);
+    } catch {
+      throw recoveryFailed('An adoption record could not be read safely.');
+    }
+    if (isDeepStrictEqual(current, mutation.beforeRecord)) {
+      inspected.push({ mutation, absolutePath, currentState: 'before' });
+    } else if (isDeepStrictEqual(current, mutation.intendedRecord)) {
+      inspected.push({ mutation, absolutePath, currentState: 'intended' });
+    } else {
+      throw recoveryFailed('An adoption record is neither its before nor intended value.');
+    }
+  }
+  return inspected;
+}
+
+async function assertJournalRecordsMatch(
+  context: ProjectContext,
+  journal: AuthorRevisionAdoptionJournal,
+  expected: 'before' | 'intended'
+): Promise<void> {
+  const inspected = await inspectAdoptionJournalMutations(context, journal);
+  if (inspected.some(({ currentState }) => currentState !== expected)) {
+    throw recoveryFailed(`Adoption records do not match the ${expected} transaction state.`);
+  }
+}
+
+async function readAdoptionJournalIfValid(
+  context: ProjectContext,
+  journalPath: string
+): Promise<AuthorRevisionAdoptionJournal | null> {
+  try {
+    const journal = await context.store.readJson(
+      journalPath,
+      AuthorRevisionAdoptionJournalSchema
+    );
+    validateAdoptionJournalBinding(
+      context,
+      journal.chapterNumber,
+      path.basename(journalPath),
+      journal
+    );
+    return journal;
+  } catch {
+    return null;
+  }
+}
+
+async function archiveTerminalAdoptionJournal(
+  context: ProjectContext,
+  activePath: string,
+  journal: AuthorRevisionAdoptionJournal
+): Promise<void> {
+  if (journal.state === 'prepared') {
+    throw recoveryFailed('A prepared adoption journal cannot be archived.');
+  }
+  const revisionDir = context.paths.chapterArtifact(
+    journal.chapterNumber,
+    'author_revisions'
+  );
+  const archiveDir = path.join(revisionDir, ADOPTION_JOURNAL_ARCHIVE_DIR);
+  const archivePath = path.join(archiveDir, path.basename(activePath));
+  await context.store.ensureDir(archiveDir);
+  if (await context.store.exists(archivePath)) {
+    const existing = await context.store.readJson(
+      archivePath,
+      AuthorRevisionAdoptionJournalSchema
+    );
+    if (!isDeepStrictEqual(existing, journal)) {
+      throw recoveryFailed('An archived adoption journal conflicts with its terminal record.');
+    }
+  } else {
+    await context.store.writeJson(
+      archivePath,
+      journal,
+      AuthorRevisionAdoptionJournalSchema
+    );
+    const archived = await context.store.readJson(
+      archivePath,
+      AuthorRevisionAdoptionJournalSchema
+    );
+    if (!isDeepStrictEqual(archived, journal)) {
+      throw recoveryFailed('An archived adoption journal could not be verified.');
+    }
+  }
+  if (await context.store.exists(activePath)) await context.store.removePath(activePath);
+  await pruneTerminalAdoptionJournals(context.store, archiveDir);
+}
+
+async function pruneTerminalAdoptionJournals(
+  store: FileStore,
+  archiveDir: string
+): Promise<void> {
+  const terminal = (await store.list(archiveDir))
+    .flatMap((fileName) => {
+      const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
+      return match === null
+        ? []
+        : [{ fileName, version: Number(match[2]) }];
+    })
+    .sort((left, right) => right.version - left.version);
+  for (const entry of terminal.slice(MAX_TERMINAL_ADOPTION_JOURNALS)) {
+    await store.removePath(path.join(archiveDir, entry.fileName));
   }
 }
 
@@ -925,15 +1134,22 @@ function validateAdoptionJournalBinding(
   const version = match?.[2];
   const expectedLabel = revisionArtifactLabel(journal.artifactKind);
   const expectedId = `author_adoption_ch${String(chapterNumber).padStart(3, '0')}_${expectedLabel}_v${version ?? ''}`;
+  const targetIdentity = REVISION_ID_PATTERN.exec(journal.targetRevisionId);
   const recordsBound = journal.mutations.every((mutation) => {
-    const expectedRecordPath = mutation.beforeRecord.workingCopyPath.replace(/\.md$/u, '.json');
-    return mutation.recordPath === expectedRecordPath;
+    try {
+      canonicalMutationRecordPath(context, journal, mutation);
+      return true;
+    } catch {
+      return false;
+    }
   });
   if (
     label !== expectedLabel
     || journal.journalId !== expectedId
     || journal.projectId !== context.paths.projectId
     || journal.chapterNumber !== chapterNumber
+    || targetIdentity?.[1] !== String(chapterNumber).padStart(3, '0')
+    || targetIdentity?.[2] !== expectedLabel
     || !recordsBound
   ) {
     throw new AppError(
@@ -942,6 +1158,53 @@ function validateAdoptionJournalBinding(
       2
     );
   }
+}
+
+function canonicalMutationRecordPath(
+  context: ProjectContext,
+  journal: AuthorRevisionAdoptionJournal,
+  mutation: AuthorRevisionAdoptionMutation
+): string {
+  const identity = REVISION_ID_PATTERN.exec(mutation.beforeRecord.revisionId);
+  const expectedLabel = revisionArtifactLabel(journal.artifactKind);
+  const chapterLabel = String(journal.chapterNumber).padStart(3, '0');
+  if (
+    identity === null
+    || identity[1] !== chapterLabel
+    || identity[2] !== expectedLabel
+    || mutation.intendedRecord.revisionId !== mutation.beforeRecord.revisionId
+  ) {
+    throw recoveryFailed('Adoption mutation identity does not match its journal.');
+  }
+  const expectedRecordPath = toProjectRelativePath(
+    context.projectRoot,
+    context.paths.chapterArtifact(
+      journal.chapterNumber,
+      'author_revisions',
+      `${expectedLabel}_revision_v${identity[3]}.json`
+    )
+  );
+  const expectedWorkingCopyPath = expectedRecordPath.replace(/\.json$/u, '.md');
+  if (
+    mutation.recordPath !== expectedRecordPath
+    || mutation.beforeRecord.workingCopyPath !== expectedWorkingCopyPath
+    || mutation.intendedRecord.workingCopyPath !== expectedWorkingCopyPath
+  ) {
+    throw recoveryFailed('Adoption mutation path is not a canonical chapter revision path.');
+  }
+  return resolveProjectPath(context.projectRoot, expectedRecordPath);
+}
+
+function recoveryFailed(message: string): AppError {
+  return new AppError('AUTHOR_REVISION_RECOVERY_FAILED', message, 2);
+}
+
+function commitDurabilityUncertain(): AppError {
+  return new AppError(
+    'AUTHOR_REVISION_COMMIT_DURABILITY_UNCERTAIN',
+    'Author revision adoption reached its committed marker, but terminal durability must be rechecked.',
+    2
+  );
 }
 
 async function findRevision(

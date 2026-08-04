@@ -2,7 +2,14 @@
 
 import '@testing-library/jest-dom/vitest';
 
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import {
+  act,
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within
+} from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { ChapterDraftEditor } from '../../src/renderer/src/features/chapter/ChapterDraftEditor';
@@ -200,6 +207,21 @@ describe('ChapterDraftEditor', () => {
 
     expect(await screen.findByText('采用过程需要恢复后才能继续编辑。')).toBeVisible();
     expect(onAdopted).not.toHaveBeenCalled();
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 0));
+    });
+    expect(fireEvent.keyDown(window, { key: 's', ctrlKey: true })).toBe(false);
+    expect(fireEvent.keyDown(window, {
+      key: 'p',
+      ctrlKey: true,
+      shiftKey: true
+    })).toBe(false);
+    expect(api.saveDraftWorkingCopy).not.toHaveBeenCalled();
+    expect(screen.getByRole('tab', { name: '编辑' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    );
+    expect(screen.getByRole('button', { name: '采用此修订' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '重新载入本章' }));
     expect(onAdopted).toHaveBeenCalledTimes(1);
   });

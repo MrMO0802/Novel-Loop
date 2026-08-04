@@ -16,6 +16,7 @@ type WriteFile = (filePath: string, data: string, options: { encoding: BufferEnc
 type AppendFile = (filePath: string, data: string, options: { encoding: BufferEncoding }) => Promise<void>;
 type Rename = (oldPath: string, newPath: string) => Promise<void>;
 type Rm = (filePath: string, options: { force: true }) => Promise<void>;
+type SyncDirectory = (directoryHandle: FileHandle) => Promise<void>;
 
 export interface AtomicWriterFileSystem {
   mkdir: Mkdir;
@@ -23,10 +24,23 @@ export interface AtomicWriterFileSystem {
   appendFile: AppendFile;
   rename: Rename;
   rm: Rm;
+  syncDirectory: SyncDirectory;
 }
 
 export type AtomicWriterOverrides = Partial<AtomicWriterFileSystem>;
 export type AtomicWriterPathGuard = (filePath: string) => Promise<void>;
+
+export class AtomicWriteDurabilityUncertainError extends Error {
+  readonly code = 'ATOMIC_WRITE_DURABILITY_UNCERTAIN';
+
+  constructor(cause: unknown) {
+    super(
+      'Atomic replacement completed, but directory durability could not be confirmed.',
+      { cause }
+    );
+    this.name = 'AtomicWriteDurabilityUncertainError';
+  }
+}
 
 export class AtomicWriter {
   private readonly fileSystem: AtomicWriterFileSystem;
@@ -42,6 +56,7 @@ export class AtomicWriter {
       appendFile,
       rename,
       rm,
+      syncDirectory: async (directoryHandle) => directoryHandle.sync(),
       ...overrides
     };
     this.projectRoot = projectRoot === undefined
@@ -159,6 +174,7 @@ export class AtomicWriter {
       directoryHandle,
       path.basename(targetPath)
     );
+    let targetReplaced = false;
     try {
       const tempHandle = await open(
         anchoredTempPath,
@@ -176,9 +192,14 @@ export class AtomicWriter {
       }
       await this.pathGuard?.(targetPath);
       await rename(anchoredTempPath, anchoredTargetPath);
-      await directoryHandle.sync();
+      targetReplaced = true;
+      try {
+        await this.fileSystem.syncDirectory(directoryHandle);
+      } catch (error) {
+        throw new AtomicWriteDurabilityUncertainError(error);
+      }
     } catch (error) {
-      await rm(anchoredTempPath, { force: true });
+      if (!targetReplaced) await rm(anchoredTempPath, { force: true });
       throw error;
     } finally {
       await closeHandles(handles);

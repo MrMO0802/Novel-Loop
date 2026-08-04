@@ -398,6 +398,33 @@ describe('chapter workspace contract', () => {
     }).success).toBe(false);
   });
 
+  test.each([
+    Array.from({ length: 6 }).reduce<string>(
+      (encoded) => encodeURIComponent(encoded),
+      '/tmp/novel-loop/selected_plan.md'
+    ),
+    Array.from({ length: 6 }).reduce<string>(
+      (encoded) => encoded.replaceAll('&', '&amp;'),
+      '&#47;tmp&#47;novel-loop&#47;selected_plan.md'
+    ),
+    '`workspace/private/cache.dat`',
+    'artifact:/tmp/novel-loop/private.json',
+    'artifact:workspace/private/cache.dat',
+    'selected_plan.md',
+    '`mission.json`'
+  ])('rejects deeply encoded and delimited internal values: %s', (leak) => {
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: validPlanReview.directions.map((direction, index) => (
+        index === 0 ? { ...direction, markdown: leak } : direction
+      ))
+    }).success).toBe(false);
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      alternatives: [{ ...validPlanReview.alternatives[0], excerpt: leak }]
+    }).success).toBe(false);
+  });
+
   test('keeps bounded author prose with ordinary slashes and web links usable', () => {
     const prose = 'Choose yes/no in chapter 1/2; reference https://example.com/story-notes.';
     expect(ChapterPlanReviewResultSchema.safeParse({
@@ -410,6 +437,30 @@ describe('chapter workspace contract', () => {
       directions: validPlanReview.directions.map((direction) => ({
         ...direction,
         excerpt: prose
+      }))
+    }).success).toBe(true);
+  });
+
+  test.each([
+    'Choose yes/no/maybe before the signal returns.',
+    'Track actor/goal/stakes through the midpoint.'
+  ])('keeps valid three-way slash prose usable: %s', (prose) => {
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      selectedPlan: {
+        ...validPlanReview.selectedPlan,
+        markdown: `# Direction\n\n${prose}\n`
+      },
+      alternatives: [{
+        ...validPlanReview.alternatives[0],
+        excerpt: prose,
+        strengths: [prose]
+      }],
+      directions: validPlanReview.directions.map((direction) => ({
+        ...direction,
+        markdown: `# Direction\n\n${prose}\n`,
+        excerpt: prose,
+        risks: [prose]
       }))
     }).success).toBe(true);
   });

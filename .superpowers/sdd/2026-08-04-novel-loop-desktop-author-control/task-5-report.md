@@ -208,3 +208,80 @@ No blocking concerns. The existing synchronization concern remains: the
 gateway reconstructs trusted review bindings from engine artifacts until the
 engine exports a single trusted read model. Existing untracked Playwright and
 screenshot artifacts remain outside this fix commit.
+
+## Fix Round 2
+
+### Status And Commit
+
+Complete on top of `cf433ff`. Scoped fix commit subject:
+`fix(desktop): close remaining authoring security gaps`.
+
+### RED
+
+- The fixed three-pass leakage decoder accepted paths and internal artifact
+  names after four or more percent/HTML-entity encoding layers, as well as
+  backtick, colon-delimited, and standalone `selected_plan.md` forms.
+- The broad separator heuristic rejected bounded author prose such as
+  `yes/no/maybe` and `actor/goal/stakes`.
+- Revision capacity eviction could remove the oldest token while it was
+  reserved for adoption; a subsequent busy release could not make it
+  retryable. Fully reserved stores also accepted allocations by invalidating
+  an in-flight token.
+
+### GREEN
+
+```bash
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/chapterContract.test.ts \
+  tests/main/chapterHandlers.test.ts \
+  tests/main/projectChapterService.test.ts \
+  tests/main/chapterStateProtection.test.ts
+```
+
+Result: 4 files passed, 159 tests passed, exit 0.
+
+```bash
+corepack pnpm --dir apps/desktop check
+corepack pnpm build
+```
+
+Result: desktop node/web/end-to-end TypeScript checks and the root build both
+passed, exit 0.
+
+### Leakage Guard
+
+- Leakage normalization now runs to a fixed point with a 16-pass ceiling and
+  the existing Markdown-size ceiling. It fails closed if normalization does
+  not converge within those bounds.
+- The same centralized guard detects prohibited paths, IDs, and known internal
+  filenames through nested percent/entity encoding, Markdown backticks, and
+  colon-delimited text in every renderer-facing free-text field.
+- The imprecise two-separator rule was removed; precise path/artifact patterns
+  retain ordinary three-way slash prose while aggregate and per-field bounds
+  remain unchanged.
+
+### Revision Capacity
+
+- Allocation at capacity evicts only the oldest unreserved revision. Reserved
+  revisions are excluded from expiry and capacity pruning until commit or
+  release.
+- If all 500 revision entries are reserved, allocation fails with one bounded
+  internal error instead of invalidating any adoption.
+- Tests reserve the oldest entry at capacity, allocate across projects, force
+  a non-mutating busy result, release and retry successfully, then verify that
+  success remains single-use. Concurrent and cross-project reservation checks
+  remain enforced.
+
+### Story State And Boundaries
+
+The Story State suite passes all 12 cases. Candidate containment, participant
+origin, 192-bit token shape, fixed IPC/preload methods, and renderer response
+shapes were not changed in this round. Existing untracked Playwright and
+screenshot artifacts remain outside the commit.
+
+### Concerns
+
+No blocking concerns. The bounded normalization intentionally rejects text
+that still changes after 16 decoding passes; this is a fail-closed public
+contract behavior. The existing trusted gateway read-model synchronization
+concern from Fix Round 1 remains unchanged.

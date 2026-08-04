@@ -854,6 +854,89 @@ describe('ProjectChapterService', () => {
     expect(gateway.adoptions).toHaveLength(1);
   });
 
+  test('protects a reserved oldest revision at capacity through busy release and retry', async () => {
+    const tokenContext = createTokenStore();
+    const revisions = Array.from({ length: 500 }, (_, index) => (
+      tokenContext.store.createRevision(revisionTokenInput(index))
+    ));
+    const gateway = new DeferredChapterGateway();
+    gateway.planReviews.set(projectRoot, planReview);
+    const service = new ProjectChapterService({
+      gateway,
+      projects: new MemoryProjectResolver(),
+      tokenStore: tokenContext.store
+    });
+    let reportAdoptionStarted!: () => void;
+    const adoptionStarted = new Promise<void>((resolve) => {
+      reportAdoptionStarted = resolve;
+    });
+    let releaseBusyAdoption!: () => void;
+    const busyAdoption = new Promise<void>((resolve) => {
+      releaseBusyAdoption = resolve;
+    });
+    const successfulAdoption = gateway.adoptRevision.bind(gateway);
+    gateway.adoptRevision = async () => {
+      reportAdoptionStarted();
+      await busyAdoption;
+      throw withCode('PROJECT_OPERATION_BUSY', 'lease busy');
+    };
+
+    const firstAttempt = service.adoptRevision({
+      projectKey,
+      revisionToken: revisions[0]!,
+      confirmInvalidation: true
+    });
+    await adoptionStarted;
+    expect(tokenContext.store.reserveRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(tokenContext.store.reserveRevision({
+      projectKey: secondProjectKey,
+      projectRoot: secondProjectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+
+    const replacement = tokenContext.store.createRevision({
+      ...revisionTokenInput(500),
+      projectKey: secondProjectKey,
+      projectRoot: secondProjectRoot
+    });
+    releaseBusyAdoption();
+    await expect(firstAttempt).resolves.toEqual({
+      outcome: 'blocked',
+      messageKey: 'generation_busy'
+    });
+
+    gateway.adoptRevision = successfulAdoption;
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: revisions[0]!,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'adopted' });
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: revisions[0]!,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(gateway.adoptions).toHaveLength(1);
+    expect(tokenContext.store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[1]!,
+      currentLatestCommittedChapter: 0
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(tokenContext.store.consumeRevision({
+      projectKey: secondProjectKey,
+      projectRoot: secondProjectRoot,
+      revisionToken: replacement,
+      currentLatestCommittedChapter: 0
+    }).outcome).toBe('resolved');
+  });
+
   test('keeps a stale-source revision token retryable after a non-mutating failure', async () => {
     const { gateway, service } = createService();
     gateway.planReviews.set(projectRoot, planReview);
@@ -1181,6 +1264,39 @@ describe('ChapterReviewTokenStore', () => {
       currentLatestCommittedChapter: 0
     })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
   });
+
+  test('fails bounded allocation when every revision binding is reserved', () => {
+    const { store } = createTokenStore();
+    const revisions = Array.from({ length: 500 }, (_, index) => {
+      const secondProject = index % 2 === 1;
+      const input = {
+        ...revisionTokenInput(index),
+        ...(secondProject
+          ? { projectKey: secondProjectKey, projectRoot: secondProjectRoot }
+          : {})
+      };
+      const revisionToken = store.createRevision(input);
+      expect(store.reserveRevision({
+        projectKey: input.projectKey,
+        projectRoot: input.projectRoot,
+        revisionToken,
+        currentLatestCommittedChapter: 0
+      }).outcome).toBe('resolved');
+      return { input, revisionToken };
+    });
+
+    expect(() => store.createRevision(revisionTokenInput(500)))
+      .toThrow('Chapter revision token capacity is fully reserved.');
+    for (const { revisionToken } of revisions) {
+      store.releaseRevision(revisionToken);
+    }
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!.revisionToken,
+      currentLatestCommittedChapter: 0
+    }).outcome).toBe('resolved');
+  });
 });
 
 function createService(overrides: {
@@ -1301,6 +1417,18 @@ function reviewTokenInput() {
     reviewHash: 'a'.repeat(64),
     missionHash: 'b'.repeat(64),
     options: [{ purpose: 'direction' as const, trustedId: 'plan_001' }]
+  };
+}
+
+function revisionTokenInput(index: number) {
+  return {
+    projectKey,
+    projectRoot,
+    chapterNumber: 1,
+    latestCommittedChapter: 0,
+    purpose: 'plan' as const,
+    sourceHash: String(index).padStart(64, '0'),
+    revisionId: `author_revision_${index + 1}`
   };
 }
 

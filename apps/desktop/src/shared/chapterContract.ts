@@ -6,6 +6,8 @@ const MAX_ALTERNATIVES = 10;
 const MAX_MISSION_ITEMS = 100;
 const MAX_PARTICIPANTS = 32;
 const MAX_SCENES = 100;
+const MAX_LEAKAGE_NORMALIZATION_PASSES = 16;
+const MAX_LEAKAGE_NORMALIZED_CHARACTERS = MAX_MARKDOWN_BYTES;
 
 export const ChapterReviewTokenSchema = opaqueToken('chapter_review');
 export const ChapterOptionTokenSchema = opaqueToken('chapter_option');
@@ -520,33 +522,40 @@ function enforcePlanReview(
 }
 
 function containsInternalValue(text: string): boolean {
-  const normalized = normalizeLeakageText(text);
+  const normalization = normalizeLeakageText(text);
+  if (!normalization.complete) return true;
+  const normalized = normalization.text;
   const withoutWebUrls = normalized.replace(
     /\bhttps?:\/\/[^\s<>{}\[\]"']+/giu,
     ' '
   );
   return (
     /\bfile:\/\//iu.test(normalized)
-    ||
-    /(?:^|[\s([{"'=])\/(?!\/)[^\s<>{}\[\]]+/u.test(withoutWebUrls)
-    || /(?:^|[\s([{"'=])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])[^\s<>{}\[\]]*/u
+    || /(?:^|[\s([{"'`=:])\/(?!\/)[^\s<>{}\[\]]+/u.test(withoutWebUrls)
+    || /(?:^|[\s([{"'`=:])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])[^\s<>{}\[\]]*/u
       .test(withoutWebUrls)
-    || /(?:^|[\s([{"'=])(?:\.{1,2}[\\/])?(?:[A-Za-z0-9_.-]+[\\/])+(?:[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12})(?=$|[\s)\]}>.,;:!?])/u
-      .test(withoutWebUrls)
-    || /(?:^|[\s([{"'=])(?:[A-Za-z0-9_.-]+[\\/]){2,}[A-Za-z0-9_.-]+(?=$|[\s)\]}>.,;:!?])/u
+    || /(?:^|[\s([{"'`=:])(?:\.{1,2}[\\/])?(?:[A-Za-z0-9_.-]+[\\/])+(?:[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12})(?=$|[\s`)'\]}>.,;:!?])/u
       .test(withoutWebUrls)
     || /\b(?:author_revision|candidate|chapter|character|char|debt|event|mission|objective|obj|plan|revision|run|scene|task)_[A-Za-z0-9][A-Za-z0-9_-]*\b/iu
       .test(normalized)
     || /\b[a-f0-9]{64}\b/iu.test(normalized)
     || /\b[A-Za-z0-9_.-]+\.schema(?:\.json)?\b/iu.test(normalized)
+    || /\b(?:arc_map\.json|chapter_queue\.json|draft\.md|global_outline\.md|mission\.json|ranking\.json|scene_cards\.json|selected_plan\.md|story_state\.json|volume_[0-9]+_outline\.md)\b/iu
+      .test(normalized)
     || /\b(?:auth|authorization|candidateId|profile|provider|runId|sourceHash|taskId)\s*[:=]/iu
       .test(normalized)
   );
 }
 
-function normalizeLeakageText(text: string): string {
+function normalizeLeakageText(text: string): {
+  text: string;
+  complete: boolean;
+} {
   let normalized = text.normalize('NFKC');
-  for (let pass = 0; pass < 3; pass += 1) {
+  if (normalized.length > MAX_LEAKAGE_NORMALIZED_CHARACTERS) {
+    return { text: '', complete: false };
+  }
+  for (let pass = 0; pass < MAX_LEAKAGE_NORMALIZATION_PASSES; pass += 1) {
     const previous = normalized;
     normalized = normalized
       .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));?/giu, (
@@ -569,10 +578,17 @@ function normalizeLeakageText(text: string): string {
         (_encoded, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))
       );
     }
-    normalized = normalized.replace(/\\([/._:#?%])/gu, '$1');
-    if (normalized === previous) break;
+    normalized = normalized
+      .replace(/\\([/._:#?%])/gu, '$1')
+      .normalize('NFKC');
+    if (normalized.length > MAX_LEAKAGE_NORMALIZED_CHARACTERS) {
+      return { text: '', complete: false };
+    }
+    if (normalized === previous) {
+      return { text: normalized, complete: true };
+    }
   }
-  return normalized;
+  return { text: normalized, complete: false };
 }
 
 function decodeNumericEntity(

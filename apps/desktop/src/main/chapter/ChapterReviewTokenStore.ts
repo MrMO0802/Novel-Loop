@@ -208,19 +208,21 @@ export class ChapterReviewTokenStore {
 
   createRevision(input: CreateRevisionInput): string {
     this.pruneExpired();
+    const evictionToken = this.revisions.size < MAX_REVISION_BINDINGS
+      ? null
+      : this.oldestUnreservedRevisionToken();
+    if (this.revisions.size >= MAX_REVISION_BINDINGS && evictionToken === null) {
+      throw new Error('Chapter revision token capacity is fully reserved.');
+    }
     const revisionToken = this.createUniqueToken(
       'chapter_revision',
       this.revisions
     );
+    if (evictionToken !== null) this.revisions.delete(evictionToken);
     this.revisions.set(revisionToken, {
       ...input,
       createdAtMs: this.now()
     });
-    this.enforceCapacity(
-      this.revisions,
-      MAX_REVISION_BINDINGS,
-      (token) => this.reservedRevisions.delete(token)
-    );
     return revisionToken;
   }
 
@@ -285,6 +287,13 @@ export class ChapterReviewTokenStore {
     return `${prefix}_${Buffer.from(bytes).toString('hex')}`;
   }
 
+  private oldestUnreservedRevisionToken(): string | null {
+    for (const token of this.revisions.keys()) {
+      if (!this.reservedRevisions.has(token)) return token;
+    }
+    return null;
+  }
+
   private pruneExpired(): void {
     const now = this.now();
     for (const [token, review] of this.reviews) {
@@ -293,23 +302,20 @@ export class ChapterReviewTokenStore {
       }
     }
     for (const [token, revision] of this.revisions) {
-      if (now - revision.createdAtMs >= TOKEN_TTL_MS) {
+      if (
+        now - revision.createdAtMs >= TOKEN_TTL_MS
+        && !this.reservedRevisions.has(token)
+      ) {
         this.revisions.delete(token);
-        this.reservedRevisions.delete(token);
       }
     }
   }
 
-  private enforceCapacity<T>(
-    store: Map<string, T>,
-    capacity: number,
-    onDelete?: (token: string) => void
-  ): void {
+  private enforceCapacity<T>(store: Map<string, T>, capacity: number): void {
     while (store.size > capacity) {
       const oldestToken = store.keys().next().value as string | undefined;
       if (oldestToken === undefined) return;
       store.delete(oldestToken);
-      onDelete?.(oldestToken);
     }
   }
 }

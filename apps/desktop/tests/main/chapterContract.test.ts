@@ -425,6 +425,28 @@ describe('chapter workspace contract', () => {
     }).success).toBe(false);
   });
 
+  test('rejects HTML named aliases in renderer-facing prose', () => {
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      alternatives: [{
+        ...validPlanReview.alternatives[0],
+        excerpt: 'Use plan&lowbar;002 for this direction.'
+      }]
+    }).success).toBe(false);
+  });
+
+  test('rejects nested HTML named aliases in renderer-facing Markdown', () => {
+    const nestedArtifact = 'selected&amp;amp;lowbar;plan&amp;amp;period;md';
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: validPlanReview.directions.map((direction, index) => (
+        index === 0
+          ? { ...direction, markdown: `# Direction\n\n${nestedArtifact}\n` }
+          : direction
+      ))
+    }).success).toBe(false);
+  });
+
   test('keeps bounded author prose with ordinary slashes and web links usable', () => {
     const prose = 'Choose yes/no in chapter 1/2; reference https://example.com/story-notes.';
     expect(ChapterPlanReviewResultSchema.safeParse({

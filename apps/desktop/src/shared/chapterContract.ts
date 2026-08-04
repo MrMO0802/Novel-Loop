@@ -1,3 +1,4 @@
+import { decodeHTML } from 'entities';
 import { z } from 'zod';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
@@ -557,19 +558,7 @@ function normalizeLeakageText(text: string): {
   }
   for (let pass = 0; pass < MAX_LEAKAGE_NORMALIZATION_PASSES; pass += 1) {
     const previous = normalized;
-    normalized = normalized
-      .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));?/giu, (
-        entity,
-        hexadecimal: string | undefined,
-        decimal: string | undefined
-      ) => decodeNumericEntity(entity, hexadecimal, decimal))
-      .replace(/&(amp|bsol|colon|period|sol);/giu, (entity, name: string) => ({
-        amp: '&',
-        bsol: '\\',
-        colon: ':',
-        period: '.',
-        sol: '/'
-      })[name.toLowerCase()] ?? entity);
+    normalized = decodeHTML(normalized);
     try {
       normalized = decodeURIComponent(normalized);
     } catch {
@@ -589,16 +578,4 @@ function normalizeLeakageText(text: string): {
     }
   }
   return { text: normalized, complete: false };
-}
-
-function decodeNumericEntity(
-  entity: string,
-  hexadecimal: string | undefined,
-  decimal: string | undefined
-): string {
-  const codePoint = Number.parseInt(hexadecimal ?? decimal ?? '', hexadecimal === undefined ? 10 : 16);
-  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
-    return entity;
-  }
-  return String.fromCodePoint(codePoint);
 }

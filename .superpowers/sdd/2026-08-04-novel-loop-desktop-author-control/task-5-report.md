@@ -285,3 +285,59 @@ No blocking concerns. The bounded normalization intentionally rejects text
 that still changes after 16 decoding passes; this is a fail-closed public
 contract behavior. The existing trusted gateway read-model synchronization
 concern from Fix Round 1 remains unchanged.
+
+## Fix Round 3
+
+### Status And Commit
+
+Complete on top of `04f7468`. Scoped fix commit subject:
+`fix(desktop): decode complete HTML entities in authoring guard`.
+
+### RED
+
+- `plan&lowbar;002` in a renderer-facing excerpt passed the leakage guard.
+- Nested named entities producing `selected_plan.md` in renderer-facing
+  Markdown also passed. The focused contract run failed exactly these two new
+  cases while its other 59 tests passed.
+
+### GREEN
+
+```bash
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/chapterContract.test.ts \
+  tests/main/chapterHandlers.test.ts \
+  tests/main/projectChapterService.test.ts \
+  tests/main/chapterStateProtection.test.ts
+```
+
+Result: 4 files passed, 161 tests passed, exit 0. The focused contract file
+passes all 61 tests, and the Story State file passes all 12 tests.
+
+```bash
+corepack pnpm --dir apps/desktop check
+corepack pnpm build
+```
+
+Result: desktop node/web/end-to-end TypeScript checks and the root build both
+passed, exit 0.
+
+### Entity Decoding
+
+- The hand-maintained numeric/named entity replacements were replaced by the
+  standards-complete `decodeHTML` implementation from `entities@6.0.1`.
+- `entities` was already resolved transitively in the workspace lockfile and
+  is now declared as a direct desktop runtime dependency; no new package
+  version or large parser dependency was introduced.
+- Decoding remains inside the existing fixed-point loop, so nested aliases are
+  normalized while the 2 MiB character ceiling, 16-pass ceiling, NFKC,
+  percent decoding, Markdown unescaping, and fail-closed behavior stay intact.
+- Direct regressions cover `&lowbar;` in author prose and nested named aliases
+  in Markdown. Existing valid three-way slash prose cases remain green.
+
+### Boundaries And Concerns
+
+No blocking concerns. This round changes only entity normalization, its direct
+dependency declaration, focused contract regressions, and this report. Story
+State, token storage, candidate containment, participant origin, IPC/preload,
+and renderer response shapes are unchanged. Existing untracked Playwright and
+screenshot artifacts remain outside the commit.

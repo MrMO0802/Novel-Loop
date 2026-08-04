@@ -7,8 +7,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import {
   adoptAuthorRevision,
   archiveInvalidatedChapterArtifacts,
+  bindAuthorRevisionPublication,
   createAuthorRevision,
   discardReadyAuthorRevision,
+  promoteAuthorRevisionPublication,
+  readAuthorRevision,
   readLatestAdoptedDraft
 } from '../../src/app/chapterAuthorRevision.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
@@ -113,6 +116,145 @@ describe('chapter author revision storage', () => {
 
     await expect(store.exists(paths.projectArtifact(created.relativeRecordPath))).resolves.toBe(false);
     await expect(store.exists(paths.projectArtifact(created.relativeMarkdownPath))).resolves.toBe(false);
+  });
+
+  test('keeps an adjustment non-adoptable until durable publication binding is promoted', async () => {
+    const sourcePath = paths.chapterArtifact(1, 'selected_plan.md');
+    const source = await store.readText(sourcePath);
+    const created = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      mode: 'codex_adjustment',
+      initialState: 'publishing',
+      sourceArtifactPath: sourcePath,
+      sourceCandidateId: 'plan_001',
+      expectedSourceHash: hashText(source),
+      content: '# Publishing candidate\n',
+      authorInstruction: 'Adjust safely.'
+    });
+
+    expect(created.record).toMatchObject({
+      state: 'publishing',
+      publication: null
+    });
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId
+    })).rejects.toMatchObject({ code: 'AUTHOR_REVISION_NOT_ADOPTABLE' });
+    await expect(readAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    })).rejects.toMatchObject({ code: 'AUTHOR_REVISION_NOT_ADOPTABLE' });
+
+    const bound = await bindAuthorRevisionPublication({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash,
+      revisionToken: `chapter_revision_${'7'.repeat(48)}`,
+      projectKey: 'project_radio',
+      latestCommittedChapter: 0,
+      purpose: 'plan'
+    });
+    expect(bound).toMatchObject({
+      state: 'publishing',
+      publication: {
+        revisionToken: `chapter_revision_${'7'.repeat(48)}`,
+        projectKey: 'project_radio',
+        purpose: 'plan'
+      }
+    });
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId
+    })).rejects.toMatchObject({ code: 'AUTHOR_REVISION_NOT_ADOPTABLE' });
+
+    const ready = await promoteAuthorRevisionPublication({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash,
+      revisionToken: `chapter_revision_${'7'.repeat(48)}`
+    });
+    expect(ready.state).toBe('ready');
+    await expect(readAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    })).resolves.toMatchObject({ record: { state: 'ready' } });
+  });
+
+  test('leaves schema-valid publishing records across bind, promotion, and cleanup failures', async () => {
+    const sourcePath = paths.chapterArtifact(1, 'selected_plan.md');
+    const source = await store.readText(sourcePath);
+    const created = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      mode: 'codex_adjustment',
+      initialState: 'publishing',
+      sourceArtifactPath: sourcePath,
+      sourceCandidateId: 'plan_001',
+      expectedSourceHash: hashText(source),
+      content: '# Publishing candidate\n',
+      authorInstruction: 'Adjust safely.'
+    });
+    const recordPath = paths.projectArtifact(created.relativeRecordPath);
+    const originalWriteJson = store.writeJson.bind(store);
+    vi.spyOn(store, 'writeJson').mockRejectedValueOnce(new Error('bind failed'));
+    await expect(bindAuthorRevisionPublication({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash,
+      revisionToken: `chapter_revision_${'8'.repeat(48)}`,
+      projectKey: 'project_radio',
+      latestCommittedChapter: 0,
+      purpose: 'plan'
+    }, store)).rejects.toThrow('bind failed');
+    await expect(store.readJson(recordPath, AuthorRevisionRecordSchema)).resolves
+      .toMatchObject({ state: 'publishing', publication: null });
+
+    vi.mocked(store.writeJson).mockImplementation(originalWriteJson);
+    await bindAuthorRevisionPublication({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash,
+      revisionToken: `chapter_revision_${'8'.repeat(48)}`,
+      projectKey: 'project_radio',
+      latestCommittedChapter: 0,
+      purpose: 'plan'
+    }, store);
+    vi.mocked(store.writeJson).mockRejectedValueOnce(new Error('promotion failed'));
+    await expect(promoteAuthorRevisionPublication({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash,
+      revisionToken: `chapter_revision_${'8'.repeat(48)}`
+    }, store)).rejects.toThrow('promotion failed');
+    await expect(store.readJson(recordPath, AuthorRevisionRecordSchema)).resolves
+      .toMatchObject({
+        state: 'publishing',
+        publication: { revisionToken: `chapter_revision_${'8'.repeat(48)}` }
+      });
+
+    vi.spyOn(store, 'removePath').mockRejectedValueOnce(new Error('cleanup failed'));
+    await expect(discardReadyAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    }, store)).rejects.toThrow('cleanup failed');
+    await expect(store.readJson(recordPath, AuthorRevisionRecordSchema)).resolves
+      .toMatchObject({ state: 'publishing' });
   });
 
   test('creates sequential selected-plan revisions without changing Story State or generated sources', async () => {

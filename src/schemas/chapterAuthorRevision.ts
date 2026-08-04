@@ -38,11 +38,20 @@ export const AuthorRevisionModeSchema = z.enum([
 
 export const AuthorRevisionStateSchema = z.enum([
   'working',
+  'publishing',
   'ready',
   'adopted',
   'rejected',
   'superseded'
 ]);
+
+export const AuthorRevisionPublicationSchema = z.object({
+  revisionToken: z.string().regex(/^chapter_revision_[a-f0-9]{48}$/u),
+  projectKey: z.string().trim().min(1).max(96).regex(/^project_[A-Za-z0-9_-]+$/u),
+  latestCommittedChapter: z.number().int().nonnegative(),
+  purpose: z.enum(['mission', 'plan']),
+  boundAt: TimestampSchema
+}).strict();
 
 export const AuthorInvalidatedNodeSchema = z.enum([
   'mission',
@@ -68,6 +77,7 @@ export const AuthorRevisionRecordSchema = z.object({
   workingCopyPath: ProjectRelativePathSchema,
   workingCopyHash: Sha256Schema,
   state: AuthorRevisionStateSchema,
+  publication: AuthorRevisionPublicationSchema.nullable().optional(),
   authorInstruction: z.string().max(4_000).nullable(),
   createdAt: TimestampSchema,
   adoptedAt: TimestampSchema.nullable(),
@@ -81,6 +91,30 @@ export const AuthorRevisionRecordSchema = z.object({
       path: ['sourceCandidateId'],
       message: 'Only selected plan revisions bind a source candidate.'
     });
+  }
+  if (record.state === 'publishing' && record.mode !== 'codex_adjustment') {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['state'],
+      message: 'Only Codex adjustments may enter publication.'
+    });
+  }
+  if (record.publication !== undefined && record.publication !== null) {
+    const expectedPurpose = record.artifactKind === 'mission'
+      ? 'mission'
+      : record.artifactKind === 'selected_plan'
+        ? 'plan'
+        : null;
+    if (
+      record.mode !== 'codex_adjustment'
+      || record.publication.purpose !== expectedPurpose
+    ) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['publication'],
+        message: 'Publication metadata does not match the adjustment artifact.'
+      });
+    }
   }
 });
 
@@ -140,6 +174,7 @@ export const AuthorEditInvalidationReportSchema = z.object({
 export type AuthorRevisionArtifactKind = z.infer<typeof AuthorRevisionArtifactKindSchema>;
 export type AuthorRevisionMode = z.infer<typeof AuthorRevisionModeSchema>;
 export type AuthorRevisionState = z.infer<typeof AuthorRevisionStateSchema>;
+export type AuthorRevisionPublication = z.infer<typeof AuthorRevisionPublicationSchema>;
 export type AuthorInvalidatedNode = z.infer<typeof AuthorInvalidatedNodeSchema>;
 export type AuthorRevisionRecord = z.infer<typeof AuthorRevisionRecordSchema>;
 export type ChapterDirectionSelection = z.infer<typeof ChapterDirectionSelectionSchema>;

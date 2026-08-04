@@ -135,7 +135,14 @@ export async function adjustChapterMission(
           0,
           MAX_SELECTED_PLAN_CONTEXT_CHARACTERS
         ),
-        STORY_STATE_SUMMARY: summarizeStoryState(context.storyState)
+        STORY_STATE_SUMMARY: summarizeStoryState(
+          context.storyState,
+          relevantCharacterIds(
+            context.mission,
+            context.selectedPlanText,
+            context.storyState
+          )
+        )
       }
     );
     const response = await createProvider(input, context).complete({
@@ -165,6 +172,7 @@ export async function adjustChapterMission(
       chapterNumber: input.chapterNumber,
       artifactKind: 'mission',
       mode: 'codex_adjustment',
+      initialState: 'publishing',
       sourceArtifactPath: sourcePath,
       sourceCandidateId: null,
       expectedSourceHash: input.expectedSourceHash,
@@ -209,7 +217,10 @@ export async function adjustChapterPlan(
         AUTHOR_INSTRUCTION: input.authorInstruction,
         CURRENT_PLAN: sourceText,
         MISSION_CONTEXT: summarizeMissionForPlan(context.mission),
-        STORY_STATE_SUMMARY: summarizeStoryState(context.storyState)
+        STORY_STATE_SUMMARY: summarizeStoryState(
+          context.storyState,
+          relevantCharacterIds(context.mission, sourceText, context.storyState)
+        )
       }
     );
     const response = await createProvider(input, context).complete({
@@ -244,6 +255,7 @@ export async function adjustChapterPlan(
       chapterNumber: input.chapterNumber,
       artifactKind: 'selected_plan',
       mode: 'codex_adjustment',
+      initialState: 'publishing',
       sourceArtifactPath: sourcePath,
       sourceCandidateId: sourcePlan.candidateId,
       expectedSourceHash: input.expectedSourceHash,
@@ -375,6 +387,7 @@ function parseMissionAdjustment(
       || !missionObjectiveReferencesAreValid(mission, context.mission)
       || !missionCharacterReferencesAreValid(mission, context.storyState)
       || !missionDebtReferencesAreValid(mission, context.storyState)
+      || !missionAuthorFacingStrings(mission).every(isAuthorFacingText)
     ) {
       throw new Error('Mission references are invalid.');
     }
@@ -413,6 +426,24 @@ function missionObjectiveReferencesAreValid(
   const outputIds = mission.requiredObjectives.map(({ id }) => id);
   return new Set(outputIds).size === outputIds.length
     && outputIds.every((id) => sourceIds.has(id));
+}
+
+function missionAuthorFacingStrings(mission: ChapterMission): string[] {
+  return [
+    mission.chapterFunction,
+    ...mission.requiredObjectives.map(({ text }) => text),
+    ...mission.debtsToIntroduce.map(({ promise }) => promise),
+    ...mission.characterDeltas.flatMap(({ from, to, evidenceRequired }) => (
+      [from, to, evidenceRequired]
+    )),
+    ...mission.charactersToIntroduce.flatMap(({ name, role }) => [name, role]),
+    ...mission.readerInformationDelta.newKnowledge,
+    ...mission.readerInformationDelta.newSuspicions,
+    ...mission.readerInformationDelta.questionsToMaintain,
+    ...mission.readerInformationDelta.questionsToAnswer,
+    ...mission.forbiddenMoves,
+    ...mission.targetEmotionalCurve
+  ];
 }
 
 function projectMissionCandidate(
@@ -656,10 +687,14 @@ function throwIfCancelled(input: ChapterAuthorAdjustmentInput): void {
   );
 }
 
-function summarizeStoryState(storyState: StoryState): string {
+function summarizeStoryState(
+  storyState: StoryState,
+  relevantIds: readonly string[]
+): string {
+  const prioritizedCharacters = prioritizeStoryCharacters(storyState, relevantIds);
   const summary = {
     latestCommittedChapter: storyState.latestCommittedChapter,
-    characters: storyState.characters.slice(0, 5).map((character) => ({
+    characters: prioritizedCharacters.slice(0, 5).map((character) => ({
       id: clipText(character.id, 100),
       name: clipText(character.name, 80),
       role: clipText(character.role, 80),
@@ -699,7 +734,7 @@ function summarizeStoryState(storyState: StoryState): string {
   }
   return JSON.stringify({
     latestCommittedChapter: storyState.latestCommittedChapter,
-    characters: storyState.characters.slice(0, 2).map((character) => ({
+    characters: prioritizedCharacters.slice(0, 2).map((character) => ({
       id: clipText(character.id, 60),
       name: clipText(character.name, 60),
       role: clipText(character.role, 60),
@@ -729,6 +764,43 @@ function summarizeStoryState(storyState: StoryState): string {
         strictness
       }))
   }, null, 2);
+}
+
+function relevantCharacterIds(
+  mission: ChapterMission,
+  planText: string,
+  storyState: StoryState
+): string[] {
+  const planReferencedIds = storyState.characters
+    .map(({ id }) => id)
+    .filter((characterId) => planText.includes(characterId));
+  return uniqueStrings([
+    ...mission.participatingCharacterIds,
+    ...planReferencedIds,
+    ...mission.characterDeltas.map(({ characterId }) => characterId)
+  ]);
+}
+
+function prioritizeStoryCharacters(
+  storyState: StoryState,
+  relevantIds: readonly string[]
+): StoryState['characters'] {
+  const charactersById = new Map(
+    storyState.characters.map((character) => [character.id, character])
+  );
+  const prioritized = relevantIds.flatMap((characterId) => {
+    const character = charactersById.get(characterId);
+    return character === undefined ? [] : [character];
+  });
+  const selectedIds = new Set(prioritized.map(({ id }) => id));
+  return [
+    ...prioritized,
+    ...storyState.characters.filter(({ id }) => !selectedIds.has(id))
+  ];
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function invalidOutputError(): AppError {

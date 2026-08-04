@@ -370,6 +370,7 @@ export {
   AuthorRevisionArtifactKindSchema,
   AuthorRevisionModeSchema,
   AuthorRevisionRecordSchema,
+  AuthorRevisionPublicationSchema,
   AuthorRevisionStateSchema,
   ChapterDirectionSelectionSchema,
   type AuthorArtifactReference,
@@ -379,6 +380,7 @@ export {
   type AuthorRevisionArtifactKind,
   type AuthorRevisionMode,
   type AuthorRevisionRecord,
+  type AuthorRevisionPublication,
   type AuthorRevisionState,
   type ChapterDirectionSelection
 } from './chapterAuthorRevision.js';

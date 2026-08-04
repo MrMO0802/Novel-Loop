@@ -51,9 +51,40 @@ describe('chapter author revision schemas', () => {
     for (const mode of ['direct_edit', 'codex_adjustment'] as const) {
       expect(AuthorRevisionModeSchema.parse(mode)).toBe(mode);
     }
-    for (const state of ['working', 'ready', 'adopted', 'rejected', 'superseded'] as const) {
+    for (const state of [
+      'working',
+      'publishing',
+      'ready',
+      'adopted',
+      'rejected',
+      'superseded'
+    ] as const) {
       expect(AuthorRevisionStateSchema.parse(state)).toBe(state);
     }
+  });
+
+  test('defines strict internal publication metadata for publishing adjustments', () => {
+    const publishing = AuthorRevisionRecordSchema.parse({
+      ...validRevision,
+      mode: 'codex_adjustment',
+      state: 'publishing',
+      publication: {
+        revisionToken: `chapter_revision_${'7'.repeat(48)}`,
+        projectKey: 'project_radio',
+        latestCommittedChapter: 0,
+        purpose: 'plan',
+        boundAt: '2026-08-04T01:01:00.000Z'
+      }
+    });
+
+    expect(publishing.publication).toMatchObject({
+      projectKey: 'project_radio',
+      purpose: 'plan'
+    });
+    expect(() => AuthorRevisionRecordSchema.parse({
+      ...publishing,
+      publication: { ...publishing.publication, projectRoot: '/private/project' }
+    })).toThrow();
   });
 
   test('accepts nullable revision fields and enforces lowercase SHA-256 hashes', () => {

@@ -217,6 +217,47 @@ export interface TrustedDiscardAdjustmentInput {
   expectedSourceHash: string;
 }
 
+export interface TrustedBindAdjustmentPublicationInput
+  extends TrustedDiscardAdjustmentInput {
+  revisionToken: string;
+  projectKey: string;
+  latestCommittedChapter: number;
+  purpose: 'mission' | 'plan';
+}
+
+export interface TrustedPromoteAdjustmentPublicationInput
+  extends TrustedDiscardAdjustmentInput {
+  revisionToken: string;
+}
+
+export interface TrustedRecoverableAdjustmentPublication {
+  state: 'publishing' | 'ready';
+  revisionId: string;
+  sourceHash: string;
+  chapterNumber: number;
+  publication: null | {
+    revisionToken: string;
+    projectKey: string;
+    latestCommittedChapter: number;
+    purpose: 'mission' | 'plan';
+  };
+}
+
+const TrustedRecoverableAdjustmentPublicationSchema = z.object({
+  state: z.enum(['publishing', 'ready']),
+  revisionId: z.string().regex(
+    /^author_revision_ch\d{3}_(?:mission|plan)_v[1-9]\d*$/u
+  ),
+  sourceHash: z.string().regex(/^[a-f0-9]{64}$/u),
+  chapterNumber: z.number().int().positive(),
+  publication: z.object({
+    revisionToken: z.string().regex(/^chapter_revision_[a-f0-9]{48}$/u),
+    projectKey: z.string().regex(/^project_[A-Za-z0-9_-]+$/u).max(96),
+    latestCommittedChapter: z.number().int().nonnegative(),
+    purpose: z.enum(['mission', 'plan'])
+  }).strict().nullable()
+}).strict();
+
 export interface ChapterEngineGateway {
   inspect(projectRoot: string): Promise<ChapterInspection>;
   plan(input: RunChapterInput): Promise<void>;
@@ -226,6 +267,15 @@ export interface ChapterEngineGateway {
   ): Promise<TrustedAdjustmentResult>;
   adjustPlan(input: TrustedPlanAdjustmentInput): Promise<TrustedAdjustmentResult>;
   discardAdjustmentRevision(input: TrustedDiscardAdjustmentInput): Promise<void>;
+  bindAdjustmentPublication(
+    input: TrustedBindAdjustmentPublicationInput
+  ): Promise<void>;
+  promoteAdjustmentPublication(
+    input: TrustedPromoteAdjustmentPublicationInput
+  ): Promise<void>;
+  listAdjustmentPublications(
+    projectRoot: string
+  ): Promise<TrustedRecoverableAdjustmentPublication[]>;
   readPlan(projectRoot: string): Promise<TrustedChapterPlanReview>;
   readDraft(projectRoot: string): Promise<ChapterDraftReviewResult>;
   selectDirection(input: {
@@ -292,7 +342,7 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       onStage: input.onStage
     };
     const created = await adjustDesktopChapterMission(trustedInput);
-    assertReadyAdjustment(created.record, 'mission');
+    assertPublishingAdjustment(created.record, 'mission');
     return {
       revisionId: created.record.revisionId,
       sourceHash: created.record.sourceHash,
@@ -317,7 +367,7 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       onStage: input.onStage
     };
     const created = await adjustDesktopChapterPlan(trustedInput);
-    assertReadyAdjustment(created.record, 'selected_plan');
+    assertPublishingAdjustment(created.record, 'selected_plan');
     return {
       revisionId: created.record.revisionId,
       sourceHash: created.record.sourceHash,
@@ -332,6 +382,52 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       'novel-loop-engine/desktop'
     );
     await discardDesktopChapterAdjustmentRevision(input);
+  }
+
+  async bindAdjustmentPublication(
+    input: TrustedBindAdjustmentPublicationInput
+  ): Promise<void> {
+    const { bindDesktopChapterAdjustmentPublication } = await import(
+      'novel-loop-engine/desktop'
+    );
+    await bindDesktopChapterAdjustmentPublication(input);
+  }
+
+  async promoteAdjustmentPublication(
+    input: TrustedPromoteAdjustmentPublicationInput
+  ): Promise<void> {
+    const { promoteDesktopChapterAdjustmentPublication } = await import(
+      'novel-loop-engine/desktop'
+    );
+    await promoteDesktopChapterAdjustmentPublication(input);
+  }
+
+  async listAdjustmentPublications(
+    projectRoot: string
+  ): Promise<TrustedRecoverableAdjustmentPublication[]> {
+    const { listDesktopChapterAdjustmentPublications } = await import(
+      'novel-loop-engine/desktop'
+    );
+    const entries = await listDesktopChapterAdjustmentPublications({
+      projectRoot
+    });
+    return entries.map(({ record }) => (
+      TrustedRecoverableAdjustmentPublicationSchema.parse({
+        state: record.state,
+        revisionId: record.revisionId,
+        sourceHash: record.sourceHash,
+        chapterNumber: record.chapterNumber,
+        publication: record.publication == null
+          ? null
+          : {
+              revisionToken: record.publication.revisionToken,
+              projectKey: record.publication.projectKey,
+              latestCommittedChapter:
+                record.publication.latestCommittedChapter,
+              purpose: record.publication.purpose
+            }
+      })
+    ));
   }
 
   async readPlan(projectRoot: string): Promise<TrustedChapterPlanReview> {
@@ -780,11 +876,12 @@ function markdownExcerpt(markdown: string): string {
   return (paragraph ?? '').slice(0, 8_000).trim();
 }
 
-function assertReadyAdjustment(
+function assertPublishingAdjustment(
   record: {
     artifactKind: string;
     mode: string;
     state: string;
+    publication?: unknown;
     storyStateMutated: boolean;
   },
   artifactKind: 'mission' | 'selected_plan'
@@ -792,7 +889,8 @@ function assertReadyAdjustment(
   if (
     record.artifactKind !== artifactKind
     || record.mode !== 'codex_adjustment'
-    || record.state !== 'ready'
+    || record.state !== 'publishing'
+    || record.publication !== null
     || record.storyStateMutated
   ) {
     throw invalidTrustedReview();

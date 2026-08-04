@@ -81,6 +81,12 @@ interface CreateRevisionInput {
   revisionId: string;
 }
 
+interface RevisionPublicationReservation {
+  evictionToken: string | null;
+  evictedBinding?: StoredRevisionToken;
+  published: boolean;
+}
+
 interface ConsumeRevisionInput {
   projectKey: string;
   projectRoot: string;
@@ -102,7 +108,10 @@ export class ChapterReviewTokenStore {
   private readonly randomBytes: (size: number) => Uint8Array;
   private readonly reviews = new Map<string, StoredReviewToken>();
   private readonly revisions = new Map<string, StoredRevisionToken>();
-  private readonly revisionPublications = new Set<string>();
+  private readonly revisionPublications = new Map<
+    string,
+    RevisionPublicationReservation
+  >();
   private readonly reservedRevisions = new Set<string>();
 
   constructor(dependencies: TokenStoreDependencies = {}) {
@@ -210,7 +219,9 @@ export class ChapterReviewTokenStore {
   createRevision(input: CreateRevisionInput): string {
     const revisionToken = this.reserveRevisionPublication();
     try {
-      return this.publishReservedRevision(revisionToken, input);
+      this.publishReservedRevision(revisionToken, input);
+      this.commitRevisionPublication(revisionToken);
+      return revisionToken;
     } catch (error) {
       this.discardRevisionPublication(revisionToken);
       throw error;
@@ -219,7 +230,9 @@ export class ChapterReviewTokenStore {
 
   reserveRevisionPublication(): string {
     this.pruneExpired();
-    const capacityUsed = this.revisions.size + this.revisionPublications.size;
+    const pendingReservations = [...this.revisionPublications.values()]
+      .filter(({ published }) => !published).length;
+    const capacityUsed = this.revisions.size + pendingReservations;
     const evictionToken = capacityUsed < MAX_REVISION_BINDINGS
       ? null
       : this.oldestUnreservedRevisionToken();
@@ -229,27 +242,110 @@ export class ChapterReviewTokenStore {
         { code: 'CHAPTER_REVISION_TOKEN_CAPACITY' }
       );
     }
-    if (evictionToken !== null) this.revisions.delete(evictionToken);
     const revisionToken = this.createUniqueRevisionToken();
-    this.revisionPublications.add(revisionToken);
+    this.revisionPublications.set(revisionToken, {
+      evictionToken,
+      published: false
+    });
     return revisionToken;
+  }
+
+  reserveRecoveredRevisionPublication(
+    revisionToken: string,
+    input: CreateRevisionInput
+  ): 'existing' | 'reserved' {
+    this.pruneExpired();
+    const existing = this.revisions.get(revisionToken);
+    if (existing !== undefined) {
+      if (!sameRevisionBinding(existing, input)) {
+        throw new Error('Recovered chapter revision token conflicts with a binding.');
+      }
+      return 'existing';
+    }
+    if (
+      !/^chapter_revision_[a-f0-9]{48}$/u.test(revisionToken)
+      || this.revisionPublications.has(revisionToken)
+    ) {
+      throw new Error('Recovered chapter revision token is invalid.');
+    }
+    const pendingReservations = [...this.revisionPublications.values()]
+      .filter(({ published }) => !published).length;
+    const capacityUsed = this.revisions.size + pendingReservations;
+    const evictionToken = capacityUsed < MAX_REVISION_BINDINGS
+      ? null
+      : this.oldestUnreservedRevisionToken();
+    if (capacityUsed >= MAX_REVISION_BINDINGS && evictionToken === null) {
+      throw Object.assign(
+        new Error('Chapter revision token capacity is fully reserved.'),
+        { code: 'CHAPTER_REVISION_TOKEN_CAPACITY' }
+      );
+    }
+    this.revisionPublications.set(revisionToken, {
+      evictionToken,
+      published: false
+    });
+    return 'reserved';
   }
 
   publishReservedRevision(
     revisionToken: string,
     input: CreateRevisionInput
   ): string {
-    if (!this.revisionPublications.delete(revisionToken)) {
+    const reservation = this.revisionPublications.get(revisionToken);
+    if (reservation === undefined || reservation.published) {
       throw new Error('Chapter revision publication was not reserved.');
+    }
+    let evictedBinding: StoredRevisionToken | undefined;
+    if (this.revisions.size >= MAX_REVISION_BINDINGS) {
+      const evictionToken = reservation.evictionToken;
+      if (
+        evictionToken === null
+        || this.reservedRevisions.has(evictionToken)
+      ) {
+        throw Object.assign(
+          new Error('Chapter revision token capacity is fully reserved.'),
+          { code: 'CHAPTER_REVISION_TOKEN_CAPACITY' }
+        );
+      }
+      evictedBinding = this.revisions.get(evictionToken);
+      if (evictedBinding === undefined) {
+        throw new Error('Chapter revision publication eviction binding is missing.');
+      }
+      this.revisions.delete(evictionToken);
     }
     this.revisions.set(revisionToken, {
       ...input,
       createdAtMs: this.now()
     });
+    reservation.published = true;
+    if (evictedBinding !== undefined) {
+      reservation.evictedBinding = evictedBinding;
+    }
     return revisionToken;
   }
 
+  commitRevisionPublication(revisionToken: string): void {
+    const reservation = this.revisionPublications.get(revisionToken);
+    if (reservation?.published !== true) return;
+    this.revisionPublications.delete(revisionToken);
+  }
+
   discardRevisionPublication(revisionToken: string): void {
+    const reservation = this.revisionPublications.get(revisionToken);
+    if (reservation === undefined) return;
+    if (reservation.published) {
+      this.reservedRevisions.delete(revisionToken);
+      this.revisions.delete(revisionToken);
+      if (
+        reservation.evictionToken !== null
+        && reservation.evictedBinding !== undefined
+      ) {
+        this.revisions.set(
+          reservation.evictionToken,
+          reservation.evictedBinding
+        );
+      }
+    }
     this.revisionPublications.delete(revisionToken);
   }
 
@@ -326,8 +422,16 @@ export class ChapterReviewTokenStore {
   }
 
   private oldestUnreservedRevisionToken(): string | null {
+    const publicationEvictions = new Set(
+      [...this.revisionPublications.values()].flatMap(({ evictionToken }) => (
+        evictionToken === null ? [] : [evictionToken]
+      ))
+    );
     for (const token of this.revisions.keys()) {
-      if (!this.reservedRevisions.has(token)) return token;
+      if (
+        !this.reservedRevisions.has(token)
+        && !publicationEvictions.has(token)
+      ) return token;
     }
     return null;
   }
@@ -343,6 +447,9 @@ export class ChapterReviewTokenStore {
       if (
         now - revision.createdAtMs >= TOKEN_TTL_MS
         && !this.reservedRevisions.has(token)
+        && ![...this.revisionPublications.values()].some(
+          ({ evictionToken }) => evictionToken === token
+        )
       ) {
         this.revisions.delete(token);
       }
@@ -356,6 +463,19 @@ export class ChapterReviewTokenStore {
       store.delete(oldestToken);
     }
   }
+}
+
+function sameRevisionBinding(
+  stored: StoredRevisionToken,
+  input: CreateRevisionInput
+): boolean {
+  return stored.projectKey === input.projectKey
+    && stored.projectRoot === input.projectRoot
+    && stored.chapterNumber === input.chapterNumber
+    && stored.latestCommittedChapter === input.latestCommittedChapter
+    && stored.purpose === input.purpose
+    && stored.sourceHash === input.sourceHash
+    && stored.revisionId === input.revisionId;
 }
 
 function staleTokenResult(): StaleTokenResult {

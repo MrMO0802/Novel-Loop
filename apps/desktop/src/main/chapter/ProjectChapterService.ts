@@ -204,6 +204,7 @@ export class ProjectChapterService implements ChapterApplicationService {
       });
     }
     try {
+      await this.recoverAdjustmentPublications(projectKey, projectRoot);
       const trusted = TrustedChapterPlanReviewSchema.parse(
         await this.dependencies.gateway.readPlan(projectRoot)
       );
@@ -633,6 +634,7 @@ export class ProjectChapterService implements ChapterApplicationService {
           messageKey: 'project_unavailable'
         });
       }
+      await this.recoverAdjustmentPublications(projectKey, projectRoot);
       const trusted = TrustedChapterPlanReviewSchema.parse(
         await this.dependencies.gateway.readPlan(projectRoot)
       );
@@ -921,7 +923,7 @@ export class ProjectChapterService implements ChapterApplicationService {
     pending: PendingAdjustment
   ): Promise<void> {
     let durableResult: TrustedAdjustmentResult | undefined;
-    let publicationBound = false;
+    let publicationCommitted = false;
     try {
       this.updateTask(internal, {
         status: 'running',
@@ -971,7 +973,7 @@ export class ProjectChapterService implements ChapterApplicationService {
         this.finishCancelled(internal);
         return;
       }
-      this.tokenStore.publishReservedRevision(pending.publicationToken, {
+      const publicationBinding = {
         projectKey: internal.task.projectKey,
         projectRoot: pending.projectRoot,
         chapterNumber: pending.chapterNumber,
@@ -979,13 +981,35 @@ export class ProjectChapterService implements ChapterApplicationService {
         purpose: pending.purpose,
         sourceHash: result.sourceHash,
         revisionId: result.revisionId
+      };
+      await this.dependencies.gateway.bindAdjustmentPublication({
+        projectRoot: pending.projectRoot,
+        chapterNumber: pending.chapterNumber,
+        revisionId: result.revisionId,
+        expectedSourceHash: result.sourceHash,
+        revisionToken: pending.publicationToken,
+        projectKey: internal.task.projectKey,
+        latestCommittedChapter: pending.latestCommittedChapter,
+        purpose: pending.purpose
       });
-      publicationBound = true;
+      this.tokenStore.publishReservedRevision(
+        pending.publicationToken,
+        publicationBinding
+      );
+      await this.dependencies.gateway.promoteAdjustmentPublication({
+        projectRoot: pending.projectRoot,
+        chapterNumber: pending.chapterNumber,
+        revisionId: result.revisionId,
+        expectedSourceHash: result.sourceHash,
+        revisionToken: pending.publicationToken
+      });
+      this.tokenStore.commitRevisionPublication(pending.publicationToken);
+      publicationCommitted = true;
       internal.task = succeededTask;
       internal.terminal = true;
     } catch (error) {
       let terminalError = error;
-      if (durableResult !== undefined && !publicationBound) {
+      if (durableResult !== undefined && !publicationCommitted) {
         try {
           await this.discardAdjustmentResult(pending, durableResult);
         } catch (cleanupError) {
@@ -1001,7 +1025,7 @@ export class ProjectChapterService implements ChapterApplicationService {
         );
       }
     } finally {
-      if (!publicationBound) {
+      if (!publicationCommitted) {
         this.tokenStore.discardRevisionPublication(pending.publicationToken);
       }
       if (this.activeByProject.get(internal.task.projectKey) === internal.task.taskId) {
@@ -1078,6 +1102,81 @@ export class ProjectChapterService implements ChapterApplicationService {
       revisionId: result.revisionId,
       expectedSourceHash: result.sourceHash
     });
+  }
+
+  private async recoverAdjustmentPublications(
+    projectKey: string,
+    projectRoot: string
+  ): Promise<void> {
+    let recoverable: Awaited<ReturnType<
+      ChapterEngineGateway['listAdjustmentPublications']
+    >>;
+    try {
+      recoverable = await this.dependencies.gateway.listAdjustmentPublications(
+        projectRoot
+      );
+    } catch {
+      return;
+    }
+    for (const entry of recoverable) {
+      if (entry.publication === null) {
+        try {
+          await this.dependencies.gateway.discardAdjustmentRevision({
+            projectRoot,
+            chapterNumber: entry.chapterNumber,
+            revisionId: entry.revisionId,
+            expectedSourceHash: entry.sourceHash
+          });
+        } catch {
+          // A later recovery pass can retry cleanup while the record stays non-ready.
+        }
+        continue;
+      }
+      if (entry.publication.projectKey !== projectKey) continue;
+      const binding = {
+        projectKey,
+        projectRoot,
+        chapterNumber: entry.chapterNumber,
+        latestCommittedChapter: entry.publication.latestCommittedChapter,
+        purpose: entry.publication.purpose,
+        sourceHash: entry.sourceHash,
+        revisionId: entry.revisionId
+      };
+      let reserved = false;
+      try {
+        const reservation = this.tokenStore.reserveRecoveredRevisionPublication(
+          entry.publication.revisionToken,
+          binding
+        );
+        if (reservation === 'reserved') {
+          reserved = true;
+          this.tokenStore.publishReservedRevision(
+            entry.publication.revisionToken,
+            binding
+          );
+        }
+        if (entry.state === 'publishing') {
+          await this.dependencies.gateway.promoteAdjustmentPublication({
+            projectRoot,
+            chapterNumber: entry.chapterNumber,
+            revisionId: entry.revisionId,
+            expectedSourceHash: entry.sourceHash,
+            revisionToken: entry.publication.revisionToken
+          });
+        }
+        if (reserved) {
+          this.tokenStore.commitRevisionPublication(
+            entry.publication.revisionToken
+          );
+        }
+      } catch {
+        if (reserved) {
+          this.tokenStore.discardRevisionPublication(
+            entry.publication.revisionToken
+          );
+        }
+      }
+    }
   }
 
   private async begin(

@@ -16,6 +16,7 @@ import type {
   AuthorInvalidatedNode,
   AuthorRevisionArtifactKind,
   AuthorRevisionMode,
+  AuthorRevisionPublication,
   AuthorRevisionRecord
 } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
@@ -79,6 +80,7 @@ export interface CreateAuthorRevisionInput {
   chapterNumber: number;
   artifactKind: AuthorRevisionArtifactKind;
   mode: AuthorRevisionMode;
+  initialState?: 'ready' | 'publishing';
   sourceArtifactPath: string;
   sourceCandidateId: string | null;
   expectedSourceHash?: string;
@@ -115,6 +117,33 @@ export interface DiscardReadyAuthorRevisionInput {
   chapterNumber: number;
   revisionId: string;
   expectedSourceHash: string;
+}
+
+export interface BindAuthorRevisionPublicationInput {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+  revisionToken: string;
+  projectKey: string;
+  latestCommittedChapter: number;
+  purpose: AuthorRevisionPublication['purpose'];
+}
+
+export interface PromoteAuthorRevisionPublicationInput {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+  revisionToken: string;
+}
+
+export interface ListAuthorRevisionPublicationsInput {
+  projectRoot: string;
+}
+
+export interface AuthorRevisionPublicationEntry {
+  record: AuthorRevisionRecord;
 }
 
 export interface ReadAuthorRevisionResult extends CreateAuthorRevisionResult {
@@ -236,7 +265,8 @@ export async function createAuthorRevision(
       sourceHash,
       workingCopyPath: relativeMarkdownPath,
       workingCopyHash: sha256(input.content),
-      state: 'ready',
+      state: input.initialState ?? 'ready',
+      publication: null,
       authorInstruction: input.authorInstruction,
       createdAt: new Date().toISOString(),
       adoptedAt: null,
@@ -360,6 +390,99 @@ export async function readAuthorRevision(
   });
 }
 
+export async function bindAuthorRevisionPublication(
+  input: BindAuthorRevisionPublicationInput,
+  fileStore?: FileStore
+): Promise<AuthorRevisionRecord> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter_author_revision_publication_bind',
+    allowStoryStateWrite: false
+  }, async () => {
+    const context = await readProjectContext(projectRoot, input.chapterNumber, store);
+    rejectCommittedChapter(input.chapterNumber, context.latestCommittedChapter);
+    const target = await findRevision(context, input.chapterNumber, input.revisionId);
+    assertPublishingAdjustment(target.record, input.expectedSourceHash);
+    await readVerifiedSourceArtifact(projectRoot, store, target.record);
+    await readVerifiedWorkingCopy(projectRoot, store, target.record);
+    const requested = {
+      revisionToken: input.revisionToken,
+      projectKey: input.projectKey,
+      latestCommittedChapter: input.latestCommittedChapter,
+      purpose: input.purpose
+    };
+    if (target.record.publication !== null && target.record.publication !== undefined) {
+      const existing = target.record.publication;
+      if (
+        existing.revisionToken === requested.revisionToken
+        && existing.projectKey === requested.projectKey
+        && existing.latestCommittedChapter === requested.latestCommittedChapter
+        && existing.purpose === requested.purpose
+      ) return target.record;
+      throw new AppError(
+        'AUTHOR_REVISION_PUBLICATION_CONFLICT',
+        `Author revision publication is already bound: ${input.revisionId}`,
+        2
+      );
+    }
+    const bound = AuthorRevisionRecordSchema.parse({
+      ...target.record,
+      publication: {
+        ...requested,
+        boundAt: new Date().toISOString()
+      }
+    });
+    await store.writeJson(target.absoluteRecordPath, bound, AuthorRevisionRecordSchema);
+    return bound;
+  });
+}
+
+export async function promoteAuthorRevisionPublication(
+  input: PromoteAuthorRevisionPublicationInput,
+  fileStore?: FileStore
+): Promise<AuthorRevisionRecord> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter_author_revision_publication_promote',
+    allowStoryStateWrite: false
+  }, async () => {
+    const context = await readProjectContext(projectRoot, input.chapterNumber, store);
+    rejectCommittedChapter(input.chapterNumber, context.latestCommittedChapter);
+    const target = await findRevision(context, input.chapterNumber, input.revisionId);
+    if (
+      target.record.mode !== 'codex_adjustment'
+      || target.record.sourceHash !== input.expectedSourceHash
+      || target.record.publication?.revisionToken !== input.revisionToken
+      || (target.record.state !== 'publishing' && target.record.state !== 'ready')
+    ) {
+      throw new AppError(
+        'AUTHOR_REVISION_PUBLICATION_INVALID',
+        `Author revision publication cannot be promoted: ${input.revisionId}`,
+        2
+      );
+    }
+    await readVerifiedSourceArtifact(projectRoot, store, target.record);
+    await readVerifiedWorkingCopy(projectRoot, store, target.record);
+    if (target.record.state === 'ready') return target.record;
+    const ready = AuthorRevisionRecordSchema.parse({
+      ...target.record,
+      state: 'ready'
+    });
+    await store.writeJson(target.absoluteRecordPath, ready, AuthorRevisionRecordSchema);
+    return ready;
+  });
+}
+
 export async function discardReadyAuthorRevision(
   input: DiscardReadyAuthorRevisionInput,
   fileStore?: FileStore
@@ -377,7 +500,7 @@ export async function discardReadyAuthorRevision(
     const context = await readProjectContext(projectRoot, input.chapterNumber, store);
     const target = await findRevision(context, input.chapterNumber, input.revisionId);
     if (
-      target.record.state !== 'ready'
+      (target.record.state !== 'ready' && target.record.state !== 'publishing')
       || target.record.mode !== 'codex_adjustment'
       || target.record.sourceHash !== input.expectedSourceHash
     ) {
@@ -397,6 +520,43 @@ export async function discardReadyAuthorRevision(
       await store.removePath(workingCopyPath);
     }
   });
+}
+
+export async function listAuthorRevisionPublications(
+  input: ListAuthorRevisionPublicationsInput,
+  fileStore?: FileStore
+): Promise<AuthorRevisionPublicationEntry[]> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+  const storyState = await store.readJson(
+    path.join(projectRoot, 'state', 'story_state.json'),
+    StoryStateSchema
+  );
+  const paths = new ProjectPaths(path.dirname(projectRoot), storyState.projectId);
+  if (paths.projectRoot !== projectRoot || !(await store.exists(paths.chaptersDir()))) {
+    return [];
+  }
+  const results: AuthorRevisionPublicationEntry[] = [];
+  const chapterNames = (await store.list(paths.chaptersDir())).sort();
+  for (const chapterName of chapterNames) {
+    const match = /^chapter_(\d{3})$/u.exec(chapterName);
+    if (match === null) continue;
+    const chapterNumber = Number(match[1]);
+    const context = await readProjectContext(projectRoot, chapterNumber, store);
+    for (const entry of await readRevisionEntries(context, chapterNumber)) {
+      if (
+        entry.record.mode === 'codex_adjustment'
+        && (
+          entry.record.state === 'publishing'
+          || (entry.record.state === 'ready' && entry.record.publication != null)
+        )
+      ) {
+        results.push({ record: entry.record });
+      }
+    }
+  }
+  return results;
 }
 
 export async function archiveAuthorChapterArtifacts(
@@ -725,6 +885,30 @@ function validateCreateInput(input: CreateAuthorRevisionInput): void {
   }
   if ((input.artifactKind === 'selected_plan') !== (input.sourceCandidateId !== null)) {
     throw new AppError('AUTHOR_REVISION_SOURCE_CANDIDATE_INVALID', 'Only selected plan revisions require a source candidate.', 2);
+  }
+  if (input.initialState === 'publishing' && input.mode !== 'codex_adjustment') {
+    throw new AppError(
+      'AUTHOR_REVISION_PUBLICATION_INVALID',
+      'Only Codex adjustments may start in publishing state.',
+      2
+    );
+  }
+}
+
+function assertPublishingAdjustment(
+  record: AuthorRevisionRecord,
+  expectedSourceHash: string
+): void {
+  if (
+    record.state !== 'publishing'
+    || record.mode !== 'codex_adjustment'
+    || record.sourceHash !== expectedSourceHash
+  ) {
+    throw new AppError(
+      'AUTHOR_REVISION_PUBLICATION_INVALID',
+      `Author revision is not a matching publishing adjustment: ${record.revisionId}`,
+      2
+    );
   }
 }
 

@@ -165,6 +165,25 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   readonly adoptions: unknown[] = [];
   readonly adjustments: DeferredAdjustment[] = [];
   readonly discardedAdjustments: unknown[] = [];
+  readonly boundAdjustmentPublications: unknown[] = [];
+  readonly promotedAdjustmentPublications: unknown[] = [];
+  readonly publicationEvents: string[] = [];
+  recoverableAdjustmentPublications: Array<{
+    state: 'publishing' | 'ready';
+    revisionId: string;
+    sourceHash: string;
+    chapterNumber: number;
+    publication: null | {
+      revisionToken: string;
+      projectKey: string;
+      latestCommittedChapter: number;
+      purpose: 'mission' | 'plan';
+    };
+  }> = [];
+  bindAdjustmentPublicationError: unknown;
+  promoteAdjustmentPublicationError: unknown;
+  discardAdjustmentError: unknown;
+  recoveryReads = 0;
   autoComplete = false;
   inspectError: unknown;
   planReviewError: unknown;
@@ -248,7 +267,32 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   }
 
   async discardAdjustmentRevision(input: unknown): Promise<void> {
+    if (this.discardAdjustmentError !== undefined) {
+      throw this.discardAdjustmentError;
+    }
+    this.publicationEvents.push('discard');
     this.discardedAdjustments.push(input);
+  }
+
+  async bindAdjustmentPublication(input: unknown): Promise<void> {
+    if (this.bindAdjustmentPublicationError !== undefined) {
+      throw this.bindAdjustmentPublicationError;
+    }
+    this.publicationEvents.push('bind');
+    this.boundAdjustmentPublications.push(input);
+  }
+
+  async promoteAdjustmentPublication(input: unknown): Promise<void> {
+    if (this.promoteAdjustmentPublicationError !== undefined) {
+      throw this.promoteAdjustmentPublicationError;
+    }
+    this.publicationEvents.push('promote');
+    this.promotedAdjustmentPublications.push(input);
+  }
+
+  async listAdjustmentPublications() {
+    this.recoveryReads += 1;
+    return this.recoverableAdjustmentPublications;
   }
 
   emit(index: number, event: ChapterEngineProgressEvent): void {
@@ -1114,7 +1158,7 @@ describe('ProjectChapterService', () => {
     expect(gateway.discardedAdjustments).toHaveLength(0);
   });
 
-  test('discards a ready revision when reserved-token publication fails', async () => {
+  test('discards a publishing revision when reserved-token publication fails', async () => {
     const tokenStore = createTokenStore().store;
     Object.assign(tokenStore, {
       publishReservedRevision: vi.fn(() => {
@@ -1141,6 +1185,195 @@ describe('ProjectChapterService', () => {
     });
     expect(gateway.discardedAdjustments).toHaveLength(1);
     expect((await service.get(task.taskId)).resultRevisionToken).toBeUndefined();
+  });
+
+  test.each([
+    'cancellation',
+    'provider',
+    'task_schema',
+    'publication'
+  ] as const)('preserves the previous capacity binding on %s failure', async (
+    failure
+  ) => {
+    const tokenStore = createTokenStore().store;
+    const revisions = Array.from({ length: 500 }, (_, index) => (
+      tokenStore.createRevision(revisionTokenInput(index))
+    ));
+    if (failure === 'publication') {
+      Object.assign(tokenStore, {
+        publishReservedRevision: vi.fn(() => {
+          throw new Error('publication failed');
+        })
+      });
+    }
+    const { gateway, service } = createService({ tokenStore });
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    if (failure === 'cancellation') {
+      await service.cancel(task.taskId);
+      gateway.failAdjustment(0, withCode(
+        'CHAPTER_ADJUSTMENT_CANCELLED',
+        'cancelled'
+      ));
+    } else if (failure === 'provider') {
+      gateway.failAdjustment(0, withCode('CODEX_EXEC_FAILED', 'provider failed'));
+    } else if (failure === 'task_schema') {
+      gateway.succeedAdjustmentWithCandidate(0, {
+        artifactKind: 'mission',
+        title: '调整后的本章任务',
+        markdown: 'selected_plan.md'
+      });
+    } else {
+      gateway.succeedAdjustment(0);
+    }
+    await eventually(async () => {
+      expect((await service.get(task.taskId)).status).toMatch(/failed|cancelled/u);
+    });
+
+    expect(tokenStore.reserveRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: revisionTokenInput(0)
+    });
+  });
+
+  test('binds recoverable metadata before token publication and promotes last', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+    gateway.succeedAdjustment(0);
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'succeeded'
+      });
+    });
+    expect(gateway.publicationEvents).toEqual(['bind', 'promote']);
+    const succeeded = await service.get(task.taskId);
+    expect(gateway.boundAdjustmentPublications[0]).toMatchObject({
+      projectRoot,
+      chapterNumber: 1,
+      revisionId: 'author_revision_ch001_mission_v1',
+      revisionToken: succeeded.resultRevisionToken,
+      projectKey,
+      latestCommittedChapter: 0,
+      purpose: 'mission'
+    });
+    expect(gateway.promotedAdjustmentPublications[0]).toMatchObject({
+      revisionToken: succeeded.resultRevisionToken
+    });
+  });
+
+  test('rolls back capacity publication when promotion fails after binding', async () => {
+    const tokenStore = createTokenStore().store;
+    const revisions = Array.from({ length: 500 }, (_, index) => (
+      tokenStore.createRevision(revisionTokenInput(index))
+    ));
+    const { gateway, service } = createService({ tokenStore });
+    gateway.promoteAdjustmentPublicationError = new Error('promotion failed');
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+    gateway.succeedAdjustment(0);
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'failed',
+        error: { kind: 'unexpected' }
+      });
+    });
+    expect(gateway.publicationEvents).toEqual(['bind', 'discard']);
+    expect(tokenStore.reserveRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: revisionTokenInput(0)
+    });
+  });
+
+  test.each(['publishing', 'ready'] as const)(
+    'recovers a durable %s adjustment token after service restart',
+    async (state) => {
+      const revisionToken = `chapter_revision_${'d'.repeat(48)}`;
+      const gateway = new DeferredChapterGateway();
+      gateway.planReviews.set(projectRoot, planReview);
+      gateway.recoverableAdjustmentPublications = [{
+        state,
+        revisionId: 'author_revision_ch001_mission_v1',
+        sourceHash: 'b'.repeat(64),
+        chapterNumber: 1,
+        publication: {
+          revisionToken,
+          projectKey,
+          latestCommittedChapter: 0,
+          purpose: 'mission'
+        }
+      }];
+      const service = new ProjectChapterService({
+        gateway,
+        projects: new MemoryProjectResolver(),
+        tokenStore: createTokenStore().store
+      });
+
+      await expect(service.adoptRevision({
+        projectKey,
+        revisionToken,
+        confirmInvalidation: true
+      })).resolves.toEqual({ outcome: 'adopted' });
+      expect(gateway.adoptions).toHaveLength(1);
+      expect(gateway.promotedAdjustmentPublications).toHaveLength(
+        state === 'publishing' ? 1 : 0
+      );
+    }
+  );
+
+  test('keeps an unbound publishing record non-ready when recovery cleanup fails', async () => {
+    const gateway = new DeferredChapterGateway();
+    gateway.planReviews.set(projectRoot, planReview);
+    gateway.recoverableAdjustmentPublications = [{
+      state: 'publishing',
+      revisionId: 'author_revision_ch001_mission_v1',
+      sourceHash: 'b'.repeat(64),
+      chapterNumber: 1,
+      publication: null
+    }];
+    gateway.discardAdjustmentError = new Error('cleanup failed');
+    const service = new ProjectChapterService({
+      gateway,
+      projects: new MemoryProjectResolver(),
+      tokenStore: createTokenStore().store
+    });
+
+    const review = await service.readPlan(projectKey);
+    expect(review).toMatchObject({ available: true });
+    expect(gateway.recoveryReads).toBe(1);
+    expect(gateway.discardedAdjustments).toHaveLength(0);
+    expect(gateway.promotedAdjustmentPublications).toHaveLength(0);
   });
 
   test('resolves mission item tokens while new participants remain name and role only', async () => {
@@ -1762,6 +1995,92 @@ describe('ChapterReviewTokenStore', () => {
     })).toMatchObject({
       outcome: 'resolved',
       value: { revisionId: 'author_revision_2' }
+    });
+  });
+
+  test('does not evict the oldest published token until a capacity reservation is committed', () => {
+    const { store } = createTokenStore();
+    const revisions = Array.from({ length: 500 }, (_, index) => (
+      store.createRevision(revisionTokenInput(index))
+    ));
+    const reservationToken = store.reserveRevisionPublication();
+
+    expect(store.reserveRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: revisionTokenInput(0)
+    });
+    store.releaseRevision(revisions[0]!);
+    store.discardRevisionPublication(reservationToken);
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: revisionTokenInput(0)
+    });
+  });
+
+  test('preserves the oldest published token when capacity reservation entropy fails', () => {
+    let validEntropy = true;
+    let nonce = 0;
+    const store = new ChapterReviewTokenStore({
+      randomBytes: (size) => {
+        if (!validEntropy) return new Uint8Array(1);
+        const bytes = new Uint8Array(size);
+        new DataView(bytes.buffer).setUint32(size - 4, ++nonce);
+        return bytes;
+      }
+    });
+    const revisions = Array.from({ length: 500 }, (_, index) => (
+      store.createRevision(revisionTokenInput(index))
+    ));
+    validEntropy = false;
+
+    expect(() => store.reserveRevisionPublication()).toThrow(
+      'Chapter token entropy source returned the wrong size.'
+    );
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: revisionTokenInput(0)
+    });
+  });
+
+  test('fails bounded publication reservation without changing all-reserved bindings', () => {
+    const { store } = createTokenStore();
+    const revisions = Array.from({ length: 500 }, (_, index) => {
+      const revisionToken = store.createRevision(revisionTokenInput(index));
+      expect(store.reserveRevision({
+        projectKey,
+        projectRoot,
+        revisionToken,
+        currentLatestCommittedChapter: 0
+      }).outcome).toBe('resolved');
+      return revisionToken;
+    });
+
+    expect(() => store.reserveRevisionPublication())
+      .toThrow('Chapter revision token capacity is fully reserved.');
+    store.releaseRevision(revisions[0]!);
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: revisionTokenInput(0)
     });
   });
 

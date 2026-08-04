@@ -4,8 +4,11 @@ import path from 'node:path';
 import {
   adoptAuthorRevision,
   archiveAuthorChapterArtifacts,
+  bindAuthorRevisionPublication,
   createAuthorRevision,
   discardReadyAuthorRevision,
+  listAuthorRevisionPublications,
+  promoteAuthorRevisionPublication,
   readAuthorRevision,
   type ArchiveInvalidatedChapterArtifactsResult,
   type CreateAuthorRevisionResult
@@ -223,6 +226,38 @@ export async function discardDesktopChapterAdjustmentRevision(input: {
 }, fileStore?: FileStore): Promise<void> {
   const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
   await discardReadyAuthorRevision(input, store);
+}
+
+export async function bindDesktopChapterAdjustmentPublication(input: {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+  revisionToken: string;
+  projectKey: string;
+  latestCommittedChapter: number;
+  purpose: 'mission' | 'plan';
+}, fileStore?: FileStore): Promise<void> {
+  const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
+  await bindAuthorRevisionPublication(input, store);
+}
+
+export async function promoteDesktopChapterAdjustmentPublication(input: {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+  revisionToken: string;
+}, fileStore?: FileStore): Promise<void> {
+  const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
+  await promoteAuthorRevisionPublication(input, store);
+}
+
+export async function listDesktopChapterAdjustmentPublications(input: {
+  projectRoot: string;
+}, fileStore?: FileStore) {
+  const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
+  return listAuthorRevisionPublications(input, store);
 }
 
 export async function createDesktopMissionRevision(input: {

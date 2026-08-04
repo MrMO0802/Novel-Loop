@@ -641,8 +641,8 @@ async function rollbackAuthoringTransaction(
   originalError: unknown
 ): Promise<void> {
   const snapshot = transaction.snapshot;
-  const rollbackErrors: string[] = [];
-  const restoreSteps: Array<() => Promise<unknown>> = [
+  const restorationErrors: string[] = [];
+  const restorationSteps: Array<() => Promise<unknown>> = [
     () => store.writeText(
       snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'ranking.json'),
       snapshot.rankingText
@@ -656,7 +656,7 @@ async function rollbackAuthoringTransaction(
   if (transaction.archive !== null) {
     for (const artifact of transaction.archive.archivedArtifacts) {
       if (artifact.node === 'selected_plan') continue;
-      restoreSteps.push(async () => {
+      restorationSteps.push(async () => {
         const content = await store.readText(snapshot.paths.projectArtifact(artifact.archivedPath));
         if (
           sha256(content) !== artifact.hash
@@ -672,38 +672,54 @@ async function rollbackAuthoringTransaction(
       });
     }
     if (snapshot.sceneDraftsDirectoryExisted) {
-      restoreSteps.push(() => store.ensureDir(
+      restorationSteps.push(() => store.ensureDir(
         snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scenes')
       ));
     }
   }
   for (const record of transaction.revisionRecords) {
-    restoreSteps.push(() => store.writeText(record.path, record.content));
+    restorationSteps.push(() => store.writeText(record.path, record.content));
   }
-  for (const provenancePath of transaction.createdProvenancePaths) {
-    restoreSteps.push(async () => {
+  for (const restore of restorationSteps) {
+    try {
+      await restore();
+    } catch (error) {
+      restorationErrors.push(getErrorMessage(error));
+    }
+  }
+  if (restorationErrors.length > 0) {
+    throw new AppError(
+      'DESKTOP_CHAPTER_EDIT_ROLLBACK_FAILED',
+      `Author edit failed (${getErrorMessage(originalError)}) and rollback failed: ${restorationErrors.join('; ')}`,
+      2
+    );
+  }
+
+  const cleanupErrors: string[] = [];
+  const cleanupSteps: Array<() => Promise<unknown>> = transaction.createdProvenancePaths.map(
+    (provenancePath) => async () => {
       if (await store.exists(provenancePath)) await store.removePath(provenancePath);
-    });
-  }
+    }
+  );
   if (transaction.archive !== null) {
-    restoreSteps.push(async () => {
+    cleanupSteps.push(async () => {
       const archiveDir = snapshot.paths.projectArtifact(transaction.archive!.relativeArchiveDir);
       if (await store.exists(archiveDir)) {
         await store.removePath(archiveDir, { recursive: true });
       }
     });
   }
-  for (const restore of restoreSteps) {
+  for (const cleanup of cleanupSteps) {
     try {
-      await restore();
+      await cleanup();
     } catch (error) {
-      rollbackErrors.push(getErrorMessage(error));
+      cleanupErrors.push(getErrorMessage(error));
     }
   }
-  if (rollbackErrors.length > 0) {
+  if (cleanupErrors.length > 0) {
     throw new AppError(
       'DESKTOP_CHAPTER_EDIT_ROLLBACK_FAILED',
-      `Author edit failed (${getErrorMessage(originalError)}) and rollback failed: ${rollbackErrors.join('; ')}`,
+      `Author edit failed (${getErrorMessage(originalError)}) and rollback failed: ${cleanupErrors.join('; ')}`,
       2
     );
   }

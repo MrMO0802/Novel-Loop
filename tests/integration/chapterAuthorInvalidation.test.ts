@@ -394,6 +394,77 @@ describe('chapter author invalidation', () => {
       second.record.revisionId
     ))).resolves.toBe(false);
   });
+
+  test('retains recovery provenance and archive when rollback restoration fails', async () => {
+    const first = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_001',
+      expectedReviewHash: await reviewHash(),
+      markdown: '# First adopted author plan\n'
+    });
+    await adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: first.record.revisionId,
+      expectedSourceHash: first.record.sourceHash
+    });
+    const second = await createDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_002',
+      expectedReviewHash: await reviewHash(),
+      markdown: '# Alternative author plan\n'
+    });
+    const archiveDir = paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'archive',
+      second.record.revisionId
+    );
+    const directionSelectionPath = paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'direction_selection_v1.json'
+    );
+    const invalidationReportPath = paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'edit_invalidation_report_v2.json'
+    );
+    const stateBefore = await store.readText(paths.storyState());
+    const failingStore = new RollbackRestoreFailingFileStore(
+      paths.projectArtifact(second.relativeRecordPath),
+      paths.chapterArtifact(1, 'ranking.json')
+    );
+
+    await expect(adoptDesktopChapterPlanRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: second.record.sourceHash
+    }, failingStore)).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_EDIT_ROLLBACK_FAILED',
+      message: expect.stringMatching(
+        /injected target revision write failure.*injected ranking restore failure/u
+      )
+    });
+
+    await expect(store.exists(archiveDir)).resolves.toBe(true);
+    await expect(store.exists(directionSelectionPath)).resolves.toBe(true);
+    await expect(store.exists(invalidationReportPath)).resolves.toBe(true);
+    const report = await store.readJson(
+      invalidationReportPath,
+      AuthorEditInvalidationReportSchema
+    );
+    const archivedSelectedPlan = report.archivedArtifacts.find(
+      ({ node }) => node === 'selected_plan'
+    )!;
+    expect(sha256(await store.readText(
+      paths.projectArtifact(archivedSelectedPlan.archivedPath)
+    ))).toBe(archivedSelectedPlan.hash);
+    expect(await store.readText(paths.storyState())).toBe(stateBefore);
+  });
 });
 
 class FailOnceFileStore extends FileStore {
@@ -407,6 +478,35 @@ class FailOnceFileStore extends FileStore {
     if (!this.failed && path.resolve(filePath) === path.resolve(this.targetPath)) {
       this.failed = true;
       throw new Error('injected selected-plan write failure');
+    }
+    await super.writeText(filePath, content);
+  }
+}
+
+class RollbackRestoreFailingFileStore extends FileStore {
+  private operationFailed = false;
+  private restorePathWrites = 0;
+
+  constructor(
+    private readonly operationFailurePath: string,
+    private readonly restoreFailurePath: string
+  ) {
+    super();
+  }
+
+  override async writeText(filePath: string, content: string): Promise<void> {
+    if (
+      !this.operationFailed
+      && path.resolve(filePath) === path.resolve(this.operationFailurePath)
+    ) {
+      this.operationFailed = true;
+      throw new Error('injected target revision write failure');
+    }
+    if (path.resolve(filePath) === path.resolve(this.restoreFailurePath)) {
+      this.restorePathWrites += 1;
+      if (this.restorePathWrites === 2) {
+        throw new Error('injected ranking restore failure');
+      }
     }
     await super.writeText(filePath, content);
   }

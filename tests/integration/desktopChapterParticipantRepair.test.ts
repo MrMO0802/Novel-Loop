@@ -78,6 +78,62 @@ describe('desktop chapter participant preflight', () => {
     expect(await sha256(paths.storyState())).toBe(stateBefore);
   });
 
+  test('rejects a duplicate nonempty participant roster before any scene-card provider call', async () => {
+    await writeStoryState([{
+      ...validStoryState.characters[0],
+      id: 'char_committed',
+      name: 'Mara Vale'
+    }]);
+    await writeMission({
+      participatingCharacterIds: ['char_committed', 'char_committed'],
+      charactersToIntroduce: [],
+      characterDeltas: []
+    });
+    const complete = vi.fn().mockResolvedValue(sceneResponse('char_committed'));
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    const error = await generateSceneCards({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot
+    }, store).then(() => undefined, (caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: 'CHAPTER_MISSION_INVALID_CHARACTER_REFERENCES'
+    });
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  test('rejects an unknown nonempty participant before any scene-card provider call', async () => {
+    await writeStoryState([{
+      ...validStoryState.characters[0],
+      id: 'char_committed',
+      name: 'Mara Vale'
+    }]);
+    await writeMission({
+      participatingCharacterIds: ['char_committed', 'char_unknown'],
+      charactersToIntroduce: [],
+      characterDeltas: []
+    });
+    const complete = vi.fn().mockResolvedValue(sceneResponse('char_committed'));
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    const error = await generateSceneCards({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot
+    }, store).then(() => undefined, (caught: unknown) => caught);
+
+    expect(error).toMatchObject({
+      code: 'CHAPTER_MISSION_INVALID_CHARACTER_REFERENCES'
+    });
+    expect(complete).not.toHaveBeenCalled();
+  });
+
   test('sends a committed mission participant as an ID/name map and accepts its scene references', async () => {
     await writeStoryState([{
       ...validStoryState.characters[0],

@@ -137,6 +137,7 @@ export interface ArchiveAuthorChapterArtifactsInput {
     | 'scene_cards'
     | 'scene_drafts'
     | 'draft'
+    | 'future_diagnostics'
   >>;
 }
 
@@ -720,7 +721,10 @@ function archivePathForNode(
   if (node === 'selected_plan') return 'selected_plan.md';
   if (node === 'scene_cards') return 'scene_cards.json';
   if (node === 'scene_drafts') return 'scenes';
-  return 'draft_v1.md';
+  if (node === 'draft') return 'draft_v1.md';
+  if (node === 'future_diagnostics') return 'diagnostics_v1.json';
+  const exhaustiveNode: never = node;
+  return exhaustiveNode;
 }
 
 function sha256(content: string): string {

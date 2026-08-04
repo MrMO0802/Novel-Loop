@@ -5,6 +5,7 @@ import { ChapterQueueStore } from './chapterQueue.js';
 import {
   assertMissionHasParticipants,
   isStructuredOutputFailure,
+  missionCharacterReferencesAreValid,
   sceneCharacterReferencesAreValid
 } from './chapterReferenceValidation.js';
 import { writeCodexContextManifest } from './codexMinimalContext.js';
@@ -122,6 +123,9 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
 
   const mission = await fileStore.readJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), ChapterMissionSchema);
   const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+  if (!missionCharacterReferencesAreValid(mission, storyState)) {
+    throw invalidMissionCharacterReferences(input.chapterNumber);
+  }
   assertMissionHasParticipants(mission, storyState);
   const selectedPlan = await fileStore.readText(paths.chapterArtifact(input.chapterNumber, 'selected_plan.md'));
   const promptService = createPromptService(input);
@@ -486,10 +490,13 @@ async function runChapterUntilDraftWithinLease(input: ChapterDraftingInput, file
   } catch (error) {
     await markDraftingFailed(queueStore, input, activeStage, runId, error);
     const cancelled = error instanceof AppError && error.code === 'CHAPTER_DRAFT_CANCELLED';
-    const invalidProviderOutput = error instanceof AppError
-      && error.code === 'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT';
+    const invalidChapterOutput = error instanceof AppError
+      && (
+        error.code === 'CHAPTER_MISSION_INVALID_CHARACTER_REFERENCES'
+        || error.code === 'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT'
+      );
     await runLogger.recordError(runId, {
-      code: cancelled || invalidProviderOutput ? error.code : 'CHAPTER_DRAFT_FAILED',
+      code: cancelled || invalidChapterOutput ? error.code : 'CHAPTER_DRAFT_FAILED',
       message: cancelled ? error.message : getErrorMessage(error),
       recoverable: cancelled
     });
@@ -912,6 +919,18 @@ function invalidSceneCardsProviderOutput(chapterNumber: number): AppError {
   return new AppError(
     'CHAPTER_SCENE_CARDS_INVALID_PROVIDER_OUTPUT',
     'Chapter scene cards contain invalid character references.',
+    2,
+    {
+      chapterNumber,
+      stage: 'scene_cards'
+    }
+  );
+}
+
+function invalidMissionCharacterReferences(chapterNumber: number): AppError {
+  return new AppError(
+    'CHAPTER_MISSION_INVALID_CHARACTER_REFERENCES',
+    'Chapter mission contains invalid character references.',
     2,
     {
       chapterNumber,

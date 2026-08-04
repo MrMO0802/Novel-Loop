@@ -57,7 +57,8 @@ const MISSION_INVALIDATED_NODES = [
   'selected_plan',
   'scene_cards',
   'scene_drafts',
-  'draft'
+  'draft',
+  'future_diagnostics'
 ] as const satisfies readonly AuthorInvalidatedNode[];
 
 const ARCHIVE_NODES = [
@@ -74,7 +75,8 @@ const MISSION_ARCHIVE_NODES = [
   'selected_plan',
   'scene_cards',
   'scene_drafts',
-  'draft'
+  'draft',
+  'future_diagnostics'
 ] as const;
 
 const COMPLETED_PLANNING_STAGES = ['mission', 'plan_candidates', 'ranking'] as const;
@@ -1153,7 +1155,8 @@ async function removeInvalidatedMissionDownstream(
     { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'selected_plan.md'), recursive: false },
     { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scene_cards.json'), recursive: false },
     { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scenes'), recursive: true },
-    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'draft_v1.md'), recursive: false }
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'draft_v1.md'), recursive: false },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'diagnostics_v1.json'), recursive: false }
   ]) {
     if (await store.exists(artifact.path)) {
       await store.removePath(artifact.path, { recursive: artifact.recursive });

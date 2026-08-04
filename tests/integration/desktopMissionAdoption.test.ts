@@ -11,6 +11,7 @@ import {
   ChapterMissionSchema,
   ChapterPlanRankingSchema,
   ChapterQueueSchema,
+  DiagnosticsReportSchema,
   SceneCardsSchema,
   StoryStateSchema
 } from '../../src/schemas/index.js';
@@ -21,6 +22,7 @@ import {
 import { inspectDesktopNextChapter } from '../../src/desktop/chapterWorkspace.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import { validDiagnosticsReport } from '../fixtures/schemas/valid.js';
 
 const projectId = 'desktop-mission-adoption';
 
@@ -95,6 +97,9 @@ describe('desktop mission authoring', () => {
   test('adopts the mission by archiving all generated planning and drafting artifacts', async () => {
     const stateBefore = await sha256File(paths.storyState());
     const sourceMission = await store.readText(paths.chapterArtifact(1, 'mission.json'));
+    const sourceDiagnostics = await store.readText(
+      paths.chapterArtifact(1, 'diagnostics_v1.json')
+    );
     const revision = await createDesktopMissionRevision({
       projectRoot: paths.projectRoot,
       chapterNumber: 1,
@@ -117,7 +122,8 @@ describe('desktop mission authoring', () => {
         'selected_plan',
         'scene_cards',
         'scene_drafts',
-        'draft'
+        'draft',
+        'future_diagnostics'
       ],
       storyStateMutated: false
     });
@@ -161,7 +167,8 @@ describe('desktop mission authoring', () => {
         'chapters/chapter_001/selected_plan.md',
         'chapters/chapter_001/scene_cards.json',
         'chapters/chapter_001/scenes/scene_001.md',
-        'chapters/chapter_001/draft_v1.md'
+        'chapters/chapter_001/draft_v1.md',
+        'chapters/chapter_001/diagnostics_v1.json'
       ]));
     const archivedMission = report.archivedArtifacts.find(
       ({ sourcePath }) => sourcePath === 'chapters/chapter_001/mission.json'
@@ -170,6 +177,13 @@ describe('desktop mission authoring', () => {
     expect(await store.readText(paths.projectArtifact(archivedMission!.archivedPath)))
       .toBe(sourceMission);
     expect(archivedMission!.hash).toBe(sha256(sourceMission));
+    const archivedDiagnostics = report.archivedArtifacts.find(
+      ({ sourcePath }) => sourcePath === 'chapters/chapter_001/diagnostics_v1.json'
+    );
+    expect(archivedDiagnostics).toBeDefined();
+    expect(await store.readText(paths.projectArtifact(archivedDiagnostics!.archivedPath)))
+      .toBe(sourceDiagnostics);
+    expect(archivedDiagnostics!.hash).toBe(sha256(sourceDiagnostics));
 
     const adoptedRecord = await store.readJson(
       paths.projectArtifact(revision.relativeRecordPath),
@@ -202,6 +216,8 @@ describe('desktop mission authoring', () => {
     }, failingStore)).rejects.toThrow('injected mission write failure');
 
     expect(await activeArtifactBytes()).toEqual(before);
+    expect(await store.readText(paths.chapterArtifact(1, 'diagnostics_v1.json')))
+      .toBe(before['diagnostics_v1.json']);
     expect(await store.readText(paths.storyState())).toBe(stateBefore);
     expect(await store.readText(paths.projectArtifact(revision.relativeRecordPath)))
       .toBe(recordBefore);
@@ -210,6 +226,34 @@ describe('desktop mission authoring', () => {
       'author_revisions',
       'edit_invalidation_report_v1.json'
     ))).resolves.toBe(false);
+    await expect(store.exists(paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'archive',
+      revision.record.revisionId
+    ))).resolves.toBe(false);
+  });
+
+  test('rejects invalid diagnostics before changing active mission artifacts', async () => {
+    const revision = await createDesktopMissionRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      edit: missionEdit(await sha256File(paths.chapterArtifact(1, 'mission.json')))
+    });
+    await store.writeText(
+      paths.chapterArtifact(1, 'diagnostics_v1.json'),
+      '{"chapterNumber":1,"draftVersion":1}\n'
+    );
+    const before = await activeArtifactBytes();
+
+    await expect(adoptDesktopMissionRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: revision.record.revisionId,
+      expectedSourceHash: revision.record.sourceHash
+    })).rejects.toMatchObject({ name: 'ZodError' });
+
+    expect(await activeArtifactBytes()).toEqual(before);
     await expect(store.exists(paths.chapterArtifact(
       1,
       'author_revisions',
@@ -414,6 +458,11 @@ async function writeChapterFixture(): Promise<void> {
     '# 旧场景\n'
   );
   await store.writeText(paths.chapterArtifact(1, 'draft_v1.md'), '# 旧草稿\n');
+  await store.writeJson(paths.chapterArtifact(1, 'diagnostics_v1.json'), {
+    ...validDiagnosticsReport,
+    chapterNumber: 1,
+    draftVersion: 1
+  }, DiagnosticsReportSchema);
 }
 
 async function expectMissionDownstream(expected: boolean): Promise<void> {
@@ -423,7 +472,8 @@ async function expectMissionDownstream(expected: boolean): Promise<void> {
     paths.chapterArtifact(1, 'selected_plan.md'),
     paths.chapterArtifact(1, 'scene_cards.json'),
     paths.chapterArtifact(1, 'scenes'),
-    paths.chapterArtifact(1, 'draft_v1.md')
+    paths.chapterArtifact(1, 'draft_v1.md'),
+    paths.chapterArtifact(1, 'diagnostics_v1.json')
   ]) {
     await expect(store.exists(artifactPath)).resolves.toBe(expected);
   }
@@ -439,7 +489,8 @@ async function activeArtifactBytes(): Promise<Record<string, string>> {
     'selected_plan.md',
     'scene_cards.json',
     'scenes/scene_001.md',
-    'draft_v1.md'
+    'draft_v1.md',
+    'diagnostics_v1.json'
   ];
   const entries = await Promise.all(relativePaths.map(async (relativePath) => [
     relativePath,

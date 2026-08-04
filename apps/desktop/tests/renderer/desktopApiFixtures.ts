@@ -23,12 +23,22 @@ export function createInertChapterApi() {
       .mockResolvedValue({ available: false, reason: 'not_ready' }),
     readDraft: vi.fn<NovelLoopDesktopApi['chapter']['readDraft']>()
       .mockResolvedValue({ available: false, reason: 'not_ready' }),
-    selectDirection: vi.fn<NovelLoopDesktopApi['chapter']['selectDirection']>(),
+    selectDirection: vi.fn<NovelLoopDesktopApi['chapter']['selectDirection']>()
+      .mockResolvedValue({ outcome: 'adopted' }),
     saveMissionWorkingCopy:
-      vi.fn<NovelLoopDesktopApi['chapter']['saveMissionWorkingCopy']>(),
+      vi.fn<NovelLoopDesktopApi['chapter']['saveMissionWorkingCopy']>()
+        .mockResolvedValue({
+          outcome: 'saved',
+          revisionToken: `chapter_revision_${'8'.repeat(48)}`
+        }),
     savePlanWorkingCopy:
-      vi.fn<NovelLoopDesktopApi['chapter']['savePlanWorkingCopy']>(),
+      vi.fn<NovelLoopDesktopApi['chapter']['savePlanWorkingCopy']>()
+        .mockResolvedValue({
+          outcome: 'saved',
+          revisionToken: `chapter_revision_${'9'.repeat(48)}`
+        }),
     adoptRevision: vi.fn<NovelLoopDesktopApi['chapter']['adoptRevision']>()
+      .mockResolvedValue({ outcome: 'adopted' })
   } satisfies NovelLoopDesktopApi['chapter'];
 }
 

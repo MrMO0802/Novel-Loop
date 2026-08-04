@@ -46,7 +46,11 @@ type AppRoute =
   | { kind: 'planning-generation'; project: ProjectSummary }
   | { kind: 'planning-review'; project: ProjectSummary }
   | { kind: 'chapter-planning-generation'; project: ProjectSummary }
-  | { kind: 'chapter-plan-review'; project: ProjectSummary }
+  | {
+    editMission?: boolean;
+    kind: 'chapter-plan-review';
+    project: ProjectSummary;
+  }
   | { kind: 'chapter-draft-generation'; project: ProjectSummary }
   | { kind: 'chapter-workspace'; project: ProjectSummary };
 
@@ -246,6 +250,7 @@ export function App() {
   if (route.kind === 'chapter-plan-review') {
     return (
       <ChapterPlanReview
+        {...(route.editMission ? { initialEditor: 'mission' as const } : {})}
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
         onGenerateDraft={() => setRoute({
           kind: 'chapter-draft-generation',
@@ -262,6 +267,11 @@ export function App() {
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
         onCompleted={() => setRoute({
           kind: 'chapter-workspace',
+          project: route.project
+        })}
+        onRepairParticipants={() => setRoute({
+          editMission: true,
+          kind: 'chapter-plan-review',
           project: route.project
         })}
         project={route.project}

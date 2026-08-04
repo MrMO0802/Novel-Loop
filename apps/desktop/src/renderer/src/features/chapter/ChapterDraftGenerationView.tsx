@@ -4,6 +4,7 @@ import { BookOpenText } from '@phosphor-icons/react/BookOpenText';
 import { CheckCircle } from '@phosphor-icons/react/CheckCircle';
 import { CircleNotch } from '@phosphor-icons/react/CircleNotch';
 import { PauseCircle } from '@phosphor-icons/react/PauseCircle';
+import { PencilSimple } from '@phosphor-icons/react/PencilSimple';
 import { WarningCircle } from '@phosphor-icons/react/WarningCircle';
 import {
   useCallback,
@@ -53,12 +54,14 @@ const STAGE_LIST_LABELS: Partial<Record<ChapterTaskStage, string>> = {
 interface ChapterDraftGenerationViewProps {
   onBack: () => void;
   onCompleted: () => void;
+  onRepairParticipants: () => void;
   project: ProjectSummary;
 }
 
 export function ChapterDraftGenerationView({
   onBack,
   onCompleted,
+  onRepairParticipants,
   project
 }: ChapterDraftGenerationViewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -73,6 +76,7 @@ export function ChapterDraftGenerationView({
   const [isStopping, setIsStopping] = useState(false);
   const [refreshWarning, setRefreshWarning] = useState(false);
   const [localError, setLocalError] = useState<ChapterErrorKind | null>(null);
+  const [participantRepairNeeded, setParticipantRepairNeeded] = useState(false);
 
   const completeDraft = useCallback(async () => {
     if (completionRefreshStarted.current) return;
@@ -136,17 +140,39 @@ export function ChapterDraftGenerationView({
     }
   }, [project.projectKey, receiveTask]);
 
+  const startAfterParticipantCheck = useCallback(async () => {
+    const currentRequest = ++requestToken.current;
+    try {
+      const plan = await window.novelLoop.chapter.readPlan({
+        projectKey: project.projectKey
+      });
+      if (!mounted.current || currentRequest !== requestToken.current) return;
+      if (
+        plan.available
+        && !plan.mission.participantOptions.some(({ selected }) => selected)
+      ) {
+        setParticipantRepairNeeded(true);
+        return;
+      }
+    } catch {
+      if (!mounted.current || currentRequest !== requestToken.current) return;
+    }
+    if (mounted.current && currentRequest === requestToken.current) {
+      void start();
+    }
+  }, [project.projectKey, start]);
+
   useEffect(() => {
     headingRef.current?.focus();
     if (!startIssued.current) {
       startIssued.current = true;
-      void start();
+      void startAfterParticipantCheck();
     }
     return () => {
       mounted.current = false;
       requestToken.current += 1;
     };
-  }, [start]);
+  }, [startAfterParticipantCheck]);
 
   const requestStop = async () => {
     if (!task || isStopping) return;
@@ -260,7 +286,23 @@ export function ChapterDraftGenerationView({
           >
             {formatMessage('chapter.draft.title', { chapter: chapterNumber })}
           </h1>
-          {!task && !errorKind && (
+          {participantRepairNeeded && (
+            <div className="nl-authoring-recovery">
+              <p className="nl-inline-alert nl-inline-alert--error" role="alert">
+                <WarningCircle aria-hidden size={20} weight="fill" />
+                {t('chapter.authoring.participants')}
+              </p>
+              <button
+                className="nl-primary-action"
+                onClick={onRepairParticipants}
+                type="button"
+              >
+                <PencilSimple aria-hidden size={18} />
+                {t('chapter.mission.repairParticipants')}
+              </button>
+            </div>
+          )}
+          {!task && !errorKind && !participantRepairNeeded && (
             <div className="nl-foundation-progress" role="status">
               <CircleNotch aria-hidden className="nl-spin" size={28} />
               <div className="nl-foundation-progress__body">

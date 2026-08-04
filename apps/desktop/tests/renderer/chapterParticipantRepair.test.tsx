@@ -112,6 +112,13 @@ async function openReview() {
   await screen.findByRole('heading', { name: '审阅第 1 章方向' });
 }
 
+function directionOption(name: string): HTMLElement {
+  const option = screen.getByRole('radio', { name });
+  const article = option.closest('article');
+  expect(article).not.toBeNull();
+  return article!;
+}
+
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(window, 'novelLoop');
@@ -149,9 +156,8 @@ describe('chapter participant repair', () => {
     render(<App />);
     await openReview();
 
-    fireEvent.click(within(screen.getByRole('radio', {
-      name: '从交通事故切入'
-    })).getByRole('button', { name: '设为本章方向' }));
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '设为本章方向' }));
     fireEvent.click(screen.getByRole('button', {
       name: '确认设为本章方向'
     }));
@@ -162,6 +168,41 @@ describe('chapter participant repair', () => {
     fireEvent.click(screen.getByRole('button', { name: '补充本章人物' }));
     expect(screen.getByRole('heading', {
       name: '编辑本章任务'
+    })).toHaveFocus();
+  });
+
+  test.each([
+    ['无法读取', { kind: 'unavailable' as const }],
+    ['读取被拒绝', { kind: 'rejected' as const }]
+  ])('fails closed when participant preflight %s', async (_label, failure) => {
+    const api = installApi();
+    api.chapter.readPlan.mockResolvedValueOnce(completeChapterPlan);
+    if (failure.kind === 'unavailable') {
+      api.chapter.readPlan.mockResolvedValueOnce({
+        available: false,
+        reason: 'not_ready'
+      });
+    } else {
+      api.chapter.readPlan.mockRejectedValueOnce(
+        new Error('/tmp/internal-plan.jsonl')
+      );
+    }
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认方向并生成草稿'
+    }));
+    fireEvent.click(screen.getByRole('button', { name: '开始生成草稿' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '暂时无法核对本章人物，请返回章节方向后重试。'
+    );
+    expect(api.chapter.startDrafting).not.toHaveBeenCalled();
+    expect(document.body).not.toHaveTextContent('/tmp/internal-plan.jsonl');
+    fireEvent.click(screen.getByRole('button', { name: '返回章节方向' }));
+    expect(await screen.findByRole('heading', {
+      name: '审阅第 1 章方向'
     })).toHaveFocus();
   });
 });

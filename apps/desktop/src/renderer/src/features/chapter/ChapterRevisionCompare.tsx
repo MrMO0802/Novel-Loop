@@ -6,7 +6,9 @@ import { t } from '../../i18n/messages.zh-CN';
 import { SafeChapterMarkdown } from './ChapterDirectionChooser';
 
 interface ChapterRevisionCompareProps {
+  artifactKind: 'mission' | 'plan';
   candidate: string;
+  fallbackTitle?: string;
   onAdopt: () => Promise<boolean>;
   onBack: () => void;
   source: string;
@@ -14,7 +16,9 @@ interface ChapterRevisionCompareProps {
 }
 
 export function ChapterRevisionCompare({
+  artifactKind,
   candidate,
+  fallbackTitle,
   onAdopt,
   onBack,
   source,
@@ -71,11 +75,17 @@ export function ChapterRevisionCompare({
       <div className="nl-revision-compare__columns">
         <section aria-label={t('chapter.revision.source')}>
           <h3>{t('chapter.revision.source')}</h3>
-          <SafeChapterMarkdown markdown={source} />
+          <SafeChapterMarkdown
+            {...(fallbackTitle === undefined ? {} : { fallbackTitle })}
+            markdown={source}
+          />
         </section>
         <section aria-label={t('chapter.revision.candidate')}>
           <h3>{t('chapter.revision.candidate')}</h3>
-          <SafeChapterMarkdown markdown={candidate} />
+          <SafeChapterMarkdown
+            {...(fallbackTitle === undefined ? {} : { fallbackTitle })}
+            markdown={candidate}
+          />
         </section>
       </div>
       {!confirming ? (
@@ -106,7 +116,9 @@ export function ChapterRevisionCompare({
             </h3>
             <p>{t('chapter.invalidation.note')}</p>
             <p className="nl-invalidation-list">
-              {t('chapter.invalidation.nodes')}
+              {artifactKind === 'mission'
+                ? t('chapter.invalidation.missionNodes')
+                : t('chapter.invalidation.planNodes')}
             </p>
           </div>
           <div className="nl-foundation-actions">

@@ -274,6 +274,10 @@ export function App() {
           kind: 'chapter-plan-review',
           project: route.project
         })}
+        onReviewPlan={() => setRoute({
+          kind: 'chapter-plan-review',
+          project: route.project
+        })}
         project={route.project}
       />
     );

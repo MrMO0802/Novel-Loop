@@ -52,6 +52,9 @@ export function ChapterMissionEditor({
   reviewToken
 }: ChapterMissionEditorProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const compareTriggerRef = useRef<HTMLButtonElement>(null);
+  const editGeneration = useRef(0);
+  const restoreCompareFocus = useRef(false);
   const initialDraft = useMemo(() => createInitialDraft(mission), [mission]);
   const [chapterFunction, setChapterFunction] = useState(
     initialDraft.chapterFunction
@@ -90,24 +93,41 @@ export function ChapterMissionEditor({
     'compare' | 'confirm' | null
   >(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [invalidCharacterDeltas, setInvalidCharacterDeltas] = useState<
+    number[]
+  >([]);
 
   useEffect(() => {
     headingRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!compareMode && restoreCompareFocus.current) {
+      restoreCompareFocus.current = false;
+      compareTriggerRef.current?.focus();
+    }
+  }, [compareMode]);
+
   const markDirty = () => {
+    editGeneration.current += 1;
     setStatus('dirty');
     setRevisionToken(null);
     setSavedDraft(null);
     setSavedSummary(null);
     setCompareMode(null);
     setLocalError(null);
+    setInvalidCharacterDeltas([]);
   };
 
   const buildDraft = (): MissionDraft | null => {
     const incompleteParticipant = newParticipants.some(({ name, role }) => (
       (name.trim() === '') !== (role.trim() === '')
     ));
+    const incompleteCharacterDeltas = characterDeltas.flatMap((delta, index) => {
+      const completedFields = [delta.from, delta.to, delta.evidenceRequired]
+        .filter((value) => value.trim() !== '').length;
+      return completedFields > 0 && completedFields < 3 ? [index] : [];
+    });
     if (chapterFunction.trim() === '') {
       setLocalError(t('chapter.mission.validationPurpose'));
       return null;
@@ -116,6 +136,12 @@ export function ChapterMissionEditor({
       setLocalError(t('chapter.mission.validationParticipant'));
       return null;
     }
+    if (incompleteCharacterDeltas.length > 0) {
+      setInvalidCharacterDeltas(incompleteCharacterDeltas);
+      setLocalError(t('chapter.mission.validationCharacterChange'));
+      return null;
+    }
+    setInvalidCharacterDeltas([]);
     return {
       chapterFunction: chapterFunction.trim(),
       requiredObjectives: objectives
@@ -158,6 +184,13 @@ export function ChapterMissionEditor({
     if (saving) return;
     const draft = buildDraft();
     if (!draft) return;
+    const saveGeneration = editGeneration.current;
+    const summary = missionDraftSummary({
+      draft,
+      newParticipants,
+      participants,
+      promises
+    });
     setSaving(true);
     setLocalError(null);
     try {
@@ -166,21 +199,19 @@ export function ChapterMissionEditor({
         reviewToken,
         mission: draft
       });
+      if (saveGeneration !== editGeneration.current) return;
       if (result.outcome === 'saved') {
         setRevisionToken(result.revisionToken);
         setSavedDraft(draft);
-        setSavedSummary(missionDraftSummary({
-          draft,
-          newParticipants,
-          participants,
-          promises
-        }));
+        setSavedSummary(summary);
         setStatus('saved');
       } else {
         onOutcome(result);
       }
     } catch {
-      onOutcome({ outcome: 'invalid', messageKey: 'invalid_output' });
+      if (saveGeneration === editGeneration.current) {
+        onOutcome({ outcome: 'invalid', messageKey: 'invalid_output' });
+      }
     } finally {
       setSaving(false);
     }
@@ -211,9 +242,13 @@ export function ChapterMissionEditor({
   if (compareMode && savedDraft && savedSummary) {
     return (
       <ChapterRevisionCompare
+        artifactKind="mission"
         candidate={savedSummary}
         onAdopt={adopt}
-        onBack={() => setCompareMode(null)}
+        onBack={() => {
+          restoreCompareFocus.current = true;
+          setCompareMode(null);
+        }}
         source={missionReviewSummary(mission)}
         startConfirming={compareMode === 'confirm'}
       />
@@ -312,7 +347,6 @@ export function ChapterMissionEditor({
                 index === changedIndex
                   ? {
                       ...promise,
-                      itemToken: null,
                       promise: rows[index] ?? ''
                     }
                   : promise
@@ -324,6 +358,7 @@ export function ChapterMissionEditor({
 
         <CharacterDeltaRows
           deltas={characterDeltas}
+          invalidRows={invalidCharacterDeltas}
           onChange={(rows) => {
             markDirty();
             setCharacterDeltas(rows);
@@ -478,6 +513,7 @@ export function ChapterMissionEditor({
           className="nl-secondary-action"
           disabled={!revisionToken}
           onClick={() => setCompareMode('compare')}
+          ref={compareTriggerRef}
           type="button"
         >
           {t('chapter.editor.compare')}
@@ -568,10 +604,12 @@ function TextRows({
 
 function CharacterDeltaRows({
   deltas,
+  invalidRows,
   onChange,
   participants
 }: {
   deltas: CharacterDelta[];
+  invalidRows: number[];
   onChange: (rows: CharacterDelta[]) => void;
   participants: ParticipantRow[];
 }) {
@@ -612,6 +650,9 @@ function CharacterDeltaRows({
               <label key={field}>
                 <span>{fieldLabel}</span>
                 <input
+                  aria-invalid={invalidRows.includes(index)
+                    ? 'true'
+                    : undefined}
                   aria-label={`人物变化 ${index + 1} ${fieldLabel}`}
                   onChange={(event) => onChange(deltas.map((row, rowIndex) => (
                     rowIndex === index

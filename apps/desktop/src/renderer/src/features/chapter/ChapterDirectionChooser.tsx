@@ -5,6 +5,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type KeyboardEvent,
   type ReactNode
 } from 'react';
 
@@ -19,7 +20,7 @@ export type ChapterDirection = AvailablePlan['directions'][number];
 
 interface ChapterDirectionChooserProps {
   directions: ChapterDirection[];
-  onEdit: (direction: ChapterDirection) => void;
+  onEdit: (direction: ChapterDirection, authorTitle: string) => void;
   onOutcome: (result: ChapterAuthoringResult) => void;
   onSelect: (direction: ChapterDirection) => Promise<ChapterAuthoringResult>;
   onSelected: () => Promise<void>;
@@ -33,10 +34,15 @@ export function ChapterDirectionChooser({
   onSelected
 }: ChapterDirectionChooserProps) {
   const confirmationHeadingRef = useRef<HTMLHeadingElement>(null);
-  const triggerRef = useRef<HTMLButtonElement | null>(null);
+  const radioRefs = useRef<Array<HTMLDivElement | null>>([]);
+  const triggerRef = useRef<HTMLElement | null>(null);
   const confirmationWasOpen = useRef(false);
   const [pending, setPending] = useState<ChapterDirection | null>(null);
   const [selecting, setSelecting] = useState(false);
+  const [focusedIndex, setFocusedIndex] = useState(() => {
+    const activeIndex = directions.findIndex(({ active }) => active);
+    return activeIndex >= 0 ? activeIndex : 0;
+  });
 
   useEffect(() => {
     if (pending) {
@@ -52,6 +58,41 @@ export function ChapterDirectionChooser({
 
   const cancelSelection = () => {
     setPending(null);
+  };
+
+  const requestSelection = (
+    direction: ChapterDirection,
+    trigger: HTMLElement
+  ) => {
+    if (direction.active) return;
+    triggerRef.current = trigger;
+    setPending(direction);
+  };
+
+  const handleRadioKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+    direction: ChapterDirection,
+    index: number
+  ) => {
+    const lastIndex = directions.length - 1;
+    let nextIndex: number | null = null;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
+      nextIndex = index === lastIndex ? 0 : index + 1;
+    } else if (event.key === 'ArrowUp' || event.key === 'ArrowLeft') {
+      nextIndex = index === 0 ? lastIndex : index - 1;
+    } else if (event.key === 'Home') {
+      nextIndex = 0;
+    } else if (event.key === 'End') {
+      nextIndex = lastIndex;
+    } else if (event.key === ' ' || event.key === 'Enter') {
+      event.preventDefault();
+      requestSelection(direction, event.currentTarget);
+      return;
+    }
+    if (nextIndex === null) return;
+    event.preventDefault();
+    setFocusedIndex(nextIndex);
+    radioRefs.current[nextIndex]?.focus();
   };
 
   const confirmSelection = async () => {
@@ -93,57 +134,77 @@ export function ChapterDirectionChooser({
       >
         {directions.map((direction, index) => {
           const title = authorDirectionTitle(direction.title, index);
+          const titleId = `chapter-direction-title-${index}`;
           return (
             <article
-              aria-checked={direction.active}
-              aria-label={title}
               className={`nl-direction-option${direction.active
                 ? ' nl-direction-option--active'
                 : ''}`}
               key={direction.optionToken}
-              role="radio"
-              tabIndex={direction.active ? 0 : -1}
             >
-              <header className="nl-direction-option__header">
-                <div>
-                  <p className="nl-direction-option__number">
-                    {`方向 ${index + 1}`}
-                  </p>
-                  <h3>{title}</h3>
-                </div>
-                <div className="nl-direction-option__badges">
-                  {direction.aiRecommended && (
-                    <span className="nl-direction-badge">
-                      <Sparkle aria-hidden size={15} weight="fill" />
-                      {t('chapter.direction.aiRecommended')}
-                    </span>
-                  )}
-                  {direction.active && (
-                    <span className="nl-direction-badge nl-direction-badge--active">
-                      <CheckCircle aria-hidden size={15} weight="fill" />
-                      {t('chapter.direction.active')}
-                    </span>
-                  )}
-                </div>
-              </header>
-              <SafeChapterMarkdown fallbackTitle={title} markdown={direction.markdown} />
-              <div className="nl-direction-option__assessment">
-                <DirectionList
-                  items={direction.strengths}
-                  title={t('chapter.review.strengths')}
+              <div
+                aria-checked={direction.active}
+                aria-labelledby={titleId}
+                className="nl-direction-option__radio"
+                onClick={(event) => requestSelection(
+                  direction,
+                  event.currentTarget
+                )}
+                onFocus={() => setFocusedIndex(index)}
+                onKeyDown={(event) => handleRadioKeyDown(
+                  event,
+                  direction,
+                  index
+                )}
+                ref={(node) => {
+                  radioRefs.current[index] = node;
+                }}
+                role="radio"
+                tabIndex={focusedIndex === index ? 0 : -1}
+              >
+                <header className="nl-direction-option__header">
+                  <div>
+                    <p className="nl-direction-option__number">
+                      {`方向 ${index + 1}`}
+                    </p>
+                    <h3 id={titleId}>{title}</h3>
+                  </div>
+                  <div className="nl-direction-option__badges">
+                    {direction.aiRecommended && (
+                      <span className="nl-direction-badge">
+                        <Sparkle aria-hidden size={15} weight="fill" />
+                        {t('chapter.direction.aiRecommended')}
+                      </span>
+                    )}
+                    {direction.active && (
+                      <span className="nl-direction-badge nl-direction-badge--active">
+                        <CheckCircle aria-hidden size={15} weight="fill" />
+                        {t('chapter.direction.active')}
+                      </span>
+                    )}
+                  </div>
+                </header>
+                <SafeChapterMarkdown
+                  fallbackTitle={title}
+                  markdown={direction.markdown}
                 />
-                <DirectionList
-                  items={direction.risks}
-                  title={t('chapter.review.risks')}
-                />
+                <div className="nl-direction-option__assessment">
+                  <DirectionList
+                    items={direction.strengths}
+                    title={t('chapter.review.strengths')}
+                  />
+                  <DirectionList
+                    items={direction.risks}
+                    title={t('chapter.review.risks')}
+                  />
+                </div>
               </div>
               <div className="nl-direction-option__actions">
                 {!direction.active && (
                   <button
                     className="nl-primary-action"
                     onClick={(event) => {
-                      triggerRef.current = event.currentTarget;
-                      setPending(direction);
+                      requestSelection(direction, event.currentTarget);
                     }}
                     type="button"
                   >
@@ -153,7 +214,7 @@ export function ChapterDirectionChooser({
                 )}
                 <button
                   className="nl-secondary-action"
-                  onClick={() => onEdit(direction)}
+                  onClick={() => onEdit(direction, title)}
                   type="button"
                 >
                   <PencilSimple aria-hidden size={18} />
@@ -256,6 +317,17 @@ export function SafeChapterMarkdown({
   );
 }
 
+export function sanitizeDirectionMarkdown(
+  markdown: string,
+  fallbackTitle: string
+): string {
+  return markdown.split('\n').map((line) => {
+    const heading = /^(#{1,6})([ \t]+)(.*)$/u.exec(line);
+    if (!heading || !isUntitled(heading[3] ?? '')) return line;
+    return `${heading[1]}${heading[2]}${fallbackTitle}`;
+  }).join('\n');
+}
+
 function DirectionList({ items, title }: { items: string[]; title: string }) {
   if (items.length === 0) return null;
   return (
@@ -270,7 +342,7 @@ function DirectionList({ items, title }: { items: string[]; title: string }) {
   );
 }
 
-function authorDirectionTitle(title: string, index: number) {
+export function authorDirectionTitle(title: string, index: number) {
   return isUntitled(title) ? `方向 ${index + 1}` : title;
 }
 

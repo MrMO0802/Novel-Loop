@@ -23,6 +23,7 @@ import { formatMessage, t } from '../../i18n/messages.zh-CN';
 import {
   ChapterDirectionChooser,
   SafeChapterMarkdown,
+  sanitizeDirectionMarkdown,
   type ChapterDirection
 } from './ChapterDirectionChooser';
 import { ChapterMissionEditor } from './ChapterMissionEditor';
@@ -31,7 +32,7 @@ import { ChapterRevisionCompare } from './ChapterRevisionCompare';
 type AvailablePlan = Extract<ChapterPlanReviewResult, { available: true }>;
 type EditorState =
   | { kind: 'mission' }
-  | { direction: ChapterDirection; kind: 'plan' }
+  | { authorTitle: string; direction: ChapterDirection; kind: 'plan' }
   | null;
 
 interface ChapterPlanReviewProps {
@@ -63,14 +64,20 @@ export function ChapterPlanReview({
   } | null>(null);
   const [liveStatus, setLiveStatus] = useState('');
 
-  const loadReview = useCallback(async () => {
+  const loadReview = useCallback(async (resetBindings = false) => {
     const currentRequest = ++requestToken.current;
+    if (resetBindings) {
+      setReview(null);
+      setFailed(false);
+      setEditor(null);
+      setConfirmingDraft(false);
+    }
     try {
       const result = await window.novelLoop.chapter.readPlan({
         projectKey: project.projectKey
       });
       if (currentRequest !== requestToken.current) return;
-      setReview(result);
+      setReview(result.available ? result : null);
       setFailed(!result.available);
       if (
         result.available
@@ -81,7 +88,10 @@ export function ChapterPlanReview({
         setEditor({ kind: 'mission' });
       }
     } catch {
-      if (currentRequest === requestToken.current) setFailed(true);
+      if (currentRequest === requestToken.current) {
+        setReview(null);
+        setFailed(true);
+      }
     }
   }, [initialEditor, project.projectKey]);
 
@@ -133,7 +143,7 @@ export function ChapterPlanReview({
 
   const refreshAfterAdoption = async () => {
     setAuthoringIssue(null);
-    await loadReview();
+    await loadReview(true);
   };
 
   return (
@@ -179,10 +189,19 @@ export function ChapterPlanReview({
           </div>
         )}
         {failed && (
-          <p className="nl-inline-alert nl-inline-alert--error" role="alert">
-            <WarningCircle aria-hidden size={20} weight="fill" />
-            {t('chapter.review.unavailable')}
-          </p>
+          <div className="nl-authoring-recovery">
+            <p className="nl-inline-alert nl-inline-alert--error" role="alert">
+              <WarningCircle aria-hidden size={20} weight="fill" />
+              {t('chapter.review.refreshUnavailable')}
+            </p>
+            <button
+              className="nl-primary-action"
+              onClick={() => void loadReview(true)}
+              type="button"
+            >
+              {t('chapter.review.retry')}
+            </button>
+          </div>
         )}
         {authoringIssue && (
           <div className="nl-authoring-recovery">
@@ -218,9 +237,9 @@ export function ChapterPlanReview({
 
             <ChapterDirectionChooser
               directions={available.directions}
-              onEdit={(direction) => {
+              onEdit={(direction, authorTitle) => {
                 setAuthoringIssue(null);
-                setEditor({ direction, kind: 'plan' });
+                setEditor({ authorTitle, direction, kind: 'plan' });
               }}
               onOutcome={handleOutcome}
               onSelect={selectDirection}
@@ -239,6 +258,7 @@ export function ChapterPlanReview({
             )}
             {editor?.kind === 'plan' && (
               <ChapterPlanEditor
+                authorTitle={editor.authorTitle}
                 direction={editor.direction}
                 onAdopted={refreshAfterAdoption}
                 onClose={() => setEditor(null)}
@@ -377,6 +397,7 @@ function MissionList({ items, title }: { items: string[]; title: string }) {
 }
 
 function ChapterPlanEditor({
+  authorTitle,
   direction,
   onAdopted,
   onClose,
@@ -384,6 +405,7 @@ function ChapterPlanEditor({
   projectKey,
   reviewToken
 }: {
+  authorTitle: string;
   direction: ChapterDirection;
   onAdopted: () => Promise<void>;
   onClose: () => void;
@@ -392,7 +414,13 @@ function ChapterPlanEditor({
   reviewToken: string;
 }) {
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const [markdown, setMarkdown] = useState(direction.markdown);
+  const compareTriggerRef = useRef<HTMLButtonElement>(null);
+  const editGeneration = useRef(0);
+  const restoreCompareFocus = useRef(false);
+  const [markdown, setMarkdown] = useState(() => sanitizeDirectionMarkdown(
+    direction.markdown,
+    authorTitle
+  ));
   const [tab, setTab] = useState<'edit' | 'preview'>('edit');
   const [status, setStatus] = useState<'dirty' | 'saved' | 'adopted'>('dirty');
   const [saving, setSaving] = useState(false);
@@ -406,25 +434,37 @@ function ChapterPlanEditor({
     headingRef.current?.focus();
   }, []);
 
+  useEffect(() => {
+    if (!compareMode && restoreCompareFocus.current) {
+      restoreCompareFocus.current = false;
+      compareTriggerRef.current?.focus();
+    }
+  }, [compareMode]);
+
   const save = async () => {
     if (saving) return;
+    const submittedMarkdown = markdown;
+    const saveGeneration = editGeneration.current;
     setSaving(true);
     try {
       const result = await window.novelLoop.chapter.savePlanWorkingCopy({
         projectKey,
         reviewToken,
         optionToken: direction.optionToken,
-        markdown
+        markdown: submittedMarkdown
       });
+      if (saveGeneration !== editGeneration.current) return;
       if (result.outcome === 'saved') {
         setRevisionToken(result.revisionToken);
-        setSavedMarkdown(markdown);
+        setSavedMarkdown(submittedMarkdown);
         setStatus('saved');
       } else {
         onOutcome(result);
       }
     } catch {
-      onOutcome({ outcome: 'invalid', messageKey: 'invalid_output' });
+      if (saveGeneration === editGeneration.current) {
+        onOutcome({ outcome: 'invalid', messageKey: 'invalid_output' });
+      }
     } finally {
       setSaving(false);
     }
@@ -455,10 +495,15 @@ function ChapterPlanEditor({
   if (compareMode && savedMarkdown !== null) {
     return (
       <ChapterRevisionCompare
+        artifactKind="plan"
         candidate={savedMarkdown}
+        fallbackTitle={authorTitle}
         onAdopt={adopt}
-        onBack={() => setCompareMode(null)}
-        source={direction.markdown}
+        onBack={() => {
+          restoreCompareFocus.current = true;
+          setCompareMode(null);
+        }}
+        source={sanitizeDirectionMarkdown(direction.markdown, authorTitle)}
         startConfirming={compareMode === 'confirm'}
       />
     );
@@ -477,7 +522,7 @@ function ChapterPlanEditor({
             ref={headingRef}
             tabIndex={-1}
           >
-            {formatMessage('chapter.planEditor.title', { title: direction.title })}
+            {formatMessage('chapter.planEditor.title', { title: authorTitle })}
           </h2>
         </div>
         <p
@@ -487,56 +532,59 @@ function ChapterPlanEditor({
           {editStatusLabel(status)}
         </p>
       </div>
-      <div aria-label={t('chapter.planEditor.tabs')} className="nl-editor-tabs" role="tablist">
+      <div
+        aria-label={t('chapter.planEditor.tabs')}
+        className="nl-editor-tabs"
+        role="group"
+      >
         <button
-          aria-controls="chapter-plan-edit-panel"
-          aria-selected={tab === 'edit'}
+          aria-pressed={tab === 'edit'}
           onClick={() => setTab('edit')}
-          role="tab"
           type="button"
         >
           <PencilSimple aria-hidden size={17} />
           {t('chapter.planEditor.editTab')}
         </button>
         <button
-          aria-controls="chapter-plan-preview-panel"
-          aria-selected={tab === 'preview'}
+          aria-pressed={tab === 'preview'}
           onClick={() => setTab('preview')}
-          role="tab"
           type="button"
         >
           <Eye aria-hidden size={17} />
           {t('chapter.planEditor.previewTab')}
         </button>
       </div>
-      {tab === 'edit' ? (
-        <div className="nl-plan-editor__panel" id="chapter-plan-edit-panel" role="tabpanel">
-          <label htmlFor="chapter-plan-markdown">
-            {t('chapter.planEditor.markdown')}
-          </label>
-          <textarea
-            id="chapter-plan-markdown"
-            onChange={(event) => {
-              setMarkdown(event.currentTarget.value);
-              setStatus('dirty');
-              setRevisionToken(null);
-              setSavedMarkdown(null);
-              setCompareMode(null);
-            }}
-            rows={18}
-            value={markdown}
-          />
-        </div>
-      ) : (
-        <article
-          aria-label={t('chapter.planEditor.preview')}
-          className="nl-plan-editor__panel nl-plan-editor__preview"
-          id="chapter-plan-preview-panel"
-          role="tabpanel"
-        >
-          <SafeChapterMarkdown fallbackTitle={direction.title} markdown={markdown} />
-        </article>
-      )}
+      <div
+        className="nl-plan-editor__panel"
+        hidden={tab !== 'edit'}
+        id="chapter-plan-edit-panel"
+      >
+        <label htmlFor="chapter-plan-markdown">
+          {t('chapter.planEditor.markdown')}
+        </label>
+        <textarea
+          id="chapter-plan-markdown"
+          onChange={(event) => {
+            editGeneration.current += 1;
+            setMarkdown(event.currentTarget.value);
+            setStatus('dirty');
+            setRevisionToken(null);
+            setSavedMarkdown(null);
+            setCompareMode(null);
+          }}
+          rows={18}
+          value={markdown}
+        />
+      </div>
+      <article
+        aria-label={t('chapter.planEditor.preview')}
+        className="nl-plan-editor__panel nl-plan-editor__preview"
+        hidden={tab !== 'preview'}
+        id="chapter-plan-preview-panel"
+        role="region"
+      >
+        <SafeChapterMarkdown fallbackTitle={authorTitle} markdown={markdown} />
+      </article>
       <p className="nl-plan-editor__word-count">
         {formatMessage('chapter.workspace.wordCount', {
           count: countAuthorCharacters(markdown)
@@ -550,6 +598,7 @@ function ChapterPlanEditor({
           className="nl-secondary-action"
           disabled={!revisionToken}
           onClick={() => setCompareMode('compare')}
+          ref={compareTriggerRef}
           type="button"
         >
           {t('chapter.editor.compare')}

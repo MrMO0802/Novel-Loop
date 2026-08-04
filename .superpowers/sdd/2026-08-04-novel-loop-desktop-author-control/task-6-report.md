@@ -2,13 +2,15 @@
 
 ## Status
 
-Complete. Chapter-plan review is now an author-controlled Chinese workflow:
-all directions are visible as peers, mission and plan edits remain pending until
-explicit adoption, and every direction/adoption invalidation is confirmed.
+Fix round 1 is implemented on top of `1e6325e`. The renderer now keeps async
+save results tied to their submitted editor snapshots, resets every editor and
+opaque binding when a review refreshes, validates structured mission rows, and
+fails closed before drafting when participant preflight cannot be completed.
 
 ## RED
 
-The initial focused run was executed after adding the renderer behavior tests:
+The focused regression command was run after adding all fix-round tests and
+before changing renderer implementation:
 
 ```bash
 corepack pnpm --dir apps/desktop exec vitest run \
@@ -16,13 +18,15 @@ corepack pnpm --dir apps/desktop exec vitest run \
   tests/renderer/chapterParticipantRepair.test.tsx
 ```
 
-Result: 2 files failed, 11 tests failed, exit 1. The failures showed the old
-read-only alternatives, absent direction commands, absent mission/plan editors,
-absent revision comparison/adoption, and generic participant failure handling.
+Result: 2 files failed, 13 tests failed, 10 tests passed, exit 1. The failures
+reproduced deferred-save races, stale review reuse, old editor/new token
+pairing, changed debt token loss, silent partial character-row filtering,
+open participant preflight, generic invalidation copy, false radio/tab
+semantics, lost editor focus, and inconsistent placeholder-title rendering.
 
 ## GREEN
 
-Exact required renderer command:
+Exact required four-file renderer command:
 
 ```bash
 corepack pnpm --dir apps/desktop exec vitest run \
@@ -32,7 +36,17 @@ corepack pnpm --dir apps/desktop exec vitest run \
   tests/renderer/chapterWorkspace.test.tsx
 ```
 
-Result: 4 files passed, 22 tests passed, exit 0.
+Result: 4 files passed, 35 tests passed, exit 0.
+
+Complete renderer regression:
+
+```bash
+corepack pnpm --dir apps/desktop exec vitest run tests/renderer
+```
+
+Result: 11 files passed, 139 tests passed, exit 0.
+
+Desktop type check:
 
 ```bash
 corepack pnpm --dir apps/desktop check
@@ -40,73 +54,70 @@ corepack pnpm --dir apps/desktop check
 
 Result: node, web, and end-to-end TypeScript checks passed, exit 0.
 
-Additional renderer regression:
+## Fix Behavior
 
-```bash
-corepack pnpm --dir apps/desktop exec vitest run tests/renderer
-```
-
-Result: 11 files passed, 126 tests passed, exit 0.
-
-## UI Behavior
-
-- One bordered peer list renders every direction's complete safe Markdown,
-  strengths, risks, `AI 推荐`, and `当前方向` labels. Every inactive option has
-  `设为本章方向`; every option has `编辑后使用`; the Task 7 AI adjustment is
-  visibly disabled with a next-phase tooltip.
-- Direction selection names `场景规划、场景草稿、章节初稿`, requires explicit
-  confirmation, refreshes the public review after success, and never renders
-  the `Untitled Plan` fallback.
-- The mission editor supports purpose, repeatable objectives/promises/character
-  changes/reader information/forbidden moves/emotional beats, existing and new
-  participants, and target word count. Saves preserve opaque item bindings and
-  send only the Task 5 request shape.
-- Any direction can be edited without first becoming active. The Markdown
-  editor provides native text editing, an author-safe preview, Chinese character
-  count, and `未保存` / `已保存，等待采用` / `已采用` states.
-- Source/candidate comparison contains author-facing content only. Adoption
-  requires a second invalidation confirmation and calls `adoptRevision` with
-  `confirmInvalidation: true`.
-- Stale, participant-roster, invalid-output, busy, and project-unavailable
-  outcomes map to fixed Chinese copy. Drafting checks the public participant
-  selection before start and routes missing rosters to the mission editor.
+- Mission and plan saves capture an immutable request snapshot plus editor
+  generation. A response for older text cannot set the current editor to
+  `已保存，等待采用` or expose its revision for adoption; newer text
+  remains `未保存`.
+- Successful review refresh starts by hiding the old review and closing
+  editors, then binds only the returned review, direction, item, debt,
+  character, and participant tokens. Rejected, unavailable, and out-of-order
+  reads cannot reactivate stale content and expose a bounded Chinese retry.
+- Existing debt rows retain their item token after text changes. Nonempty debt
+  and character fixtures prove save, comparison, and explicit mission adoption
+  behavior. Partially completed character changes are rejected with a field
+  error and `aria-invalid` instead of being filtered out.
+- Draft participant preflight starts generation only after a successful plan
+  read with a selected participant. Empty rosters route to mission repair;
+  unavailable and rejected reads show a Chinese return-to-review recovery.
+- Mission adoption names `方案候选、方向排序、选定方案、场景规划、场景草稿、章节初稿`.
+  Plan adoption names `场景规划、场景草稿、章节初稿`.
+- `Untitled Plan` is sanitized in the chooser, editor heading, mounted
+  textarea, preview, and comparison source.
 
 ## Accessibility
 
-- Direction choices expose radio-group/radio semantics and textual selected
-  state in addition to color.
-- Route, editor, comparison, and confirmation headings receive focus.
-- Cancelling direction and draft confirmations restores focus to the trigger.
-- Save, selection, and adoption states use polite live regions; failures use
-  alerts. Form rows have author-facing labels, and icon controls have Chinese
-  accessible names and tooltips.
+- Each direction now has a separate noninteractive `role="radio"` surface and
+  sibling command buttons. Roving focus supports arrow keys, Home/End, Space,
+  Enter, wrapping, and confirmation-cancel focus restoration.
+- Edit/preview uses ordinary `aria-pressed` segmented buttons instead of false
+  tab semantics. Both panels remain mounted, preserving the native textarea
+  and its undo history while preview is visible.
+- Editor and confirmation headings receive focus, comparison return restores
+  the compare trigger, save states remain polite live regions, and structured
+  field/preflight failures use alerts and named controls.
 
 ## Renderer Boundary
 
-- Renderer calls only Task 5's named chapter methods. It does not import Node,
-  filesystem, shell, provider, engine, schema, or project-path APIs.
-- Review, option, item, participant, and revision tokens stay in component
-  closures/state. Select values use local numeric indexes; tokens and public
-  message keys are never rendered.
-- Raw errors and raw Codex content are discarded. Safe Markdown is converted to
-  React text nodes, so HTML-like input is visible as text and cannot execute.
+- Changes are limited to Task 6 renderer components, renderer tests/fixtures,
+  Chinese messages, chapter CSS, renderer route wiring, and this report.
 - No main, preload, shared contract, engine, provider, `.playwright-mcp/`, or
-  PNG file was changed.
+  PNG file changed.
+- Opaque tokens remain request-only values. Tests verify no token, internal ID,
+  path, raw error, schema name, or run metadata appears in the author UI.
+- Saving remains pending and unadopted until the separate comparison and
+  confirmation flow calls `adoptRevision`.
 
 ## Files
 
-- Added `ChapterDirectionChooser.tsx`, `ChapterMissionEditor.tsx`, and
-  `ChapterRevisionCompare.tsx`.
-- Updated `ChapterPlanReview.tsx`, `ChapterDraftGenerationView.tsx`, `App.tsx`,
-  the Chinese message catalog, and chapter styles.
-- Updated the strict renderer API fixture and chapter-plan tests; added the
-  participant-repair renderer test.
+- `apps/desktop/src/renderer/src/App.tsx`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterDirectionChooser.tsx`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterDraftGenerationView.tsx`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterMissionEditor.tsx`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterPlanReview.tsx`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterRevisionCompare.tsx`
+- `apps/desktop/src/renderer/src/i18n/messages.zh-CN.ts`
+- `apps/desktop/src/renderer/src/styles/chapter.css`
+- `apps/desktop/tests/renderer/chapterParticipantRepair.test.tsx`
+- `apps/desktop/tests/renderer/chapterPlanReview.test.tsx`
+- `apps/desktop/tests/renderer/desktopApiFixtures.ts`
+- `.superpowers/sdd/2026-08-04-novel-loop-desktop-author-control/task-6-report.md`
 
 ## Concerns
 
-No blocking concerns. The Task 5 task-error union does not expose
-`participant_roster_missing` for an already-started drafting task. Task 6
-therefore uses the existing public `readPlan` result as a renderer preflight and
-routes an empty selected roster before `startDrafting`; authoring operations
-still handle the public participant outcome directly. Existing untracked
-Playwright and PNG artifacts remain outside the commit.
+The Task 5 mission request represents a bound debt only by `debtTokens`; it has
+no token-plus-text field. The renderer therefore preserves the debt identity as
+required and shows the author's edited text in comparison, while the public
+request can transmit only the existing token. Expanding that contract is out of
+scope for this renderer-only fix round.

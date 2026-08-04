@@ -55,6 +55,7 @@ interface ChapterDraftGenerationViewProps {
   onBack: () => void;
   onCompleted: () => void;
   onRepairParticipants: () => void;
+  onReviewPlan: () => void;
   project: ProjectSummary;
 }
 
@@ -62,6 +63,7 @@ export function ChapterDraftGenerationView({
   onBack,
   onCompleted,
   onRepairParticipants,
+  onReviewPlan,
   project
 }: ChapterDraftGenerationViewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -77,6 +79,7 @@ export function ChapterDraftGenerationView({
   const [refreshWarning, setRefreshWarning] = useState(false);
   const [localError, setLocalError] = useState<ChapterErrorKind | null>(null);
   const [participantRepairNeeded, setParticipantRepairNeeded] = useState(false);
+  const [preflightUnavailable, setPreflightUnavailable] = useState(false);
 
   const completeDraft = useCallback(async () => {
     if (completionRefreshStarted.current) return;
@@ -142,20 +145,26 @@ export function ChapterDraftGenerationView({
 
   const startAfterParticipantCheck = useCallback(async () => {
     const currentRequest = ++requestToken.current;
+    setPreflightUnavailable(false);
     try {
       const plan = await window.novelLoop.chapter.readPlan({
         projectKey: project.projectKey
       });
       if (!mounted.current || currentRequest !== requestToken.current) return;
+      if (!plan.available) {
+        setPreflightUnavailable(true);
+        return;
+      }
       if (
-        plan.available
-        && !plan.mission.participantOptions.some(({ selected }) => selected)
+        !plan.mission.participantOptions.some(({ selected }) => selected)
       ) {
         setParticipantRepairNeeded(true);
         return;
       }
     } catch {
       if (!mounted.current || currentRequest !== requestToken.current) return;
+      setPreflightUnavailable(true);
+      return;
     }
     if (mounted.current && currentRequest === requestToken.current) {
       void start();
@@ -302,16 +311,35 @@ export function ChapterDraftGenerationView({
               </button>
             </div>
           )}
-          {!task && !errorKind && !participantRepairNeeded && (
-            <div className="nl-foundation-progress" role="status">
-              <CircleNotch aria-hidden className="nl-spin" size={28} />
-              <div className="nl-foundation-progress__body">
-                <p className="nl-foundation-progress__stage">
-                  {t('chapter.draft.starting')}
-                </p>
-              </div>
+          {preflightUnavailable && (
+            <div className="nl-authoring-recovery">
+              <p className="nl-inline-alert nl-inline-alert--error" role="alert">
+                <WarningCircle aria-hidden size={20} weight="fill" />
+                {t('chapter.draft.preflightUnavailable')}
+              </p>
+              <button
+                className="nl-primary-action"
+                onClick={onReviewPlan}
+                type="button"
+              >
+                <PencilSimple aria-hidden size={18} />
+                {t('chapter.draft.backToPlan')}
+              </button>
             </div>
           )}
+          {!task
+            && !errorKind
+            && !participantRepairNeeded
+            && !preflightUnavailable && (
+              <div className="nl-foundation-progress" role="status">
+                <CircleNotch aria-hidden className="nl-spin" size={28} />
+                <div className="nl-foundation-progress__body">
+                  <p className="nl-foundation-progress__stage">
+                    {t('chapter.draft.starting')}
+                  </p>
+                </div>
+              </div>
+            )}
           {task && ACTIVE_STATUSES.has(task.status) && (
             <DraftProgress
               isStopping={isStopping}

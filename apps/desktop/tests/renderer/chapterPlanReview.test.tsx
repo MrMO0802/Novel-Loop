@@ -3,6 +3,7 @@
 import '@testing-library/jest-dom/vitest';
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -11,6 +12,7 @@ import {
   within
 } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
+import { StrictMode } from 'react';
 
 import { App } from '../../src/renderer/src/App';
 import type {
@@ -23,6 +25,7 @@ import type { SystemReadiness } from '../../src/shared/systemContract';
 import {
   completeChapterPlan,
   createInertChapterApi,
+  deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
 
@@ -122,6 +125,49 @@ function planWithActive(directionIndex: number): ChapterPlanReviewResult {
   };
 }
 
+function planWithFreshBindings(directionIndex = 0): ChapterPlanReviewResult {
+  const direction = availablePlan.directions[directionIndex]!;
+  return {
+    ...availablePlan,
+    reviewToken: `chapter_review_${'c'.repeat(48)}`,
+    mission: {
+      ...availablePlan.mission,
+      objectiveItems: availablePlan.mission.objectiveItems.map((item, index) => ({
+        ...item,
+        itemToken: `chapter_option_${String(index + 10).padStart(48, 'd')}`
+      })),
+      debtItems: availablePlan.mission.debtItems.map((item) => ({
+        ...item,
+        itemToken: `chapter_option_${'e'.repeat(48)}`
+      })),
+      characterDeltaItems: availablePlan.mission.characterDeltaItems.map((item) => ({
+        ...item,
+        participantToken: `chapter_option_${'f'.repeat(48)}`
+      })),
+      participantOptions: availablePlan.mission.participantOptions.map((item) => ({
+        ...item,
+        participantToken: `chapter_option_${'f'.repeat(48)}`
+      }))
+    },
+    selectedPlan: {
+      title: direction.title,
+      markdown: direction.markdown
+    },
+    directions: availablePlan.directions.map((candidate, index) => ({
+      ...candidate,
+      optionToken: `chapter_option_${String(index + 20).padStart(48, 'a')}`,
+      active: index === directionIndex
+    }))
+  };
+}
+
+function directionOption(name: string): HTMLElement {
+  const option = screen.getByRole('radio', { name });
+  const article = option.closest('article');
+  expect(article).not.toBeNull();
+  return article!;
+}
+
 afterEach(() => {
   cleanup();
   Reflect.deleteProperty(window, 'novelLoop');
@@ -132,10 +178,13 @@ describe('chapter plan review', () => {
     const api = installApi();
     api.chapter.readPlan.mockResolvedValue({
       ...availablePlan,
-      selectedPlan: {
-        ...availablePlan.selectedPlan,
-        title: 'Untitled Plan'
-      }
+      directions: availablePlan.directions.map((direction, index) => index === 1
+        ? {
+            ...direction,
+            title: 'Untitled Plan',
+            markdown: '# Untitled Plan\n\n林默先追查三日前重复发生的交通事故。'
+          }
+        : direction)
     });
     render(<App />);
     await openReview();
@@ -180,6 +229,36 @@ describe('chapter plan review', () => {
     );
   });
 
+  test('sanitizes an untitled direction in the chooser, editor, and preview', async () => {
+    const api = installApi();
+    api.chapter.readPlan.mockResolvedValue({
+      ...availablePlan,
+      directions: availablePlan.directions.map((direction, index) => index === 1
+        ? {
+            ...direction,
+            title: 'Untitled Plan',
+            markdown: '# Untitled Plan\n\n林默先追查交通事故。'
+          }
+        : direction)
+    });
+    render(<App />);
+    await openReview();
+
+    const sanitized = directionOption('方向 2');
+    expect(document.body).not.toHaveTextContent('Untitled Plan');
+    fireEvent.click(within(sanitized).getByRole('button', {
+      name: '编辑后使用'
+    }));
+    expect(screen.getByRole('heading', {
+      name: '编辑方向：方向 2'
+    })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '预览' }));
+    expect(document.body).not.toHaveTextContent('Untitled Plan');
+    expect(within(screen.getByRole('region', {
+      name: '章节规划预览'
+    })).getByRole('heading', { name: '方向 2' })).toBeVisible();
+  });
+
   test('selects an alternative only after warning and restores focus on cancel', async () => {
     const api = installApi();
     api.chapter.readPlan
@@ -188,9 +267,8 @@ describe('chapter plan review', () => {
     render(<App />);
     await openReview();
 
-    const trigger = within(screen.getByRole('radio', {
-      name: '从交通事故切入'
-    })).getByRole('button', { name: '设为本章方向' });
+    const trigger = within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '设为本章方向' });
     trigger.focus();
     fireEvent.click(trigger);
 
@@ -217,6 +295,195 @@ describe('chapter plan review', () => {
     expect(within(screen.getByRole('radio', {
       name: '从交通事故切入'
     })).getByText('当前方向')).toBeVisible();
+  });
+
+  test('implements roving radio focus and keyboard selection without nested controls', async () => {
+    installApi();
+    render(<App />);
+    await openReview();
+
+    const choices = screen.getAllByRole('radio');
+    const first = choices[0]!;
+    const second = choices[1]!;
+    expect(within(first).queryAllByRole('button')).toHaveLength(0);
+    expect(within(second).queryAllByRole('button')).toHaveLength(0);
+
+    first.focus();
+    fireEvent.keyDown(first, { key: 'ArrowDown' });
+    expect(second).toHaveFocus();
+    await waitFor(() => expect(second).toHaveAttribute('tabindex', '0'));
+    fireEvent.keyDown(second, { key: 'Enter' });
+    expect(screen.getByRole('heading', {
+      name: '确认更换本章方向'
+    })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '取消' }));
+    expect(second).toHaveFocus();
+
+    fireEvent.keyDown(second, { key: ' ' });
+    expect(screen.getByRole('heading', {
+      name: '确认更换本章方向'
+    })).toHaveFocus();
+  });
+
+  test('resets mission bindings when a successful refresh returns fresh tokens', async () => {
+    const api = installApi();
+    const fresh = planWithFreshBindings(1) as Extract<
+      ChapterPlanReviewResult,
+      { available: true }
+    >;
+    api.chapter.readPlan
+      .mockResolvedValueOnce(completeChapterPlan)
+      .mockResolvedValueOnce(fresh);
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '设为本章方向' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认设为本章方向'
+    }));
+
+    await waitFor(() => expect(screen.queryByRole('heading', {
+      name: '编辑本章任务'
+    })).not.toBeInTheDocument());
+    expect(screen.getByRole('radio', {
+      name: '从交通事故切入'
+    })).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(api.chapter.saveMissionWorkingCopy)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        reviewToken: fresh.reviewToken,
+        mission: expect.objectContaining({
+          requiredObjectives: fresh.mission.objectiveItems.map((item) => ({
+            itemToken: item.itemToken,
+            text: item.text,
+            type: item.type,
+            priority: item.priority
+          })),
+          debtTokens: fresh.mission.debtItems.map(({ itemToken }) => itemToken),
+          participantTokens: fresh.mission.participantOptions
+            .filter(({ selected }) => selected)
+            .map(({ participantToken }) => participantToken),
+          characterDeltas: fresh.mission.characterDeltaItems.map((item) => ({
+            participantToken: item.participantToken,
+            from: item.from,
+            to: item.to,
+            evidenceRequired: item.evidenceRequired
+          }))
+        })
+      })));
+
+    fireEvent.click(screen.getByRole('button', { name: '放弃修改' }));
+    fireEvent.click(within(directionOption('遗物中的异常报告'))
+      .getByRole('button', { name: '编辑后使用' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(api.chapter.savePlanWorkingCopy)
+      .toHaveBeenCalledWith({
+        projectKey,
+        reviewToken: fresh.reviewToken,
+        optionToken: fresh.directions[0]!.optionToken,
+        markdown: fresh.directions[0]!.markdown
+      }));
+  });
+
+  test.each([
+    ['读取失败', () => Promise.reject(new Error('/tmp/raw-review.jsonl'))],
+    ['内容未就绪', () => Promise.resolve({
+      available: false as const,
+      reason: 'not_ready' as const
+    })]
+  ])('hides stale review content after refresh %s and offers bounded recovery', async (
+    _label,
+    nextRead
+  ) => {
+    const api = installApi();
+    api.chapter.readPlan
+      .mockResolvedValueOnce(completeChapterPlan)
+      .mockImplementationOnce(nextRead)
+      .mockResolvedValue(planWithFreshBindings(1));
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '设为本章方向' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认设为本章方向'
+    }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '暂时无法读取章节方向，请重试。'
+    );
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(document.body).not.toHaveTextContent('/tmp/raw-review.jsonl');
+    fireEvent.click(screen.getByRole('button', { name: '重新读取章节方向' }));
+    expect(await screen.findByRole('radio', {
+      name: '从交通事故切入'
+    })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test('ignores an older review response that completes after a fresh one', async () => {
+    const api = installApi();
+    const older = deferred<ChapterPlanReviewResult>();
+    api.chapter.readPlan
+      .mockReturnValueOnce(older.promise)
+      .mockResolvedValueOnce(planWithFreshBindings(1));
+    render(<StrictMode><App /></StrictMode>);
+    await openReview();
+
+    expect(await screen.findByRole('radio', {
+      name: '从交通事故切入'
+    })).toHaveAttribute('aria-checked', 'true');
+    await act(async () => older.resolve(completeChapterPlan));
+    expect(screen.getByRole('radio', {
+      name: '从交通事故切入'
+    })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test('keeps the newest review when overlapping adoption refreshes finish out of order', async () => {
+    const api = installApi();
+    const selection = deferred<ChapterAuthoringResult>();
+    const adoption = deferred<ChapterAuthoringResult>();
+    const olderRefresh = deferred<ChapterPlanReviewResult>();
+    api.chapter.selectDirection.mockReturnValue(selection.promise);
+    api.chapter.adoptRevision.mockReturnValue(adoption.promise);
+    api.chapter.readPlan
+      .mockResolvedValueOnce(completeChapterPlan)
+      .mockReturnValueOnce(olderRefresh.promise)
+      .mockResolvedValueOnce(planWithFreshBindings(2));
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '编辑后使用' }));
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await screen.findByText('已保存，等待采用');
+    fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
+    fireEvent.click(screen.getByRole('button', { name: '采用此版' }));
+
+    fireEvent.click(within(directionOption('从监控记录切入'))
+      .getByRole('button', { name: '设为本章方向' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认设为本章方向'
+    }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用此版' }));
+
+    await act(async () => selection.resolve({ outcome: 'adopted' }));
+    await waitFor(() => expect(api.chapter.readPlan).toHaveBeenCalledTimes(2));
+    await act(async () => adoption.resolve({ outcome: 'adopted' }));
+    expect(await screen.findByRole('radio', {
+      name: '从监控记录切入'
+    })).toHaveAttribute('aria-checked', 'true');
+
+    await act(async () => olderRefresh.resolve(completeChapterPlan));
+    expect(screen.getByRole('radio', {
+      name: '从监控记录切入'
+    })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', {
+      name: '遗物中的异常报告'
+    })).toHaveAttribute('aria-checked', 'false');
   });
 
   test('saves a structured mission with only opaque tokens and author values', async () => {
@@ -250,9 +517,14 @@ describe('chapter plan review', () => {
             type: item.type,
             priority: item.priority
           })),
-          debtTokens: [],
+          debtTokens: availablePlan.mission.debtItems.map(({ itemToken }) => itemToken),
           debtsToIntroduce: [],
-          characterDeltas: [],
+          characterDeltas: availablePlan.mission.characterDeltaItems.map((item) => ({
+            participantToken: item.participantToken,
+            from: item.from,
+            to: item.to,
+            evidenceRequired: item.evidenceRequired
+          })),
           participantTokens: [
             availablePlan.mission.participantOptions[0]!.participantToken
           ],
@@ -270,12 +542,113 @@ describe('chapter plan review', () => {
     expect(document.body).not.toHaveTextContent(/chapter_(?:option|revision)_/i);
   });
 
+  test('keeps a mission unsaved when the author types after submitting a save', async () => {
+    const api = installApi();
+    const pending = deferred<ChapterAuthoringResult>();
+    api.chapter.saveMissionWorkingCopy.mockReturnValue(pending.promise);
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    const purpose = screen.getByRole('textbox', { name: '本章目的' });
+    fireEvent.change(purpose, {
+      target: { value: '提交时的本章目的。' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(api.chapter.saveMissionWorkingCopy)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        mission: expect.objectContaining({
+          chapterFunction: '提交时的本章目的。'
+        })
+      })));
+    fireEvent.change(purpose, {
+      target: { value: '请求未完成时继续修改的本章目的。' }
+    });
+    await act(async () => pending.resolve({
+      outcome: 'saved',
+      revisionToken: `chapter_revision_${'8'.repeat(48)}`
+    }));
+
+    expect(purpose).toHaveValue('请求未完成时继续修改的本章目的。');
+    expect(screen.getByText('未保存')).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByRole('button', { name: '对比修改' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '采用此版' })).toBeDisabled();
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
+  });
+
+  test('retains debt and participant tokens through mission comparison and adoption', async () => {
+    const api = installApi();
+    api.chapter.readPlan
+      .mockResolvedValueOnce(completeChapterPlan)
+      .mockResolvedValueOnce(planWithFreshBindings());
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    fireEvent.change(screen.getByRole('textbox', {
+      name: '推进的悬念与承诺 1'
+    }), {
+      target: { value: '推进“谁在改写异常报告”的悬念' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    await waitFor(() => expect(api.chapter.saveMissionWorkingCopy)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        mission: expect.objectContaining({
+          debtTokens: [availablePlan.mission.debtItems[0]!.itemToken],
+          debtsToIntroduce: [],
+          characterDeltas: [{
+            participantToken: availablePlan.mission.characterDeltaItems[0]!
+              .participantToken,
+            from: '逃避妹妹失踪',
+            to: '主动追查循环',
+            evidenceRequired: '亲手记下报告消失前的最后一行'
+          }]
+        })
+      })));
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
+    expect(screen.getByRole('region', { name: '修改后' })).toHaveTextContent(
+      '推进“谁在改写异常报告”的悬念'
+    );
+    fireEvent.click(screen.getByRole('button', { name: '采用此版' }));
+    expect(screen.getByText(
+      '方案候选、方向排序、选定方案、场景规划、场景草稿、章节初稿'
+    )).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '确认采用此版' }));
+    await waitFor(() => expect(api.chapter.adoptRevision).toHaveBeenCalledWith({
+      projectKey,
+      revisionToken: `chapter_revision_${'8'.repeat(48)}`,
+      confirmInvalidation: true
+    }));
+  });
+
+  test('rejects a partially blank character change with a field error', async () => {
+    const api = installApi();
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    const changedTo = screen.getByRole('textbox', {
+      name: '人物变化 1 变化后'
+    });
+    fireEvent.change(changedTo, { target: { value: '   ' } });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '请完整填写每项人物变化的变化前、变化后和呈现依据。'
+    );
+    expect(changedTo).toHaveAttribute('aria-invalid', 'true');
+    expect(api.chapter.saveMissionWorkingCopy).not.toHaveBeenCalled();
+  });
+
   test('edits and previews any direction without selecting it first', async () => {
     const api = installApi();
     render(<App />);
     await openReview();
 
-    const alternative = screen.getByRole('radio', { name: '从交通事故切入' });
+    const alternative = directionOption('从交通事故切入');
     fireEvent.click(within(alternative).getByRole('button', {
       name: '编辑后使用'
     }));
@@ -288,12 +661,16 @@ describe('chapter plan review', () => {
     fireEvent.change(editor, { target: { value: markdown } });
     expect(screen.getByText('未保存')).toHaveAttribute('aria-live', 'polite');
     expect(screen.getByText(/^\d+ 字$/)).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: '预览' }));
+    expect(screen.queryAllByRole('tab')).toHaveLength(0);
+    fireEvent.click(screen.getByRole('button', { name: '预览' }));
     expect(screen.getByText('林默提前到达事故现场。')).toBeVisible();
-    fireEvent.click(screen.getByRole('tab', { name: '编辑' }));
+    expect(editor).toBeInTheDocument();
+    expect(editor).not.toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '编辑' }));
     expect(screen.getByRole('textbox', {
       name: '章节规划 Markdown'
-    })).toHaveValue(markdown);
+    })).toBe(editor);
+    expect(editor).toHaveValue(markdown);
 
     fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
     await waitFor(() => expect(api.chapter.savePlanWorkingCopy)
@@ -304,10 +681,47 @@ describe('chapter plan review', () => {
         markdown
       }));
     expect(api.chapter.selectDirection).not.toHaveBeenCalled();
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
     expect(screen.getByText('已保存，等待采用')).toBeVisible();
     expect(screen.getByRole('radio', {
       name: '遗物中的异常报告'
     })).toHaveAttribute('aria-checked', 'true');
+  });
+
+  test('keeps a plan unsaved when the author types after submitting a save', async () => {
+    const api = installApi();
+    const pending = deferred<ChapterAuthoringResult>();
+    api.chapter.savePlanWorkingCopy.mockReturnValue(pending.promise);
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '编辑后使用' }));
+    const editor = screen.getByRole('textbox', { name: '章节规划 Markdown' });
+    fireEvent.change(editor, {
+      target: { value: '# 提交版\n\n这是提交时的章节规划。' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(api.chapter.savePlanWorkingCopy)
+      .toHaveBeenCalledWith({
+        projectKey,
+        reviewToken: availablePlan.reviewToken,
+        optionToken: availablePlan.directions[1]!.optionToken,
+        markdown: '# 提交版\n\n这是提交时的章节规划。'
+      }));
+    fireEvent.change(editor, {
+      target: { value: '# 新修改\n\n请求未完成时继续写的内容。' }
+    });
+    await act(async () => pending.resolve({
+      outcome: 'saved',
+      revisionToken: `chapter_revision_${'9'.repeat(48)}`
+    }));
+
+    expect(editor).toHaveValue('# 新修改\n\n请求未完成时继续写的内容。');
+    expect(screen.getByText('未保存')).toHaveAttribute('aria-live', 'polite');
+    expect(screen.getByRole('button', { name: '对比修改' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '采用此版' })).toBeDisabled();
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
   });
 
   test('compares a pending plan and adopts it only after a second confirmation', async () => {
@@ -318,9 +732,8 @@ describe('chapter plan review', () => {
     render(<App />);
     await openReview();
 
-    fireEvent.click(within(screen.getByRole('radio', {
-      name: '从交通事故切入'
-    })).getByRole('button', { name: '编辑后使用' }));
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '编辑后使用' }));
     const markdown = '# 事故现场\n\n林默提前到达事故现场。';
     fireEvent.change(screen.getByRole('textbox', {
       name: '章节规划 Markdown'
@@ -336,6 +749,9 @@ describe('chapter plan review', () => {
     expect(screen.getByRole('region', { name: '修改后' })).toHaveTextContent(
       '林默提前到达事故现场。'
     );
+    fireEvent.click(screen.getByRole('button', { name: '返回编辑' }));
+    expect(screen.getByRole('button', { name: '对比修改' })).toHaveFocus();
+    fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
     fireEvent.click(screen.getByRole('button', { name: '采用此版' }));
     expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
     expect(screen.getByRole('heading', { name: '确认采用此版' })).toHaveFocus();
@@ -347,10 +763,12 @@ describe('chapter plan review', () => {
       revisionToken: `chapter_revision_${'9'.repeat(48)}`,
       confirmInvalidation: true
     }));
-    expect(await screen.findByText('已采用')).toHaveAttribute(
-      'aria-live',
-      'polite'
-    );
+    await waitFor(() => expect(screen.queryByRole('heading', {
+      name: '编辑方向：从交通事故切入'
+    })).not.toBeInTheDocument());
+    expect(screen.getByRole('radio', {
+      name: '从交通事故切入'
+    })).toHaveAttribute('aria-checked', 'true');
   });
 
   test.each([
@@ -374,9 +792,8 @@ describe('chapter plan review', () => {
       render(<App />);
       await openReview();
 
-      fireEvent.click(within(screen.getByRole('radio', {
-        name: '从交通事故切入'
-      })).getByRole('button', { name: '编辑后使用' }));
+      fireEvent.click(within(directionOption('从交通事故切入'))
+        .getByRole('button', { name: '编辑后使用' }));
       const editor = screen.getByRole('textbox', {
         name: '章节规划 Markdown'
       });

@@ -245,9 +245,13 @@
   background: var(--nl-accent-soft);
 }
 
-.nl-direction-option:focus-visible {
+.nl-direction-option__radio {
+  outline: none;
+}
+
+.nl-direction-option__radio:focus-visible {
   outline: 3px solid var(--nl-accent-strong);
-  outline-offset: -4px;
+  outline-offset: 5px;
 }
 
 .nl-direction-option__header {
@@ -553,7 +557,7 @@
   font-weight: 700;
 }
 
-.nl-editor-tabs button[aria-selected="true"] {
+.nl-editor-tabs button[aria-pressed="true"] {
   background: var(--nl-surface);
   color: var(--nl-text);
   box-shadow: 0 1px 3px rgb(31 37 33 / 12%);
@@ -561,6 +565,10 @@
 
 .nl-plan-editor__panel {
   margin-top: 16px;
+}
+
+.nl-plan-editor__panel[hidden] {
+  display: none;
 }
 
 .nl-plan-editor__panel textarea {

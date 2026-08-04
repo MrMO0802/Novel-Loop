@@ -91,9 +91,18 @@ export const completeChapterPlan: ChapterPlanReviewResult = {
       type: 'character',
       priority: 'must'
     }],
-    debtItems: [],
+    debtItems: [{
+      itemToken: `chapter_option_${'b'.repeat(48)}`,
+      promise: '推进“谁在删除异常报告”的悬念'
+    }],
     introducedDebts: [],
-    characterDeltaItems: [],
+    characterDeltaItems: [{
+      participantToken: `chapter_option_${'4'.repeat(48)}`,
+      participantName: '林默',
+      from: '逃避妹妹失踪',
+      to: '主动追查循环',
+      evidenceRequired: '亲手记下报告消失前的最后一行'
+    }],
     participantOptions: [{
       participantToken: `chapter_option_${'4'.repeat(48)}`,
       name: '林默',

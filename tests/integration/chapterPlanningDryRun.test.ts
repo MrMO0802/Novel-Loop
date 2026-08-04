@@ -78,7 +78,7 @@ describe('chapter dry-run planning', () => {
       candidates: Array<{ title: string; markdown: string }>;
     };
     candidatesFixture.candidates[0]!.title = '遗物中的异常报告';
-    candidatesFixture.candidates[0]!.markdown = '# 旧标题\n\n# 章节要点\n\n正文。\n';
+    candidatesFixture.candidates[0]!.markdown = '#\n\n#   \n\n# 章节要点\n\n正文。\n';
     await writeFile(
       candidatesFixturePath,
       `${JSON.stringify(candidatesFixture, null, 2)}\n`,
@@ -116,7 +116,7 @@ describe('chapter dry-run planning', () => {
       paths.chapterArtifact(1, 'plan_candidates', 'plan_001.md')
     );
     expect(first).toMatch(/^# 遗物中的异常报告\n/);
-    expect(first.match(/^# /gm)).toHaveLength(1);
+    expect(first.match(/^#(?:\s|$)/gm)).toHaveLength(1);
     await expect(
       store.readText(paths.chapterArtifact(1, 'plan_candidates', 'plan_002.md'))
     ).resolves.toMatch(/^# 雨夜误接求救频道\n/);

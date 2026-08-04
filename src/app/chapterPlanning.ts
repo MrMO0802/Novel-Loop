@@ -815,11 +815,11 @@ export function formatPlanCandidateMarkdown(
   const safeTitle = title.replace(/\s+/gu, ' ').trim().slice(0, 240);
   const lines = markdown.trim().split(/\r?\n/u);
   const firstContent = lines.findIndex((line) => line.trim().length > 0);
-  if (firstContent >= 0 && /^#\s+\S/u.test(lines[firstContent]!)) {
+  if (firstContent >= 0 && /^#(?:\s|$)/u.test(lines[firstContent]!)) {
     lines.splice(firstContent, 1);
   }
   const body = lines
-    .map((line) => /^#\s+\S/u.test(line) ? `#${line}` : line)
+    .map((line) => /^#(?:\s|$)/u.test(line) ? `#${line}` : line)
     .join('\n')
     .trim();
   return body.length > 0

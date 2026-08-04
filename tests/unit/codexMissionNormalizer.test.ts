@@ -14,6 +14,7 @@ describe('Codex slim chapter mission normalization', () => {
         promise: 'Why does the radio speak without power?',
         importance: 8
       }],
+      participatingCharacterIds: ['char_lincheng'],
       charactersToIntroduce: [],
       characterDeltas: [{
         characterId: 'char_lincheng',
@@ -40,5 +41,24 @@ describe('Codex slim chapter mission normalization', () => {
       to: 'alert',
       evidenceRequired: 'He hears the broadcast without a power source.'
     }]);
+    expect(mission.participatingCharacterIds).toEqual(['char_lincheng']);
+  });
+
+  test('rejects provider output that omits the required participant roster', () => {
+    expect(() => normalizeMission({
+      chapterNumber: 1,
+      chapterFunction: 'Open the mystery through the old radio.',
+      objectives: ['Advance the radio mystery.'],
+      debtsToPayOrAdvance: [],
+      debtsToIntroduce: [],
+      charactersToIntroduce: [],
+      characterDeltas: [],
+      readerKnowledge: [],
+      readerQuestions: [],
+      forbiddenMoves: []
+    }, {
+      projectId: 'codex-mission-normalizer',
+      chapterNumber: 1
+    })).toThrow();
   });
 });

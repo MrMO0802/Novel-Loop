@@ -3,6 +3,7 @@ import type {
   SceneCards,
   StoryState
 } from '../schemas/index.js';
+import { AppError } from '../utils/AppError.js';
 
 const ADVANCEABLE_DEBT_STATUSES = new Set([
   'open',
@@ -58,10 +59,52 @@ export function missionCharacterReferencesAreValid(
     introducedCharacterIds.add(character.characterId);
   }
 
+  const validCharacterIds = new Set([
+    ...committedCharacterIds,
+    ...introducedCharacterIds
+  ]);
+  const participatingCharacterIds = new Set<string>();
+  for (const characterId of mission.participatingCharacterIds) {
+    if (
+      participatingCharacterIds.has(characterId)
+      || !validCharacterIds.has(characterId)
+    ) {
+      return false;
+    }
+    participatingCharacterIds.add(characterId);
+  }
+
   return mission.characterDeltas.every((delta) => (
-    committedCharacterIds.has(delta.characterId)
-    || introducedCharacterIds.has(delta.characterId)
+    validCharacterIds.has(delta.characterId)
   ));
+}
+
+export function missionParticipantSet(
+  mission: ChapterMission,
+  storyState: StoryState
+): ReadonlySet<string> {
+  return new Set([
+    ...mission.participatingCharacterIds,
+    ...mission.characterDeltas.map(({ characterId }) => characterId),
+    ...mission.charactersToIntroduce.map(({ characterId }) => characterId)
+  ].filter((id) => storyState.characters.some((item) => item.id === id)
+    || mission.charactersToIntroduce.some((item) => item.characterId === id)));
+}
+
+export function assertMissionHasParticipants(
+  mission: ChapterMission,
+  storyState: StoryState
+): void {
+  if (missionParticipantSet(mission, storyState).size > 0) return;
+  throw new AppError(
+    'CHAPTER_PARTICIPANT_ROSTER_MISSING',
+    'Chapter mission must declare at least one valid participant before scene generation.',
+    2,
+    {
+      chapterNumber: mission.chapterNumber,
+      stage: 'scene_cards'
+    }
+  );
 }
 
 export function sceneCharacterReferencesAreValid(

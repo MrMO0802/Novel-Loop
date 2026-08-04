@@ -313,6 +313,22 @@ describe('desktop chapter workspace', () => {
     });
   }, 30_000);
 
+  test('rejects an impossible mission participant reference before author review', async () => {
+    await prepareGeneratedChapter();
+    const mission = await store.readJson(
+      paths.chapterArtifact(1, 'mission.json'),
+      ChapterMissionSchema
+    );
+    await store.writeJson(paths.chapterArtifact(1, 'mission.json'), {
+      ...mission,
+      participatingCharacterIds: ['char_impossible']
+    }, ChapterMissionSchema);
+
+    await expect(readDesktopChapterPlan({ projectRoot: paths.projectRoot })).rejects.toMatchObject({
+      code: 'DESKTOP_CHAPTER_INVALID_OUTPUT'
+    });
+  }, 30_000);
+
   test('fails closed for stale, already committed, sequence-gap, and missing target queue states', async () => {
     await prepareGlobalPlan();
 

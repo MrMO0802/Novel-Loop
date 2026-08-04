@@ -1,12 +1,13 @@
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import { buildBible } from '../../src/app/buildBible.js';
 import { planChapterMission } from '../../src/app/chapterPlanning.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
+import { ProviderFactory } from '../../src/llm/ProviderFactory.js';
 import { StoryStateSchema } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
@@ -61,6 +62,7 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  vi.restoreAllMocks();
   await rm(projectsRoot, { recursive: true, force: true });
 });
 
@@ -111,4 +113,44 @@ describe('Codex chapter mission character references', () => {
 
     await expect(store.exists(paths.chapterArtifact(1, 'mission.json'))).resolves.toBe(false);
   }, 30_000);
+
+  test('rejects an empty total participant roster when Story State has no committed characters', async () => {
+    const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
+    await store.writeJson(paths.storyState(), {
+      ...storyState,
+      characters: []
+    }, StoryStateSchema);
+    const json = {
+      chapterNumber: 1,
+      chapterFunction: 'Open the investigation.',
+      objectives: ['Establish the first clue.'],
+      debtsToPayOrAdvance: [],
+      debtsToIntroduce: [],
+      participatingCharacterIds: [],
+      charactersToIntroduce: [],
+      characterDeltas: [],
+      readerKnowledge: [],
+      readerQuestions: ['Who left the clue?'],
+      forbiddenMoves: []
+    };
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(json),
+      json
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await expect(planChapterMission({
+      projectId,
+      projectsRoot,
+      chapterNumber: 1,
+      provider: 'codex-text',
+      promptRoot,
+      runId: 'mission_empty_participant_roster'
+    })).rejects.toMatchObject({
+      code: 'CHAPTER_MISSION_INVALID_PROVIDER_OUTPUT'
+    });
+
+    expect(complete).toHaveBeenCalledOnce();
+    await expect(store.exists(paths.chapterArtifact(1, 'mission.json'))).resolves.toBe(false);
+  });
 });

@@ -5,7 +5,8 @@ import { ChapterQueueStore } from './chapterQueue.js';
 import {
   isStructuredOutputFailure,
   missionCharacterReferencesAreValid,
-  missionDebtReferencesAreValid
+  missionDebtReferencesAreValid,
+  missionParticipantSet
 } from './chapterReferenceValidation.js';
 import { normalizeCodexOutput } from './codexNormalization.js';
 import { injectFailure } from './pipelineFailure.js';
@@ -205,6 +206,10 @@ export async function planChapterMission(input: ChapterPlanningInput, fileStore 
     if (
       !missionCharacterReferencesAreValid(parsedMission, storyState)
       || !missionDebtReferencesAreValid(parsedMission, storyState)
+      || (
+        storyState.characters.length === 0
+        && missionParticipantSet(parsedMission, storyState).size === 0
+      )
     ) {
       throw new Error('Mission narrative references are invalid.');
     }
@@ -450,6 +455,10 @@ async function runChapterDryRunWithinLease(input: ChapterDryRunInput, fileStore:
     if (
       !missionCharacterReferencesAreValid(mission.value, storyState)
       || !missionDebtReferencesAreValid(mission.value, storyState)
+      || (
+        storyState.characters.length === 0
+        && missionParticipantSet(mission.value, storyState).size === 0
+      )
     ) {
       throw invalidMissionProviderOutput(input.chapterNumber);
     }

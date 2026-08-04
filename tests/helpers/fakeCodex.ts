@@ -289,6 +289,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
         promise: 'Why does the radio speak without power?',
         importance: 8
       }],
+      participatingCharacterIds: [effectiveMissionCharacterId],
       charactersToIntroduce: missionCharacterId === undefined ? [{
         characterId: 'char_lincheng',
         name: 'Lin Cheng',

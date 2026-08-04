@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  assertMissionHasParticipants,
   missionCharacterReferencesAreValid,
+  missionParticipantSet,
   sceneCharacterReferencesAreValid
 } from '../../src/app/chapterReferenceValidation.js';
 import {
@@ -16,6 +18,53 @@ import {
 } from '../fixtures/schemas/valid.js';
 
 describe('chapter character reference validation', () => {
+  test('defaults the backward-compatible participant roster to empty', () => {
+    const mission = ChapterMissionSchema.parse(validChapterMission);
+
+    expect(mission.participatingCharacterIds).toEqual([]);
+  });
+
+  test('collects valid explicit, changed, and introduced mission participants', () => {
+    const storyState = StoryStateSchema.parse(validStoryState);
+    const mission = ChapterMissionSchema.parse({
+      ...validChapterMission,
+      participatingCharacterIds: ['char_lincheng', 'char_new'],
+      charactersToIntroduce: [{
+        characterId: 'char_new',
+        name: 'New Character',
+        role: 'witness'
+      }],
+      characterDeltas: [{
+        characterId: 'char_new',
+        from: 'silent',
+        to: 'cooperative',
+        evidenceRequired: 'The witness answers one question.'
+      }]
+    });
+
+    expect([...missionParticipantSet(mission, storyState)])
+      .toEqual(['char_lincheng', 'char_new']);
+    expect(() => assertMissionHasParticipants(mission, storyState)).not.toThrow();
+  });
+
+  test('rejects an empty participant roster with the dedicated engine error', () => {
+    const storyState = StoryStateSchema.parse({
+      ...validStoryState,
+      characters: []
+    });
+    const mission = ChapterMissionSchema.parse({
+      ...validChapterMission,
+      debtsToPayOrAdvance: [],
+      participatingCharacterIds: [],
+      characterDeltas: [],
+      charactersToIntroduce: []
+    });
+
+    expect(() => assertMissionHasParticipants(mission, storyState)).toThrow(
+      expect.objectContaining({ code: 'CHAPTER_PARTICIPANT_ROSTER_MISSING' })
+    );
+  });
+
   test('accepts a provisional character declared by the mission', () => {
     const storyState = StoryStateSchema.parse({
       ...validStoryState,
@@ -80,6 +129,21 @@ describe('chapter character reference validation', () => {
 
     expect(missionCharacterReferencesAreValid(duplicateMission, storyState)).toBe(false);
     expect(missionCharacterReferencesAreValid(unknownDeltaMission, storyState)).toBe(false);
+  });
+
+  test('rejects duplicate and undeclared participating character IDs', () => {
+    const storyState = StoryStateSchema.parse(validStoryState);
+    const duplicateMission = ChapterMissionSchema.parse({
+      ...validChapterMission,
+      participatingCharacterIds: ['char_lincheng', 'char_lincheng']
+    });
+    const unknownMission = ChapterMissionSchema.parse({
+      ...validChapterMission,
+      participatingCharacterIds: ['char_unknown']
+    });
+
+    expect(missionCharacterReferencesAreValid(duplicateMission, storyState)).toBe(false);
+    expect(missionCharacterReferencesAreValid(unknownMission, storyState)).toBe(false);
   });
 
   test.each([

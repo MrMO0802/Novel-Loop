@@ -45,6 +45,7 @@ export const AuthorRevisionStateSchema = z.enum([
 ]);
 
 export const AuthorInvalidatedNodeSchema = z.enum([
+  'mission',
   'plan_candidates',
   'ranking',
   'selected_plan',

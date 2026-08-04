@@ -4,6 +4,7 @@ import path from 'node:path';
 import { withProjectChapterOperationLease } from './projectOperationLease.js';
 import {
   AuthorRevisionRecordSchema,
+  ChapterMissionSchema,
   ChapterPlanRankingSchema,
   ChapterQueueSchema,
   DiagnosticsReportSchema,
@@ -27,12 +28,23 @@ const MAX_AUTHOR_INSTRUCTION_CHARACTERS = 4_000;
 const REVISION_FILE_PATTERN = /^(mission|plan|draft)_revision_v([1-9]\d*)\.json$/u;
 
 const ARCHIVED_JSON_SCHEMAS = {
+  'mission.json': ChapterMissionSchema,
   'ranking.json': ChapterPlanRankingSchema,
   'scene_cards.json': SceneCardsSchema,
   'diagnostics_v1.json': DiagnosticsReportSchema
 };
 
 const ARCHIVE_ALLOWLIST: Record<AuthorInvalidatedNode, readonly string[]> = {
+  mission: [
+    'mission.json',
+    'plan_candidates',
+    'ranking.json',
+    'selected_plan.md',
+    'scene_cards.json',
+    'scenes',
+    'draft_v1.md',
+    'diagnostics_v1.json'
+  ],
   plan_candidates: [
     'plan_candidates',
     'ranking.json',
@@ -118,7 +130,13 @@ export interface ArchiveAuthorChapterArtifactsInput {
   archiveId: string;
   nodes: Array<Extract<
     AuthorInvalidatedNode,
-    'selected_plan' | 'scene_cards' | 'scene_drafts' | 'draft'
+    | 'mission'
+    | 'plan_candidates'
+    | 'ranking'
+    | 'selected_plan'
+    | 'scene_cards'
+    | 'scene_drafts'
+    | 'draft'
   >>;
 }
 
@@ -682,6 +700,8 @@ function revisionVersion(fileName: string): number {
 }
 
 function archiveNodeForPath(editedNode: AuthorInvalidatedNode, allowedPath: string): AuthorInvalidatedNode {
+  if (allowedPath === 'mission.json') return 'mission';
+  if (allowedPath === 'plan_candidates') return 'plan_candidates';
   if (allowedPath === 'ranking.json') return 'ranking';
   if (allowedPath === 'selected_plan.md') return 'selected_plan';
   if (allowedPath === 'scene_cards.json') return 'scene_cards';
@@ -694,6 +714,9 @@ function archiveNodeForPath(editedNode: AuthorInvalidatedNode, allowedPath: stri
 function archivePathForNode(
   node: ArchiveAuthorChapterArtifactsInput['nodes'][number]
 ): string {
+  if (node === 'mission') return 'mission.json';
+  if (node === 'plan_candidates') return 'plan_candidates';
+  if (node === 'ranking') return 'ranking.json';
   if (node === 'selected_plan') return 'selected_plan.md';
   if (node === 'scene_cards') return 'scene_cards.json';
   if (node === 'scene_drafts') return 'scenes';

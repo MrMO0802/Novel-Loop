@@ -3,6 +3,7 @@ import type { z } from 'zod';
 
 import { ChapterQueueStore } from './chapterQueue.js';
 import {
+  assertMissionHasParticipants,
   isStructuredOutputFailure,
   sceneCharacterReferencesAreValid
 } from './chapterReferenceValidation.js';
@@ -120,8 +121,9 @@ export async function generateSceneCards(input: ChapterDraftingInput, fileStore 
   await fileStore.ensureDir(paths.chapterDir(input.chapterNumber));
 
   const mission = await fileStore.readJson(paths.chapterArtifact(input.chapterNumber, 'mission.json'), ChapterMissionSchema);
-  const selectedPlan = await fileStore.readText(paths.chapterArtifact(input.chapterNumber, 'selected_plan.md'));
   const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
+  assertMissionHasParticipants(mission, storyState);
+  const selectedPlan = await fileStore.readText(paths.chapterArtifact(input.chapterNumber, 'selected_plan.md'));
   const promptService = createPromptService(input);
   const llmClient = createLlmClient(input, paths, fileStore);
   const promptId = input.provider === 'codex-text' ? 'planning.generate_scene_cards_slim' : 'planning.generate_scene_cards';
@@ -816,6 +818,7 @@ function missionCharacterReferences(mission: z.infer<typeof ChapterMissionSchema
   return [...new Set(
     [
       ...mission.characterDeltas.map((delta) => delta.characterId),
+      ...mission.participatingCharacterIds,
       ...mission.charactersToIntroduce.map((character) => character.characterId)
     ]
   )].slice(0, MAX_SCENE_CHARACTER_CONTEXT);

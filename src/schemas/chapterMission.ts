@@ -38,6 +38,9 @@ export const ChapterMissionSchema = z.object({
       })
     )
     .default([]),
+  participatingCharacterIds: z.array(
+    z.string().trim().min(1).max(200)
+  ).max(32).default([]),
   charactersToIntroduce: z
     .array(ChapterCharacterIntroductionSchema)
     .max(8)

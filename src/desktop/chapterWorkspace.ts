@@ -7,7 +7,10 @@ import {
   runChapterUntilDraft,
   type ChapterDraftProgressEvent
 } from '../app/chapterDrafting.js';
-import { missionDebtReferencesAreValid } from '../app/chapterReferenceValidation.js';
+import {
+  missionCharacterReferencesAreValid,
+  missionDebtReferencesAreValid
+} from '../app/chapterReferenceValidation.js';
 import {
   runChapterDryRun,
   type ChapterPlanningProgressEvent
@@ -189,6 +192,9 @@ export async function readDesktopChapterPlan(
     context.paths.storyState(),
     StoryStateSchema
   );
+  if (!missionCharacterReferencesAreValid(plan.mission, storyState)) {
+    throw invalidChapterOutput('The chapter mission contains invalid character references.');
+  }
   return parseReview(DesktopChapterPlanReviewSchema, {
     available: true,
     chapterNumber: inspection.chapterNumber,

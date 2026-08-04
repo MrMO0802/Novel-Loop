@@ -9,6 +9,11 @@ import {
   type ArchiveInvalidatedChapterArtifactsResult,
   type CreateAuthorRevisionResult
 } from '../app/chapterAuthorRevision.js';
+import {
+  assertMissionHasParticipants,
+  missionCharacterReferencesAreValid,
+  missionDebtReferencesAreValid
+} from '../app/chapterReferenceValidation.js';
 import { withProjectChapterOperationLease } from '../app/projectOperationLease.js';
 import {
   AuthorEditInvalidationReportSchema,
@@ -22,6 +27,8 @@ import {
 import type {
   AuthorArtifactReference,
   AuthorInvalidatedNode,
+  ChapterMission,
+  ChapterObjective,
   ChapterPlanRanking,
   ChapterQueue,
   ChapterQueueItem,
@@ -44,7 +51,26 @@ const PLAN_INVALIDATED_NODES = [
   'draft'
 ] as const satisfies readonly AuthorInvalidatedNode[];
 
+const MISSION_INVALIDATED_NODES = [
+  'plan_candidates',
+  'ranking',
+  'selected_plan',
+  'scene_cards',
+  'scene_drafts',
+  'draft'
+] as const satisfies readonly AuthorInvalidatedNode[];
+
 const ARCHIVE_NODES = [
+  'selected_plan',
+  'scene_cards',
+  'scene_drafts',
+  'draft'
+] as const;
+
+const MISSION_ARCHIVE_NODES = [
+  'mission',
+  'plan_candidates',
+  'ranking',
   'selected_plan',
   'scene_cards',
   'scene_drafts',
@@ -95,10 +121,35 @@ export interface DesktopAuthorAdoptionResult {
   storyStateMutated: false;
 }
 
+export interface DesktopMissionAuthorEdit {
+  sourceMissionHash: string;
+  chapterFunction: string;
+  requiredObjectives: Array<{
+    sourceObjectiveId: string | null;
+    text: string;
+    type: ChapterObjective['type'];
+    priority: ChapterObjective['priority'];
+  }>;
+  debtsToPayOrAdvance: string[];
+  debtsToIntroduce: ChapterMission['debtsToIntroduce'];
+  characterDeltas: ChapterMission['characterDeltas'];
+  participatingCharacterIds: string[];
+  newCharacters: Array<{ name: string; role: string }>;
+  readerInformationDelta: ChapterMission['readerInformationDelta'];
+  forbiddenMoves: string[];
+  targetEmotionalCurve: string[];
+  targetWordCount: number | null;
+}
+
+export interface CreateDesktopMissionRevisionResult extends CreateAuthorRevisionResult {
+  mission: ChapterMission;
+}
+
 interface ChapterAuthoringSnapshot {
   projectRoot: string;
   paths: ProjectPaths;
   missionText: string;
+  mission: ChapterMission;
   rankingText: string;
   ranking: ChapterPlanRanking;
   selectedPlanText: string;
@@ -122,6 +173,218 @@ interface AuthoringTransaction {
   archive: ArchiveInvalidatedChapterArtifactsResult | null;
   revisionRecords: RevisionRecordSnapshot[];
   createdProvenancePaths: string[];
+}
+
+export async function createDesktopMissionRevision(input: {
+  projectRoot: string;
+  chapterNumber: number;
+  edit: DesktopMissionAuthorEdit;
+}, fileStore?: FileStore): Promise<CreateDesktopMissionRevisionResult> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'desktop-author-revision-create',
+    allowStoryStateWrite: false
+  }, async () => {
+    const snapshot = await readChapterAuthoringSnapshot(
+      projectRoot,
+      input.chapterNumber,
+      store
+    );
+    assertUncommitted(snapshot);
+    if (sha256(snapshot.missionText) !== input.edit.sourceMissionHash) {
+      throw new AppError(
+        'DESKTOP_CHAPTER_EDIT_STALE',
+        'The chapter mission changed before the author edit was saved.',
+        2
+      );
+    }
+
+    const mission = createEditedMission(snapshot, input.edit);
+    const content = `${JSON.stringify(mission, null, 2)}\n`;
+    const created = await createAuthorRevision({
+      projectRoot,
+      chapterNumber: input.chapterNumber,
+      artifactKind: 'mission',
+      mode: 'direct_edit',
+      sourceArtifactPath: snapshot.paths.chapterArtifact(
+        input.chapterNumber,
+        'mission.json'
+      ),
+      sourceCandidateId: null,
+      content,
+      authorInstruction: null
+    }, store);
+    return { ...created, mission };
+  });
+}
+
+export async function adoptDesktopMissionRevision(input: {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+}, fileStore?: FileStore): Promise<DesktopAuthorAdoptionResult> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'desktop-author-adoption',
+    allowStoryStateWrite: false
+  }, async () => {
+    const snapshot = await readChapterAuthoringSnapshot(
+      projectRoot,
+      input.chapterNumber,
+      store
+    );
+    assertUncommitted(snapshot);
+    const revision = await readAuthorRevision({
+      projectRoot,
+      chapterNumber: input.chapterNumber,
+      revisionId: input.revisionId,
+      expectedSourceHash: input.expectedSourceHash
+    }, store);
+    if (revision.record.state === 'adopted') {
+      throw new AppError(
+        'DESKTOP_CHAPTER_REVISION_ALREADY_ADOPTED',
+        `Author revision is already adopted: ${revision.record.revisionId}`,
+        2
+      );
+    }
+    if (revision.record.artifactKind !== 'mission') {
+      throw new AppError(
+        'DESKTOP_CHAPTER_REVISION_KIND_INVALID',
+        'Author revision is not a chapter-mission revision.',
+        2
+      );
+    }
+    const mission = parseJson(
+      revision.content,
+      ChapterMissionSchema,
+      'mission revision'
+    );
+    if (
+      mission.chapterNumber !== input.chapterNumber
+      || !missionCharacterReferencesAreValid(mission, snapshot.storyState)
+      || !missionDebtReferencesAreValid(mission, snapshot.storyState)
+    ) {
+      throw new AppError(
+        'DESKTOP_CHAPTER_EDIT_INVALID',
+        'The mission revision contains invalid narrative references.',
+        2
+      );
+    }
+    assertMissionHasParticipants(mission, snapshot.storyState);
+
+    const generatedAt = new Date().toISOString();
+    const reportVersion = await nextArtifactVersion(
+      snapshot.paths,
+      store,
+      input.chapterNumber,
+      INVALIDATION_REPORT_PATTERN
+    );
+    const reportPath = snapshot.paths.chapterArtifact(
+      input.chapterNumber,
+      'author_revisions',
+      `edit_invalidation_report_v${reportVersion}.json`
+    );
+    const relativeReportPath = projectRelative(projectRoot, reportPath);
+    const queueAfter = queueAtMission(
+      snapshot.queue,
+      input.chapterNumber,
+      generatedAt
+    );
+    const transaction: AuthoringTransaction = {
+      snapshot,
+      archive: null,
+      revisionRecords: await snapshotRevisionRecords(
+        snapshot,
+        store,
+        'mission'
+      ),
+      createdProvenancePaths: [reportPath]
+    };
+    try {
+      const archive = await archiveAuthorChapterArtifacts({
+        projectRoot,
+        chapterNumber: input.chapterNumber,
+        archiveId: revision.record.revisionId,
+        nodes: [...MISSION_ARCHIVE_NODES]
+      }, store);
+      transaction.archive = archive;
+      const archivedMission = archive.archivedArtifacts.find(
+        ({ sourcePath }) => sourcePath === missionRelativePath(input.chapterNumber)
+      );
+      if (archivedMission === undefined) {
+        throw new AppError(
+          'DESKTOP_CHAPTER_ARCHIVE_INVALID',
+          'The generated chapter mission was not archived.',
+          2
+        );
+      }
+      await removeInvalidatedMissionDownstream(snapshot, store);
+      const report = AuthorEditInvalidationReportSchema.parse({
+        schemaVersion: '1.0',
+        reportId: `edit_invalidation_ch${padChapter(input.chapterNumber)}_v${reportVersion}`,
+        projectId: snapshot.paths.projectId,
+        chapterNumber: input.chapterNumber,
+        revisionId: revision.record.revisionId,
+        editedNode: 'mission',
+        invalidatedNodes: [...MISSION_INVALIDATED_NODES],
+        retainedArtifacts: [],
+        archivedArtifacts: archive.archivedArtifacts,
+        missingArtifactPaths: archive.missingArtifactPaths,
+        queueBefore: queueSnapshot(snapshot.queueItem),
+        queueAfter: { status: 'planning', stage: 'mission' },
+        reason: `作者采用任务修订 ${revision.record.revisionId}。`,
+        nextStep: '重新生成章节方向、场景卡、场景草稿和章节草稿。',
+        generatedAt,
+        storyStateMutated: false
+      });
+      await store.writeJson(
+        reportPath,
+        report,
+        AuthorEditInvalidationReportSchema
+      );
+      await store.writeJson(
+        snapshot.paths.chapterArtifact(input.chapterNumber, 'mission.json'),
+        mission,
+        ChapterMissionSchema
+      );
+      await store.writeJson(
+        snapshot.paths.chapterQueue(),
+        queueAfter,
+        ChapterQueueSchema
+      );
+      await adoptAuthorRevision({
+        projectRoot,
+        chapterNumber: input.chapterNumber,
+        revisionId: revision.record.revisionId,
+        expectedSourceHash: input.expectedSourceHash,
+        invalidationReportPath: relativeReportPath,
+        sourceArtifactPathOverride: archivedMission.archivedPath
+      }, store);
+    } catch (error) {
+      await rollbackAuthoringTransaction(transaction, store, error);
+      throw error;
+    }
+
+    return {
+      chapterNumber: input.chapterNumber,
+      revisionId: revision.record.revisionId,
+      selectedTitle: mission.chapterFunction,
+      invalidatedNodes: [...MISSION_INVALIDATED_NODES],
+      invalidationReportPath: relativeReportPath,
+      storyStateMutated: false
+    };
+  });
 }
 
 export async function selectDesktopChapterDirection(
@@ -501,6 +764,137 @@ export async function adoptDesktopChapterPlanRevision(
   });
 }
 
+function createEditedMission(
+  snapshot: ChapterAuthoringSnapshot,
+  edit: DesktopMissionAuthorEdit
+): ChapterMission {
+  try {
+    const sourceObjectives = new Map(
+      snapshot.mission.requiredObjectives.map((objective) => [objective.id, objective])
+    );
+    if (sourceObjectives.size !== snapshot.mission.requiredObjectives.length) {
+      throw invalidMissionEdit('The source mission has duplicate objective IDs.');
+    }
+    const objectiveIds = new Set<string>();
+    const requiredObjectives = edit.requiredObjectives.map((objective) => {
+      let id: string;
+      if (objective.sourceObjectiveId === null) {
+        id = provisionalObjectiveId(
+          snapshot.paths.projectId,
+          snapshot.mission.chapterNumber,
+          normalizeRequiredText(objective.text, 'objective text')
+        );
+        if (sourceObjectives.has(id) || objectiveIds.has(id)) {
+          throw invalidMissionEdit('A generated objective ID collides with an existing objective.');
+        }
+      } else {
+        if (
+          !sourceObjectives.has(objective.sourceObjectiveId)
+          || objectiveIds.has(objective.sourceObjectiveId)
+        ) {
+          throw invalidMissionEdit('An objective source ID is unknown or duplicated.');
+        }
+        id = objective.sourceObjectiveId;
+      }
+      objectiveIds.add(id);
+      return {
+        id,
+        text: objective.text,
+        type: objective.type,
+        priority: objective.priority
+      };
+    });
+
+    const committedCharacterIds = new Set(
+      snapshot.storyState.characters.map((character) => character.id)
+    );
+    const sourceIntroductions = new Map(
+      snapshot.mission.charactersToIntroduce.map((character) => [
+        character.characterId,
+        character
+      ])
+    );
+    if (sourceIntroductions.size !== snapshot.mission.charactersToIntroduce.length) {
+      throw invalidMissionEdit('The source mission has duplicate provisional character IDs.');
+    }
+    const retainedIntroductionIds = new Set([
+      ...edit.participatingCharacterIds,
+      ...edit.characterDeltas.map(({ characterId }) => characterId)
+    ].filter((characterId) => sourceIntroductions.has(characterId)));
+    const charactersToIntroduce = snapshot.mission.charactersToIntroduce
+      .filter(({ characterId }) => retainedIntroductionIds.has(characterId));
+    const knownCharacterIds = new Set([
+      ...committedCharacterIds,
+      ...sourceIntroductions.keys()
+    ]);
+    const normalizedNames = new Set<string>();
+    for (const character of [
+      ...snapshot.storyState.characters,
+      ...snapshot.mission.charactersToIntroduce
+    ]) {
+      const normalizedName = normalizeCharacterName(character.name);
+      if (normalizedName.length > 0) normalizedNames.add(normalizedName);
+    }
+
+    const generatedCharacterIds: string[] = [];
+    for (const character of edit.newCharacters) {
+      const normalizedName = normalizeCharacterName(character.name);
+      if (normalizedName.length === 0 || normalizedNames.has(normalizedName)) {
+        throw invalidMissionEdit('Participant names must be non-empty and unique after normalization.');
+      }
+      normalizeRequiredText(character.role, 'participant role');
+      normalizedNames.add(normalizedName);
+      const characterId = provisionalCharacterId(
+        snapshot.paths.projectId,
+        snapshot.mission.chapterNumber,
+        normalizedName
+      );
+      if (knownCharacterIds.has(characterId)) {
+        throw invalidMissionEdit('A generated provisional character ID collides with an existing character.');
+      }
+      knownCharacterIds.add(characterId);
+      generatedCharacterIds.push(characterId);
+      charactersToIntroduce.push({
+        characterId,
+        name: character.name,
+        role: character.role
+      });
+    }
+
+    const mission = ChapterMissionSchema.parse({
+      id: snapshot.mission.id,
+      chapterNumber: snapshot.mission.chapterNumber,
+      chapterFunction: edit.chapterFunction,
+      requiredObjectives,
+      debtsToPayOrAdvance: edit.debtsToPayOrAdvance,
+      debtsToIntroduce: edit.debtsToIntroduce,
+      characterDeltas: edit.characterDeltas,
+      participatingCharacterIds: [
+        ...edit.participatingCharacterIds,
+        ...generatedCharacterIds
+      ],
+      charactersToIntroduce,
+      readerInformationDelta: edit.readerInformationDelta,
+      forbiddenMoves: edit.forbiddenMoves,
+      targetEmotionalCurve: edit.targetEmotionalCurve,
+      ...(edit.targetWordCount === null
+        ? {}
+        : { targetWordCount: edit.targetWordCount })
+    });
+    if (
+      !missionCharacterReferencesAreValid(mission, snapshot.storyState)
+      || !missionDebtReferencesAreValid(mission, snapshot.storyState)
+    ) {
+      throw invalidMissionEdit('The edited mission contains invalid narrative references.');
+    }
+    assertMissionHasParticipants(mission, snapshot.storyState);
+    return mission;
+  } catch (error) {
+    if (error instanceof AppError) throw error;
+    throw invalidMissionEdit('The edited chapter mission is invalid.');
+  }
+}
+
 async function readChapterAuthoringSnapshot(
   projectRoot: string,
   chapterNumber: number,
@@ -597,6 +991,7 @@ async function readChapterAuthoringSnapshot(
     projectRoot,
     paths,
     missionText,
+    mission,
     rankingText,
     ranking,
     selectedPlanText,
@@ -644,6 +1039,10 @@ async function rollbackAuthoringTransaction(
   const restorationErrors: string[] = [];
   const restorationSteps: Array<() => Promise<unknown>> = [
     () => store.writeText(
+      snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'mission.json'),
+      snapshot.missionText
+    ),
+    () => store.writeText(
       snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'ranking.json'),
       snapshot.rankingText
     ),
@@ -655,7 +1054,11 @@ async function rollbackAuthoringTransaction(
   ];
   if (transaction.archive !== null) {
     for (const artifact of transaction.archive.archivedArtifacts) {
-      if (artifact.node === 'selected_plan') continue;
+      if (
+        artifact.sourcePath === missionRelativePath(snapshot.ranking.chapterNumber)
+        || artifact.node === 'ranking'
+        || artifact.node === 'selected_plan'
+      ) continue;
       restorationSteps.push(async () => {
         const content = await store.readText(snapshot.paths.projectArtifact(artifact.archivedPath));
         if (
@@ -740,9 +1143,35 @@ async function removeInvalidatedDownstream(
   }
 }
 
+async function removeInvalidatedMissionDownstream(
+  snapshot: ChapterAuthoringSnapshot,
+  store: FileStore
+): Promise<void> {
+  for (const artifact of [
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'plan_candidates'), recursive: true },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'ranking.json'), recursive: false },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'selected_plan.md'), recursive: false },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scene_cards.json'), recursive: false },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'scenes'), recursive: true },
+    { path: snapshot.paths.chapterArtifact(snapshot.ranking.chapterNumber, 'draft_v1.md'), recursive: false }
+  ]) {
+    if (await store.exists(artifact.path)) {
+      await store.removePath(artifact.path, { recursive: artifact.recursive });
+    }
+  }
+}
+
 async function snapshotPlanRevisionRecords(
   snapshot: ChapterAuthoringSnapshot,
   store: FileStore
+): Promise<RevisionRecordSnapshot[]> {
+  return snapshotRevisionRecords(snapshot, store, 'selected_plan');
+}
+
+async function snapshotRevisionRecords(
+  snapshot: ChapterAuthoringSnapshot,
+  store: FileStore,
+  artifactKind: 'mission' | 'selected_plan'
 ): Promise<RevisionRecordSnapshot[]> {
   const revisionDir = snapshot.paths.chapterArtifact(
     snapshot.ranking.chapterNumber,
@@ -751,18 +1180,21 @@ async function snapshotPlanRevisionRecords(
   if (!(await store.exists(revisionDir))) return [];
   const records: RevisionRecordSnapshot[] = [];
   for (const fileName of await store.list(revisionDir)) {
-    if (!/^plan_revision_v[1-9]\d*\.json$/u.test(fileName)) continue;
+    const pattern = artifactKind === 'mission'
+      ? /^mission_revision_v[1-9]\d*\.json$/u
+      : /^plan_revision_v[1-9]\d*\.json$/u;
+    if (!pattern.test(fileName)) continue;
     const recordPath = path.join(revisionDir, fileName);
     const content = await store.readText(recordPath);
     const record = AuthorRevisionRecordSchema.parse(JSON.parse(content) as unknown);
     if (
       record.projectId !== snapshot.paths.projectId
       || record.chapterNumber !== snapshot.ranking.chapterNumber
-      || record.artifactKind !== 'selected_plan'
+      || record.artifactKind !== artifactKind
     ) {
       throw new AppError(
         'DESKTOP_CHAPTER_EDIT_INVALID',
-        `Plan revision metadata has invalid scope: ${fileName}`,
+        `Author revision metadata has invalid scope: ${fileName}`,
         2
       );
     }
@@ -829,6 +1261,22 @@ function queueAtRanking(queue: ChapterQueue, chapterNumber: number, updatedAt: s
   });
 }
 
+function queueAtMission(queue: ChapterQueue, chapterNumber: number, updatedAt: string): ChapterQueue {
+  return ChapterQueueSchema.parse({
+    ...queue,
+    chapters: queue.chapters.map((item) => item.chapterNumber === chapterNumber
+      ? {
+          ...item,
+          status: 'planning',
+          currentStage: 'mission',
+          completedStages: [],
+          failureReason: null,
+          updatedAt
+        }
+      : item)
+  });
+}
+
 function queueSnapshot(item: ChapterQueueItem): { status: ChapterQueueItem['status']; stage: ChapterQueueItem['currentStage'] } {
   return { status: item.status, stage: item.currentStage };
 }
@@ -849,6 +1297,10 @@ function retainedCandidateReferences(snapshot: ChapterAuthoringSnapshot): Author
 
 function selectedPlanRelativePath(chapterNumber: number): string {
   return `chapters/chapter_${padChapter(chapterNumber)}/selected_plan.md`;
+}
+
+function missionRelativePath(chapterNumber: number): string {
+  return `chapters/chapter_${padChapter(chapterNumber)}/mission.json`;
 }
 
 function projectRelative(projectRoot: string, filePath: string): string {
@@ -880,6 +1332,48 @@ function parseJson<T>(
 
 function padChapter(chapterNumber: number): string {
   return String(chapterNumber).padStart(3, '0');
+}
+
+function provisionalCharacterId(
+  projectId: string,
+  chapterNumber: number,
+  normalizedName: string
+): string {
+  return `char_provisional_${createHash('sha256')
+    .update(`${projectId}\0${chapterNumber}\0${normalizedName}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+}
+
+function provisionalObjectiveId(
+  projectId: string,
+  chapterNumber: number,
+  normalizedText: string
+): string {
+  return `obj_author_${createHash('sha256')
+    .update(`${projectId}\0${chapterNumber}\0${normalizedText}`)
+    .digest('hex')
+    .slice(0, 16)}`;
+}
+
+function normalizeCharacterName(value: string): string {
+  return value
+    .normalize('NFKC')
+    .replace(/\s+/gu, ' ')
+    .trim()
+    .toLocaleLowerCase('en-US');
+}
+
+function normalizeRequiredText(value: string, label: string): string {
+  const normalized = value.normalize('NFKC').replace(/\s+/gu, ' ').trim();
+  if (normalized.length === 0) {
+    throw invalidMissionEdit(`The ${label} must not be empty.`);
+  }
+  return normalized;
+}
+
+function invalidMissionEdit(message: string): AppError {
+  return new AppError('DESKTOP_CHAPTER_EDIT_INVALID', message, 2);
 }
 
 function sha256(value: string): string {

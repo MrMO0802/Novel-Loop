@@ -12,7 +12,8 @@ import {
 import {
   adjustChapterMission,
   adjustChapterPlan,
-  type ChapterAuthorAdjustmentInput
+  type ChapterAuthorAdjustmentInput,
+  type ChapterAuthorAdjustmentResult
 } from '../app/chapterAuthorAdjustment.js';
 import {
   assertMissionHasParticipants,
@@ -163,7 +164,7 @@ export type AdjustDesktopChapterPlanInput = ChapterAuthorAdjustmentInput & {
 };
 
 export interface DesktopChapterAdjustmentResult
-  extends CreateAuthorRevisionResult {
+  extends ChapterAuthorAdjustmentResult {
   content: string;
 }
 

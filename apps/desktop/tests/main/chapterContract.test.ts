@@ -310,6 +310,34 @@ describe('chapter workspace contract', () => {
     }).success).toBe(false);
   });
 
+  test('enforces task kind compatibility for current and completed stages', () => {
+    const adjustment = {
+      ...validTask,
+      kind: 'mission_adjustment',
+      stage: 'requesting_adjustment',
+      completedStages: [],
+      sceneProgress: null
+    } as const;
+    expect(ChapterTaskSchema.safeParse(adjustment).success).toBe(true);
+    expect(ChapterTaskSchema.safeParse({
+      ...adjustment,
+      stage: 'preparing'
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...adjustment,
+      completedStages: ['mission']
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      stage: 'requesting_adjustment',
+      sceneProgress: null
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      completedStages: ['requesting_adjustment']
+    }).success).toBe(false);
+  });
+
   test('accepts structured mission edits without trusted identifiers', () => {
     const request = ChapterSaveMissionWorkingCopyRequestSchema.parse({
       projectKey: 'project_radio',

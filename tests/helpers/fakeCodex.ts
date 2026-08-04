@@ -266,6 +266,19 @@ function jsonFor(promptId, mode, repairMode, stdin) {
     const candidate = /EXPERIMENT_ARM:\\s*B\\d+/.test(stdin) || /draft_targeted_revision_candidate_v2\\.md/.test(stdin);
     return targetedDiagnostics(chapterNumber, !candidate, false, candidate && stdin.includes('文气突然断裂') ? 4.8 : undefined);
   }
+  const currentMissionMatch = stdin.match(
+    /<current_mission>\\s*([\\s\\S]*?)\\s*<\\/current_mission>/
+  );
+  let adjustedMission = null;
+  if (currentMissionMatch) {
+    try {
+      const currentMission = JSON.parse(currentMissionMatch[1]);
+      adjustedMission = {
+        ...currentMission,
+        targetWordCount: currentMission.targetWordCount ?? null
+      };
+    } catch {}
+  }
   const json = {
     'planning.generate_arc_map_minimal_json': {
       arcs: [
@@ -305,24 +318,7 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       readerQuestions: ['What does chapter ' + chapterNumber + ' imply for the building?'],
       forbiddenMoves: ['Do not reveal the final caller identity.']
     },
-    'planning.adjust_chapter_mission_slim': {
-      chapterNumber,
-      chapterFunction: '把开场提前到事故现场，同时保持既有故事约束。',
-      objectives: ['让林澈核对重复事故记录。'],
-      debtsToPayOrAdvance: ['debt_0001'],
-      debtsToIntroduce: [],
-      participatingCharacterIds: ['char_lincheng'],
-      charactersToIntroduce: [],
-      characterDeltas: [{
-        characterId: 'char_lincheng',
-        from: '逃避麻烦',
-        to: '主动核对事故',
-        evidenceRequired: '他保存两份互相冲突的事故记录。'
-      }],
-      readerKnowledge: ['事故在同一时间重复发生。'],
-      readerQuestions: ['是谁改写了事故记录？'],
-      forbiddenMoves: ['不要新增人物或揭示幕后主使。']
-    },
+    'planning.adjust_chapter_mission_slim': adjustedMission,
     'planning.generate_plan_candidates_slim': {
       chapterNumber,
       candidates: [

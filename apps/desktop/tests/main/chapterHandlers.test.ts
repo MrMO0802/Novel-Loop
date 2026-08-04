@@ -43,6 +43,16 @@ const task: ChapterTask = {
   canRetry: false,
   error: null
 };
+const missionAdjustmentTask: ChapterTask = {
+  ...task,
+  kind: 'mission_adjustment',
+  stage: 'requesting_adjustment',
+  completedStages: []
+};
+const planAdjustmentTask: ChapterTask = {
+  ...missionAdjustmentTask,
+  kind: 'plan_adjustment'
+};
 const inspection: ChapterInspection = {
   available: true,
   chapterNumber: 1,
@@ -122,14 +132,8 @@ function createService(): ChapterApplicationService {
       ...task,
       kind: 'drafting'
     })),
-    adjustMission: vi.fn(async (): Promise<ChapterTask> => ({
-      ...task,
-      kind: 'mission_adjustment'
-    })),
-    adjustPlan: vi.fn(async (): Promise<ChapterTask> => ({
-      ...task,
-      kind: 'plan_adjustment'
-    })),
+    adjustMission: vi.fn(async () => missionAdjustmentTask),
+    adjustPlan: vi.fn(async () => planAdjustmentTask),
     get: vi.fn(async () => task),
     cancel: vi.fn(async () => task),
     readPlan: vi.fn(async () => planReview),
@@ -200,10 +204,9 @@ const cases = [
     request: adjustMissionRequest,
     invalidRequest: { ...adjustMissionRequest, provider: 'codex-text' },
     serviceMethod: 'adjustMission',
-    response: { ...task, kind: 'mission_adjustment' },
+    response: missionAdjustmentTask,
     invalidResponse: {
-      ...task,
-      kind: 'mission_adjustment',
+      ...missionAdjustmentTask,
       sourceHash: 'a'.repeat(64)
     }
   },
@@ -212,10 +215,9 @@ const cases = [
     request: adjustPlanRequest,
     invalidRequest: { ...adjustPlanRequest, path: '/private/plan.md' },
     serviceMethod: 'adjustPlan',
-    response: { ...task, kind: 'plan_adjustment' },
+    response: planAdjustmentTask,
     invalidResponse: {
-      ...task,
-      kind: 'plan_adjustment',
+      ...planAdjustmentTask,
       revisionId: 'author_revision_ch001_plan_v1'
     }
   },

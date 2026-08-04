@@ -81,8 +81,11 @@ export interface CreateAuthorRevisionInput {
   mode: AuthorRevisionMode;
   sourceArtifactPath: string;
   sourceCandidateId: string | null;
+  expectedSourceHash?: string;
   content: string;
   authorInstruction: string | null;
+  assertCanCommit?: () => void;
+  onCommitPoint?: () => void;
 }
 
 export interface CreateAuthorRevisionResult {
@@ -187,6 +190,17 @@ export async function createAuthorRevision(
     const sourcePath = resolveProjectPath(projectRoot, input.sourceArtifactPath);
     await assertSafePath(projectRoot, sourcePath);
     const sourceText = await store.readText(sourcePath);
+    const sourceHash = sha256(sourceText);
+    if (
+      input.expectedSourceHash !== undefined
+      && sourceHash !== input.expectedSourceHash
+    ) {
+      throw new AppError(
+        'AUTHOR_REVISION_SOURCE_STALE',
+        'Source artifact hash does not match the expected revision source.',
+        2
+      );
+    }
     const revisionDir = context.paths.chapterArtifact(input.chapterNumber, 'author_revisions');
     await assertSafePath(projectRoot, revisionDir);
     await store.ensureDir(revisionDir);
@@ -212,7 +226,7 @@ export async function createAuthorRevision(
       mode: input.mode,
       sourceArtifactPath: toProjectRelativePath(projectRoot, sourcePath),
       sourceCandidateId: input.sourceCandidateId,
-      sourceHash: sha256(sourceText),
+      sourceHash,
       workingCopyPath: relativeMarkdownPath,
       workingCopyHash: sha256(input.content),
       state: 'ready',
@@ -223,8 +237,17 @@ export async function createAuthorRevision(
       storyStateMutated: false
     });
 
-    await store.writeText(markdownPath, input.content);
-    await store.writeJson(recordPath, record, AuthorRevisionRecordSchema);
+    input.assertCanCommit?.();
+    input.onCommitPoint?.();
+    try {
+      await store.writeText(markdownPath, input.content);
+      await store.writeJson(recordPath, record, AuthorRevisionRecordSchema);
+    } catch (error) {
+      if (!(await store.exists(recordPath)) && await store.exists(markdownPath)) {
+        await store.removePath(markdownPath).catch(() => undefined);
+      }
+      throw error;
+    }
     return { record, relativeRecordPath, relativeMarkdownPath };
   });
 }
@@ -634,6 +657,16 @@ async function readVerifiedSourceArtifact(
 function validateCreateInput(input: CreateAuthorRevisionInput): void {
   if (!Number.isInteger(input.chapterNumber) || input.chapterNumber <= 0) {
     throw new AppError('AUTHOR_REVISION_CHAPTER_INVALID', 'Chapter number must be a positive integer.', 2);
+  }
+  if (
+    input.expectedSourceHash !== undefined
+    && !/^[a-f0-9]{64}$/u.test(input.expectedSourceHash)
+  ) {
+    throw new AppError(
+      'AUTHOR_REVISION_SOURCE_HASH_INVALID',
+      'Expected source hash must be lowercase SHA-256.',
+      2
+    );
   }
   if (Buffer.byteLength(input.content, 'utf8') > MAX_REVISION_MARKDOWN_BYTES) {
     throw new AppError('AUTHOR_REVISION_CONTENT_TOO_LARGE', 'Author revision Markdown exceeds 2 MiB.', 2);

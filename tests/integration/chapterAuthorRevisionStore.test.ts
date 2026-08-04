@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 
 import {
   adoptAuthorRevision,
@@ -48,6 +48,46 @@ afterEach(async () => {
 });
 
 describe('chapter author revision storage', () => {
+  test('checks the expected source hash in the record source read before writing', async () => {
+    const sourcePath = paths.chapterArtifact(1, 'selected_plan.md');
+    const sourceBefore = await store.readText(sourcePath);
+    await store.writeText(sourcePath, '# Mutated source\n\nNewer bytes.\n');
+
+    await expect(createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      mode: 'codex_adjustment',
+      sourceArtifactPath: sourcePath,
+      sourceCandidateId: 'plan_001',
+      expectedSourceHash: hashText(sourceBefore),
+      content: '# Stale adjustment\n',
+      authorInstruction: 'Adjust the old source.'
+    })).rejects.toMatchObject({ code: 'AUTHOR_REVISION_SOURCE_STALE' });
+
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
+  test('removes an uncommitted working copy when the revision record write fails', async () => {
+    const sourcePath = paths.chapterArtifact(1, 'selected_plan.md');
+    const source = await store.readText(sourcePath);
+    vi.spyOn(store, 'writeJson').mockRejectedValueOnce(new Error('record write failed'));
+
+    await expect(createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      mode: 'codex_adjustment',
+      sourceArtifactPath: sourcePath,
+      sourceCandidateId: 'plan_001',
+      expectedSourceHash: hashText(source),
+      content: '# Candidate\n',
+      authorInstruction: 'Adjust safely.'
+    }, store)).rejects.toThrow('record write failed');
+
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
   test('creates sequential selected-plan revisions without changing Story State or generated sources', async () => {
     const stateBefore = await sha256(paths.storyState());
     const sourceBefore = await store.readText(paths.chapterArtifact(1, 'selected_plan.md'));
@@ -263,4 +303,13 @@ function validSceneCardsJson(): string {
     readerEffect: '制造悬念',
     constraints: ['不得揭晓真相']
   }] as const)}\n`;
+}
+
+function hashText(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+async function authorRevisionFiles(): Promise<string[]> {
+  const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+  return await store.exists(revisionDir) ? store.list(revisionDir) : [];
 }

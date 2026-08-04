@@ -2,114 +2,134 @@
 
 ## Scope
 
-Implemented bounded local Codex adjustments for a chapter mission and any
-trusted plan direction. Every successful AI result is stored as a `ready`,
-unadopted `codex_adjustment` author revision. Selection, active artifacts,
-chapter queue state, `latestCommittedChapter`, and Story State remain unchanged
-until the existing explicit adoption operation succeeds.
+Fix round 1 hardens the Task 7 implementation on top of `5cac6b9`. Local
+`codex-text` mission and plan adjustments still produce only a `ready`,
+unadopted `codex_adjustment` author revision. They do not select a direction,
+change active artifacts or queue state, advance `latestCommittedChapter`, or
+write Story State.
 
 ## RED / GREEN
 
-- RED: provider tests failed because the two descriptors, strict normalizers,
-  and adjustment service did not exist.
-- GREEN: fake-Codex mission and plan adjustments produced ready unadopted
-  revisions through the Task 2 author-revision service.
-- RED: desktop main tests failed because adjustment task kinds, strict request
-  contracts, trusted gateway methods, and fixed handlers did not exist.
-- GREEN: strict token resolution, one-active-operation lifecycle, opaque result
-  tokens, cancellation, and safe candidate projection passed.
-- RED: renderer tests exposed disabled direction adjustment plus missing mission
-  adjustment and participant-repair controls.
-- GREEN: the inline instruction, progress, cancellation, comparison, explicit
-  adoption, and keep-current flows passed without changing the active direction.
-- RED/GREEN audit: a multibyte output below the character ceiling but above 2
-  MiB initially passed; the local normalizer now enforces UTF-8 bytes. Task
-  contract tests also now reject failed tasks carrying results and task/candidate
-  kind mismatches.
+- RED: seven provider/application tests exposed permissive mission output,
+  lost mission semantics, post-write projection, a source TOCTOU race, and a
+  missing final cancellation gate. GREEN: all 25 initial focused tests passed.
+- RED: seven main/renderer tests exposed cross-kind stages, same-kind request
+  coalescing, late-cancel success publication, missing commit-point signaling,
+  stale misclassification, parent-heading focus theft, and enabled conflicting
+  controls. GREEN: all 145 focused desktop tests passed.
+- RED: a 50-objective mission made the 20,000-character plan context truncate
+  into invalid JSON. GREEN: the prompt now receives a bounded, complete JSON
+  mission summary.
+- Final focused schema/adjustment/revision-store run: 26 tests passed.
 
 ## Schemas And Prompts
 
-- Prompt `planning.adjust_chapter_mission_slim` uses descriptor
-  `CodexSlimChapterMissionAdjustmentOutputSchema` and
-  `planning.chapter_mission_adjustment.slim.schema.json`.
-- Prompt `planning.adjust_plan_candidate_slim` uses descriptor
-  `CodexSlimPlanAdjustmentOutputSchema` and
-  `planning.plan_adjustment.slim.schema.json`.
-- Mission output is a strict complete slim mission normalized into
-  `ChapterMissionSchema`, with chapter identity plus character/debt references
-  validated against trusted project state.
-- Plan output is exactly `title`, `markdown`, `changeSummary`, and
-  `preservedConstraints`; arrays and strings are bounded, extra fields are
-  rejected, and Markdown is capped at 2 MiB in UTF-8.
-- Both prompts forbid Story State mutation, unrequested characters or facts,
-  shell commands, workspace writes, direct adoption, active-artifact overwrite,
-  and whole-project rewrites.
+- `planning.adjust_chapter_mission_slim` uses
+  `planning.chapter_mission_adjustment.slim.schema.json` and the local
+  `CodexMissionAdjustmentOutputSchema`.
+- Mission output is strict and complete at the raw boundary. Required fields
+  include mission/chapter identity, objective IDs/types/priorities, both debt
+  collections and debt types, participants and introduction metadata,
+  character deltas, all four reader-information arrays, forbidden moves,
+  emotional curve, and nullable target word count. Extra or missing fields and
+  a mismatched chapter number fail validation. Nonblank checks do not trim or
+  otherwise transform returned mission strings.
+- `planning.adjust_plan_candidate_slim` remains strict over `title`,
+  `markdown`, `changeSummary`, and `preservedConstraints`, including the 2 MiB
+  UTF-8 Markdown limit.
+- Plan requests receive explicit bounded mission JSON rather than the complete
+  mission document. The summary remains valid JSON under its 20,000-character
+  budget.
+- Prompts continue to forbid Story State writes, unrequested canon, shell or
+  workspace writes, direct adoption, active-artifact replacement, and
+  whole-project rewrites.
 
 ## Provider Semantics
 
-Each service calls `ProviderFactory.create({ provider: 'codex-text' })` and
-issues exactly one `complete()` request. Defaults retain the existing provider
-behavior: one JSON retry, JSON repair enabled, and one repair retry. Tests that
-exercise invalid JSON/schema output disable retries and repair for deterministic
-failure. Fake-Codex evidence is one normal call for each successful adjustment,
-zero calls for stale input, overlong instruction, and pre-provider cancellation,
-and one call for post-validation cancellation. No real Codex or API key is used.
+Each adjustment creates the fixed local provider with
+`ProviderFactory.create({ provider: 'codex-text' })` and issues one business
+`complete()` call. Existing Codex JSON retry/repair behavior remains one JSON
+retry with repair enabled and one repair retry. Deterministic failure tests
+disable retry/repair where exact call counts matter. No real Codex process,
+network API, or API key is required.
+
+## Validation And Persistence
+
+Mission output is normalized into a complete `ChapterMission`, checked against
+the trusted mission identity and full Story State character/debt reference set,
+and projected into the complete bounded author-facing comparison before any
+revision write. Legal newly referenced open debts project and persist; an
+unprojectable participant or debt writes no revision.
+
+`createAuthorRevision()` accepts `expectedSourceHash`. The source read used to
+populate `record.sourceHash` also performs the expected-hash comparison before
+revision files are written. A deterministic mutation between the service
+freshness check and that store read returns `AUTHOR_REVISION_SOURCE_STALE` and
+leaves no revision. If the record write fails after the atomic working-copy
+write, the uncommitted working copy is removed; the record remains the ready
+revision commit marker.
 
 ## Lifecycle And Cancellation
 
-Adjustment task kinds are `mission_adjustment` and `plan_adjustment`; author
-stages are `requesting_adjustment`, `validating_adjustment`, and
-`ready_for_review`. Main resolves the project root, review/option token, trusted
-source bytes, and SHA-256 source hash. The application service checks
-cancellation before provider execution and after validated output but before
-revision storage, then rechecks source bytes before creating the revision.
-Cancelled and failed runs expose no result token and do not write a revision.
+Adjustment tasks use only `requesting_adjustment`, `validating_adjustment`, and
+`ready_for_review`; planning/drafting tasks cannot use adjustment stages in
+either `stage` or `completedStages`.
 
-Successful main tasks expose only an opaque `chapter_revision_*` token and a
-bounded author-facing comparison candidate. Adoption remains the separate Task
-5 `adoptRevision` request with invalidation confirmation.
+Cancellation is rechecked after the final source read and immediately before
+the first revision write. `onCommitPoint` marks the tiny file commit section as
+non-cancellable. Main rejects a late gateway result when stop was requested
+before that point and publishes neither a result token nor success. Once the
+commit point starts, `canCancel` is false and a durable result completes
+normally. `AUTHOR_REVISION_SOURCE_STALE` maps to bounded `stale_chapter`.
+
+Adjustment requests have a fingerprint over kind, project, review token,
+option token, and instruction. An identical active retry returns the existing
+task; a different same-kind request returns `generation_busy` and never joins
+the old task.
 
 ## Story State Evidence
 
-The deterministic integration fixture Story State is 4,859 bytes with SHA-256:
+The deterministic fixture Story State remains 4,859 bytes with SHA-256:
 
 `78fc9654b25e8f1b2cdb137c533bed56cbc1eb83dbeaa5893aa743f4e06fdc33`
 
-The before and after hashes are identical for successful mission adjustment,
-successful alternative-plan adjustment, invalid JSON, invalid schema, timeout,
-stale source, overlong instruction, both cancellation points, and provider
-failure. Tests also compare byte-exact snapshots of Story State, queue,
-mission, ranking, selected plan, and both plan candidates.
+Canonical snapshots compare byte-exact Story State, queue, mission, ranking,
+selected plan, and both plan candidates. They remain identical after mission
+adjustment, alternative-plan adjustment, legal new-debt projection, invalid
+output, timeout, stale source, cancellation, and provider failure. Participant
+repair produces revision bytes identical to the trusted source mission;
+explicit adoption preserves every mission field semantically and leaves Story
+State bytes unchanged.
 
 ## Renderer Boundary
 
-Renderer requests are strictly:
+Renderer requests remain strictly `{ projectKey, reviewToken,
+authorInstruction }` for mission and `{ projectKey, reviewToken, optionToken,
+authorInstruction }` for plan. No path, provider/profile/schema control, hash,
+engine/revision ID, or raw output crosses IPC.
 
-- Mission: `{ projectKey, reviewToken, authorInstruction }`
-- Plan: `{ projectKey, reviewToken, optionToken, authorInstruction }`
-
-Instructions are capped at 4,000 characters. Strict schemas reject paths,
-provider/profile/schema controls, source hashes, revision/engine IDs, and raw
-output. Fixed IPC channels and preload methods are used. The participant repair
-shortcut submits exactly:
-
-`补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。`
-
-It opens a pending comparison and never auto-adopts.
+`ChapterAdjustmentPanel` is remounted by review token, artifact kind, option,
+and mission request mode. Mission and direction controls are disabled while an
+adjustment panel is active. The same-mount participant-repair route suppresses
+parent heading focus until the mission editor takes focus. AI participant
+repair still uses the fixed instruction and requires explicit adoption.
 
 ## Verification
 
-- Root required tests: 3 files, 13 tests passed.
-- Desktop required tests: 6 files, 205 tests passed.
+- Required root suite: 3 files, 19 tests passed.
+- Required desktop suite: 6 files, 210 tests passed.
+- Additional focused revision-store suite: combined focused run, 26 tests
+  passed.
 - `corepack pnpm build`: passed.
 - `corepack pnpm --dir apps/desktop check`: passed.
-- `git diff --check`: passed before report creation and is rerun before commit.
+- `git diff --check`: passed before report update and is rerun before commit.
 
 ## Concerns
 
 - Real Codex execution was intentionally not run; deterministic fake-Codex
-  coverage is the required completion path.
-- JSON Schema `maxLength` is character-based by standard; the local Zod
-  normalizer supplies the required UTF-8 2 MiB enforcement.
-- Renderer behavior is covered with jsdom interaction tests. No unrelated
-  Playwright artifacts or PNG files were modified.
+  coverage is the required path.
+- JSON Schema length is character-based; local normalization supplies the
+  required UTF-8 byte ceiling.
+- The two revision files are individually atomic. The ready record is the
+  commit marker; a process crash between atomic writes could leave an
+  unreferenced working-copy file, but cannot create an orphan ready revision.

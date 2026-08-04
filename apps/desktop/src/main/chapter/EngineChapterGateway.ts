@@ -188,6 +188,7 @@ export interface TrustedMissionAdjustmentInput {
   expectedSourceHash: string;
   authorInstruction: string;
   shouldStop(): boolean;
+  onCommitPoint(): void;
   onStage(stage: ChapterAdjustmentStage): void;
 }
 
@@ -277,21 +278,15 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       expectedSourceHash: input.expectedSourceHash,
       authorInstruction: input.authorInstruction,
       shouldCancel: input.shouldStop,
+      onCommitPoint: input.onCommitPoint,
       onStage: input.onStage
     };
     const created = await adjustDesktopChapterMission(trustedInput);
     assertReadyAdjustment(created.record, 'mission');
-    const mission = MissionArtifactSchema.parse(JSON.parse(created.content));
-    const sourceReview = await this.readPlan(input.projectRoot);
-    if (!sourceReview.available) throw invalidTrustedReview();
     return {
       revisionId: created.record.revisionId,
       sourceHash: created.record.sourceHash,
-      candidate: {
-        artifactKind: 'mission',
-        title: '调整后的本章任务',
-        markdown: missionAdjustmentMarkdown(mission, sourceReview)
-      }
+      candidate: created.candidate
     };
   }
 
@@ -308,6 +303,7 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       authorInstruction: input.authorInstruction,
       sourcePlan: input.sourcePlan,
       shouldCancel: input.shouldStop,
+      onCommitPoint: input.onCommitPoint,
       onStage: input.onStage
     };
     const created = await adjustDesktopChapterPlan(trustedInput);
@@ -315,11 +311,7 @@ export class EngineChapterGateway implements ChapterEngineGateway {
     return {
       revisionId: created.record.revisionId,
       sourceHash: created.record.sourceHash,
-      candidate: {
-        artifactKind: 'plan',
-        title: markdownTitle(created.content, 1),
-        markdown: created.content
-      }
+      candidate: created.candidate
     };
   }
 
@@ -786,74 +778,6 @@ function assertReadyAdjustment(
   ) {
     throw invalidTrustedReview();
   }
-}
-
-function missionAdjustmentMarkdown(
-  mission: z.infer<typeof MissionArtifactSchema>,
-  sourceReview: Extract<TrustedChapterPlanReview, { available: true }>
-): string {
-  const participantNames = new Map([
-    ...sourceReview.mission.participants.map((participant) => [
-      participant.characterId,
-      `${participant.name}（${participant.role}）`
-    ] as const),
-    ...mission.charactersToIntroduce.map((participant) => [
-      participant.characterId,
-      `${participant.name}（${participant.role}）`
-    ] as const)
-  ]);
-  const participantIds = new Set([
-    ...mission.participatingCharacterIds,
-    ...mission.charactersToIntroduce.map(({ characterId }) => characterId),
-    ...mission.characterDeltas.map(({ characterId }) => characterId)
-  ]);
-  const participants = [...participantIds].map((characterId) => {
-    const label = participantNames.get(characterId);
-    if (label === undefined) throw invalidTrustedReview();
-    return label;
-  });
-  const debtPromises = new Map(
-    sourceReview.mission.debtsToPayOrAdvance.map(({ id, promise }) => [id, promise])
-  );
-  const advancedDebts = mission.debtsToPayOrAdvance.map((debtId) => {
-    const promise = debtPromises.get(debtId);
-    if (promise === undefined) throw invalidTrustedReview();
-    return promise;
-  });
-  const characterDeltas = mission.characterDeltas.map((delta) => {
-    const name = participantNames.get(delta.characterId);
-    if (name === undefined) throw invalidTrustedReview();
-    return `${name}：${delta.from} → ${delta.to}；${delta.evidenceRequired}`;
-  });
-  return authorMissionMarkdown([
-    ['本章目的', [mission.chapterFunction]],
-    ['必须完成', mission.requiredObjectives.map(({ text }) => text)],
-    [
-      '推进的悬念与承诺',
-      [...advancedDebts, ...mission.debtsToIntroduce.map(({ promise }) => promise)]
-    ],
-    ['人物变化', characterDeltas],
-    ['本章人物', participants],
-    ['读者会知道', mission.readerInformationDelta.newKnowledge],
-    ['读者会产生的猜测', mission.readerInformationDelta.newSuspicions],
-    ['读者会继续追问', mission.readerInformationDelta.questionsToMaintain],
-    ['本章会回答的问题', mission.readerInformationDelta.questionsToAnswer],
-    ['本章不能做', mission.forbiddenMoves],
-    ['情绪节奏', mission.targetEmotionalCurve],
-    [
-      '目标字数',
-      mission.targetWordCount === undefined ? [] : [`${mission.targetWordCount} 字`]
-    ]
-  ]);
-}
-
-function authorMissionMarkdown(sections: Array<[string, string[]]>): string {
-  return sections.flatMap(([title, rows]) => [
-    `## ${title}`,
-    '',
-    rows.length > 0 ? rows.map((row) => `- ${row}`).join('\n') : '暂无',
-    ''
-  ]).join('\n');
 }
 
 function sha256(value: string): string {

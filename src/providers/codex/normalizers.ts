@@ -90,7 +90,69 @@ const SlimMissionSchema = z.object({
   forbiddenMoves: z.array(z.string().trim().min(1).max(2_000)).max(100).default([])
 });
 
-const SlimMissionAdjustmentSchema = SlimMissionSchema.strict();
+const missionAdjustmentText = (maxCharacters: number) => z.string()
+  .min(1)
+  .max(maxCharacters)
+  .refine((value) => value.trim().length > 0);
+
+export const CodexMissionAdjustmentOutputSchema = z.object({
+  id: missionAdjustmentText(200),
+  chapterNumber: z.number().int().positive(),
+  chapterFunction: missionAdjustmentText(2_000),
+  requiredObjectives: z.array(z.object({
+    id: missionAdjustmentText(200),
+    text: missionAdjustmentText(2_000),
+    type: z.enum([
+      'plot',
+      'character',
+      'relationship',
+      'world',
+      'debt',
+      'foreshadowing',
+      'reader'
+    ]),
+    priority: z.enum(['must', 'should', 'could'])
+  }).strict()).max(100),
+  debtsToPayOrAdvance: z.array(
+    missionAdjustmentText(200)
+  ).max(100),
+  debtsToIntroduce: z.array(z.object({
+    type: missionAdjustmentText(100),
+    promise: missionAdjustmentText(2_000),
+    importance: z.number().min(1).max(10)
+  }).strict()).max(100),
+  participatingCharacterIds: z.array(
+    missionAdjustmentText(200)
+  ).max(32),
+  charactersToIntroduce: z.array(z.object({
+    characterId: missionAdjustmentText(200),
+    name: missionAdjustmentText(120),
+    role: missionAdjustmentText(120)
+  }).strict()).max(8),
+  characterDeltas: z.array(z.object({
+    characterId: missionAdjustmentText(200),
+    from: missionAdjustmentText(1_000),
+    to: missionAdjustmentText(1_000),
+    evidenceRequired: missionAdjustmentText(2_000)
+  }).strict()).max(100),
+  readerInformationDelta: z.object({
+    newKnowledge: z.array(missionAdjustmentText(2_000)).max(100),
+    newSuspicions: z.array(missionAdjustmentText(2_000)).max(100),
+    questionsToMaintain: z.array(
+      missionAdjustmentText(2_000)
+    ).max(100),
+    questionsToAnswer: z.array(
+      missionAdjustmentText(2_000)
+    ).max(100)
+  }).strict(),
+  forbiddenMoves: z.array(
+    missionAdjustmentText(2_000)
+  ).max(100),
+  targetEmotionalCurve: z.array(
+    missionAdjustmentText(2_000)
+  ).max(100),
+  targetWordCount: z.number().int().positive().max(1_000_000).nullable()
+}).strict();
 
 export const CodexPlanAdjustmentSchema = z.object({
   title: z.string().trim().min(1).max(240),
@@ -341,7 +403,18 @@ export function normalizeMissionAdjustment(
   value: unknown,
   context: CodexNormalizationContext
 ): ChapterMission {
-  return normalizedMission(SlimMissionAdjustmentSchema.parse(value), context);
+  const output = CodexMissionAdjustmentOutputSchema.parse(value);
+  if (
+    context.chapterNumber !== undefined
+    && output.chapterNumber !== context.chapterNumber
+  ) {
+    throw new Error('Mission adjustment chapter number does not match context.');
+  }
+  const { targetWordCount, ...mission } = output;
+  return ChapterMissionSchema.parse({
+    ...mission,
+    ...(targetWordCount === null ? {} : { targetWordCount })
+  });
 }
 
 export function normalizePlanAdjustment(value: unknown): CodexPlanAdjustment {

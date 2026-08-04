@@ -11,14 +11,16 @@ import {
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
 import {
   adjustDesktopChapterMission,
-  adjustDesktopChapterPlan
+  adjustDesktopChapterPlan,
+  adoptDesktopMissionRevision
 } from '../../src/desktop/index.js';
 import { ProviderFactory } from '../../src/llm/ProviderFactory.js';
 import {
   ChapterMissionSchema,
   ChapterPlanRankingSchema,
   ChapterQueueSchema,
-  StoryStateSchema
+  StoryStateSchema,
+  type ChapterMission
 } from '../../src/schemas/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
@@ -120,6 +122,208 @@ describe('bounded Codex chapter author adjustments', () => {
     expect(await canonicalSnapshot()).toEqual(before);
     expect(await fakeCallCount(fake.statePath, 'planning.adjust_plan_candidate_slim'))
       .toBe(1);
+  });
+
+  test('supplies plan adjustment with a bounded valid mission summary', async () => {
+    const missionPath = paths.chapterArtifact(chapterNumber, 'mission.json');
+    const mission = await store.readJson(missionPath, ChapterMissionSchema);
+    await store.writeJson(missionPath, {
+      ...mission,
+      requiredObjectives: Array.from({ length: 50 }, (_, index) => ({
+        ...mission.requiredObjectives[0]!,
+        id: `obj_${String(index + 1).padStart(3, '0')}`,
+        text: `保留关键目标 ${index + 1}：${'甲'.repeat(500)}${
+          index === 49 ? 'MISSION_CONTEXT_TAIL' : ''
+        }`
+      }))
+    }, ChapterMissionSchema);
+    const sourceContent = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'plan_candidates', 'plan_002.md')
+    );
+    let providerPrompt = '';
+    const output = {
+      title: '交通事故',
+      markdown: '# 交通事故\n\n从重复事故开始。\n',
+      changeSummary: ['收紧开场。'],
+      preservedConstraints: ['不新增人物。']
+    };
+    const complete = vi.fn().mockImplementation(async (request: { user: string }) => {
+      providerPrompt = request.user;
+      return { text: JSON.stringify(output), json: output };
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await adjustChapterPlan({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceContent),
+      authorInstruction: '只收紧开场。',
+      sourcePlan: {
+        candidateId: 'plan_002',
+        content: sourceContent,
+        active: false
+      },
+      promptRoot
+    });
+
+    expect(complete).toHaveBeenCalledOnce();
+    const missionContext = /<chapter_mission_context>\n([\s\S]*?)\n<\/chapter_mission_context>/u
+      .exec(providerPrompt)?.[1];
+    expect(missionContext).toBeDefined();
+    expect(missionContext!.length).toBeLessThanOrEqual(20_000);
+    expect(() => JSON.parse(missionContext!)).not.toThrow();
+    expect(missionContext).not.toContain('MISSION_CONTEXT_TAIL');
+  });
+
+  test('participant repair preserves every unrelated mission field through adoption', async () => {
+    const fake = await writeFakeCodex(projectsRoot, 'valid');
+    const missionPath = paths.chapterArtifact(chapterNumber, 'mission.json');
+    const missionWithSpacing = await store.readJson(
+      missionPath,
+      ChapterMissionSchema
+    );
+    await store.writeJson(missionPath, {
+      ...missionWithSpacing,
+      chapterFunction: ` ${missionWithSpacing.chapterFunction} `,
+      requiredObjectives: missionWithSpacing.requiredObjectives.map(
+        (objective) => ({ ...objective, text: ` ${objective.text} ` })
+      )
+    }, ChapterMissionSchema);
+    const before = await canonicalSnapshot();
+    const sourceMission = ChapterMissionSchema.parse(JSON.parse(before.mission));
+    const result = await adjustDesktopChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(before.mission),
+      authorInstruction: '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。',
+      promptRoot,
+      providerOptions: { codexBin: fake.codexBin }
+    });
+
+    expect(result.content).toBe(before.mission);
+    expect(ChapterMissionSchema.parse(JSON.parse(result.content))).toEqual(
+      sourceMission
+    );
+    await adoptDesktopMissionRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      revisionId: result.record.revisionId,
+      expectedSourceHash: result.record.sourceHash
+    });
+    await expect(store.readJson(
+      paths.chapterArtifact(chapterNumber, 'mission.json'),
+      ChapterMissionSchema
+    )).resolves.toEqual(sourceMission);
+    expect(await store.readText(paths.storyState())).toBe(before.storyState);
+  });
+
+  test('projects a newly referenced open debt before storing the revision', async () => {
+    const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
+    await store.writeJson(paths.storyState(), {
+      ...storyState,
+      narrativeDebts: [
+        ...storyState.narrativeDebts,
+        {
+          ...storyState.narrativeDebts[0]!,
+          id: 'debt_0002',
+          promise: '事故记录会在午夜恢复原状。',
+          status: 'open'
+        }
+      ]
+    }, StoryStateSchema);
+    const sourceText = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'mission.json')
+    );
+    const source = ChapterMissionSchema.parse(JSON.parse(sourceText));
+    const output = completeMissionOutput(source, {
+      debtsToPayOrAdvance: [...source.debtsToPayOrAdvance, 'debt_0002']
+    });
+    const before = await canonicalSnapshot();
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(output),
+      json: output
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    const result = await adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceText),
+      authorInstruction: '把已有的午夜恢复悬念加入本章任务。',
+      promptRoot
+    });
+
+    expect(result.candidate.markdown).toContain('事故记录会在午夜恢复原状。');
+    expect(result.record.state).toBe('ready');
+    expect(await canonicalSnapshot()).toEqual(before);
+  });
+
+  test('rejects an unprojectable mission before writing a revision', async () => {
+    const sourceText = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'mission.json')
+    );
+    const source = ChapterMissionSchema.parse(JSON.parse(sourceText));
+    const output = completeMissionOutput(source, {
+      participatingCharacterIds: ['char_missing']
+    });
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(output),
+      json: output
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await expect(adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceText),
+      authorInstruction: '调整人物参与范围。',
+      promptRoot
+    })).rejects.toMatchObject({ code: 'CHAPTER_ADJUSTMENT_INVALID_OUTPUT' });
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
+  test('rejects a source mutation between freshness validation and revision storage', async () => {
+    const fake = await writeFakeCodex(projectsRoot, 'valid');
+    const sourcePath = paths.chapterArtifact(chapterNumber, 'mission.json');
+    const sourceText = await store.readText(sourcePath);
+    const originalReadText = store.readText.bind(store);
+    let sourceReads = 0;
+    vi.spyOn(store, 'readText').mockImplementation(async (filePath) => {
+      const content = await originalReadText(filePath);
+      if (path.resolve(filePath) === path.resolve(sourcePath) && ++sourceReads === 2) {
+        await store.writeText(sourcePath, `${content.trimEnd()} \n`);
+      }
+      return content;
+    });
+
+    await expect(adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceText),
+      authorInstruction: '收紧本章任务。',
+      promptRoot,
+      providerOptions: { codexBin: fake.codexBin }
+    }, store)).rejects.toMatchObject({ code: 'AUTHOR_REVISION_SOURCE_STALE' });
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
+  test('cancels during the final freshness read before revision commit', async () => {
+    const fake = await writeFakeCodex(projectsRoot, 'valid');
+    const before = await canonicalSnapshot();
+    let cancellationChecks = 0;
+
+    await expect(adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(before.mission),
+      authorInstruction: '收紧本章任务。',
+      shouldCancel: () => ++cancellationChecks >= 3,
+      promptRoot,
+      providerOptions: { codexBin: fake.codexBin }
+    })).rejects.toMatchObject({ code: 'CHAPTER_ADJUSTMENT_CANCELLED' });
+
+    expect(await canonicalSnapshot()).toEqual(before);
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
   });
 
   test.each([
@@ -363,4 +567,15 @@ async function fakeCallCount(statePath: string, promptId: string): Promise<numbe
 
 function sha256(value: string): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function completeMissionOutput(
+  source: ChapterMission,
+  overrides: Partial<ChapterMission> = {}
+) {
+  const mission = { ...source, ...overrides };
+  return {
+    ...mission,
+    targetWordCount: mission.targetWordCount ?? null
+  };
 }

@@ -19,6 +19,7 @@ type AvailablePlan = Extract<ChapterPlanReviewResult, { available: true }>;
 export type ChapterDirection = AvailablePlan['directions'][number];
 
 interface ChapterDirectionChooserProps {
+  disabled?: boolean;
   directions: ChapterDirection[];
   onAdjust: (
     direction: ChapterDirection,
@@ -32,6 +33,7 @@ interface ChapterDirectionChooserProps {
 }
 
 export function ChapterDirectionChooser({
+  disabled = false,
   directions,
   onAdjust,
   onEdit,
@@ -70,7 +72,7 @@ export function ChapterDirectionChooser({
     direction: ChapterDirection,
     trigger: HTMLElement
   ) => {
-    if (direction.active) return;
+    if (disabled || direction.active) return;
     triggerRef.current = trigger;
     setPending(direction);
   };
@@ -80,6 +82,7 @@ export function ChapterDirectionChooser({
     direction: ChapterDirection,
     index: number
   ) => {
+    if (disabled) return;
     const lastIndex = directions.length - 1;
     let nextIndex: number | null = null;
     if (event.key === 'ArrowDown' || event.key === 'ArrowRight') {
@@ -156,6 +159,7 @@ export function ChapterDirectionChooser({
             >
               <div
                 aria-checked={direction.active}
+                aria-disabled={disabled}
                 aria-describedby={descriptionIds.length > 0
                   ? descriptionIds.join(' ')
                   : undefined}
@@ -221,6 +225,7 @@ export function ChapterDirectionChooser({
                 {!direction.active && (
                   <button
                     className="nl-primary-action"
+                    disabled={disabled}
                     onClick={(event) => {
                       requestSelection(direction, event.currentTarget);
                     }}
@@ -232,6 +237,7 @@ export function ChapterDirectionChooser({
                 )}
                 <button
                   className="nl-secondary-action"
+                  disabled={disabled}
                   onClick={() => onEdit(direction, title)}
                   type="button"
                 >
@@ -240,6 +246,7 @@ export function ChapterDirectionChooser({
                 </button>
                 <button
                   className="nl-secondary-action"
+                  disabled={disabled}
                   onClick={(event) => onAdjust(
                     direction,
                     title,

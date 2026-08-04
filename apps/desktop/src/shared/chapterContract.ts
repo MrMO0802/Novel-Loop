@@ -235,6 +235,33 @@ export const ChapterTaskSchema = z.object({
 }).strict().superRefine((task, context) => {
   const adjustment = task.kind === 'mission_adjustment'
     || task.kind === 'plan_adjustment';
+  const adjustmentStages = new Set<ChapterTaskStage>([
+    'requesting_adjustment',
+    'validating_adjustment',
+    'ready_for_review'
+  ]);
+  const generationStages = new Set<ChapterTaskStage>([
+    'preparing',
+    'mission',
+    'plan_candidates',
+    'ranking',
+    'scene_cards',
+    'scene_drafts',
+    'draft_assembly',
+    'finalizing',
+    'completed'
+  ]);
+  const compatibleStages = adjustment
+    ? adjustmentStages
+    : generationStages;
+  if (!compatibleStages.has(task.stage)) {
+    context.addIssue({ code: 'custom', path: ['stage'] });
+  }
+  task.completedStages.forEach((stage, index) => {
+    if (!compatibleStages.has(stage)) {
+      context.addIssue({ code: 'custom', path: ['completedStages', index] });
+    }
+  });
   const hasResult = task.resultRevisionToken !== undefined
     || task.resultCandidate !== undefined;
   if (adjustment && task.status === 'succeeded') {

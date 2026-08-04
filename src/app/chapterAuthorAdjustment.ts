@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { z } from 'zod';
 
 import {
   createAuthorRevision,
@@ -32,6 +33,7 @@ const MAX_AUTHOR_INSTRUCTION_CHARACTERS = 4_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
 const MAX_SELECTED_PLAN_CONTEXT_CHARACTERS = 20_000;
 const MAX_STORY_STATE_SUMMARY_CHARACTERS = 8_000;
+const MAX_MISSION_PLAN_CONTEXT_CHARACTERS = 20_000;
 const SAFE_PLAN_CANDIDATE_ID = /^plan_[0-9]{3}$/u;
 
 export type ChapterAuthorAdjustmentStage =
@@ -60,18 +62,40 @@ export interface ChapterAuthorAdjustmentInput {
   expectedSourceHash: string;
   authorInstruction: string;
   shouldCancel?: () => boolean;
+  onCommitPoint?: () => void;
   onStage?: (stage: ChapterAuthorAdjustmentStage) => void;
   promptRoot?: string;
   providerOptions?: CodexChapterAdjustmentProviderOptions;
   sourcePlan?: TrustedChapterPlanAdjustmentSource;
 }
 
+export interface ChapterAuthorAdjustmentCandidate {
+  artifactKind: 'mission' | 'plan';
+  title: string;
+  markdown: string;
+}
+
+export interface ChapterAuthorAdjustmentResult extends CreateAuthorRevisionResult {
+  candidate: ChapterAuthorAdjustmentCandidate;
+}
+
+const ChapterAuthorAdjustmentCandidateSchema = z.object({
+  artifactKind: z.enum(['mission', 'plan']),
+  title: z.string().trim().min(1).max(240).refine(isAuthorFacingText),
+  markdown: z.string()
+    .min(1)
+    .refine(
+      (value) => Buffer.byteLength(value, 'utf8') <= MAX_ARTIFACT_BYTES,
+      { message: 'Adjustment candidate exceeds 2 MiB.' }
+    )
+    .refine(isAuthorFacingText)
+}).strict();
+
 interface AdjustmentContext {
   projectRoot: string;
   paths: ProjectPaths;
   store: FileStore;
   storyState: StoryState;
-  storyStateText: string;
   mission: ChapterMission;
   missionText: string;
   selectedPlanText: string;
@@ -80,7 +104,7 @@ interface AdjustmentContext {
 export async function adjustChapterMission(
   input: ChapterAuthorAdjustmentInput,
   fileStore?: FileStore
-): Promise<CreateAuthorRevisionResult> {
+): Promise<ChapterAuthorAdjustmentResult> {
   return runAdjustment(input, fileStore, async (context) => {
     const sourcePath = context.paths.chapterArtifact(
       input.chapterNumber,
@@ -113,6 +137,12 @@ export async function adjustChapterMission(
     input.onStage?.('validating_adjustment');
 
     const mission = parseMissionAdjustment(response.json, context);
+    let candidate: ChapterAuthorAdjustmentCandidate;
+    try {
+      candidate = projectMissionCandidate(mission, context);
+    } catch {
+      throw invalidOutputError();
+    }
     throwIfCancelled(input);
     await assertSourceStillCurrent(context.store, sourcePath, input.expectedSourceHash);
     const created = await createAuthorRevision({
@@ -122,18 +152,23 @@ export async function adjustChapterMission(
       mode: 'codex_adjustment',
       sourceArtifactPath: sourcePath,
       sourceCandidateId: null,
+      expectedSourceHash: input.expectedSourceHash,
       content: `${JSON.stringify(mission, null, 2)}\n`,
-      authorInstruction: input.authorInstruction
+      authorInstruction: input.authorInstruction,
+      assertCanCommit: () => throwIfCancelled(input),
+      ...(input.onCommitPoint === undefined
+        ? {}
+        : { onCommitPoint: input.onCommitPoint })
     }, context.store);
     input.onStage?.('ready_for_review');
-    return created;
+    return { ...created, candidate };
   });
 }
 
 export async function adjustChapterPlan(
   input: ChapterAuthorAdjustmentInput,
   fileStore?: FileStore
-): Promise<CreateAuthorRevisionResult> {
+): Promise<ChapterAuthorAdjustmentResult> {
   return runAdjustment(input, fileStore, async (context) => {
     const sourcePlan = validateTrustedPlanSource(input.sourcePlan);
     const sourcePath = sourcePlan.active
@@ -158,7 +193,7 @@ export async function adjustChapterPlan(
         CHAPTER_NUMBER: input.chapterNumber,
         AUTHOR_INSTRUCTION: input.authorInstruction,
         CURRENT_PLAN: sourceText,
-        MISSION_CONTEXT: context.missionText,
+        MISSION_CONTEXT: summarizeMissionForPlan(context.mission),
         STORY_STATE_SUMMARY: summarizeStoryState(context.storyState)
       }
     );
@@ -176,6 +211,16 @@ export async function adjustChapterPlan(
     } catch {
       throw invalidOutputError();
     }
+    let candidate: ChapterAuthorAdjustmentCandidate;
+    try {
+      candidate = ChapterAuthorAdjustmentCandidateSchema.parse({
+        artifactKind: 'plan',
+        title: adjusted.title,
+        markdown: adjusted.markdown
+      });
+    } catch {
+      throw invalidOutputError();
+    }
     throwIfCancelled(input);
     await assertSourceStillCurrent(context.store, sourcePath, input.expectedSourceHash);
     const created = await createAuthorRevision({
@@ -185,19 +230,24 @@ export async function adjustChapterPlan(
       mode: 'codex_adjustment',
       sourceArtifactPath: sourcePath,
       sourceCandidateId: sourcePlan.candidateId,
+      expectedSourceHash: input.expectedSourceHash,
       content: adjusted.markdown,
-      authorInstruction: input.authorInstruction
+      authorInstruction: input.authorInstruction,
+      assertCanCommit: () => throwIfCancelled(input),
+      ...(input.onCommitPoint === undefined
+        ? {}
+        : { onCommitPoint: input.onCommitPoint })
     }, context.store);
     input.onStage?.('ready_for_review');
-    return created;
+    return { ...created, candidate };
   });
 }
 
-async function runAdjustment(
+async function runAdjustment<T extends CreateAuthorRevisionResult>(
   input: ChapterAuthorAdjustmentInput,
   fileStore: FileStore | undefined,
-  operation: (context: AdjustmentContext) => Promise<CreateAuthorRevisionResult>
-): Promise<CreateAuthorRevisionResult> {
+  operation: (context: AdjustmentContext) => Promise<T>
+): Promise<T> {
   validateInput(input);
   const projectRoot = path.resolve(input.projectRoot);
   const store = fileStore ?? FileStore.forProject(projectRoot);
@@ -253,7 +303,6 @@ async function readContext(
     paths,
     store,
     storyState,
-    storyStateText,
     mission,
     missionText,
     selectedPlanText
@@ -297,7 +346,8 @@ function parseMissionAdjustment(
       chapterNumber: context.mission.chapterNumber
     });
     if (
-      mission.chapterNumber !== context.mission.chapterNumber
+      mission.id !== context.mission.id
+      || mission.chapterNumber !== context.mission.chapterNumber
       || !missionCharacterReferencesAreValid(mission, context.storyState)
       || !missionDebtReferencesAreValid(mission, context.storyState)
     ) {
@@ -307,6 +357,176 @@ function parseMissionAdjustment(
   } catch {
     throw invalidOutputError();
   }
+}
+
+function projectMissionCandidate(
+  mission: ChapterMission,
+  context: AdjustmentContext
+): ChapterAuthorAdjustmentCandidate {
+  const characterLabels = new Map<string, string>();
+  for (const character of context.storyState.characters) {
+    characterLabels.set(character.id, `${character.name}（${character.role}）`);
+  }
+  for (const character of [
+    ...context.mission.charactersToIntroduce,
+    ...mission.charactersToIntroduce
+  ]) {
+    characterLabels.set(
+      character.characterId,
+      `${character.name}（${character.role}）`
+    );
+  }
+  const debtLabels = new Map(
+    context.storyState.narrativeDebts.map(({ id, promise }) => [id, promise])
+  );
+  const participants = mission.participatingCharacterIds.map((characterId) => {
+    const label = characterLabels.get(characterId);
+    if (label === undefined) throw new Error('Mission participant cannot be projected.');
+    return label;
+  });
+  const advancedDebts = mission.debtsToPayOrAdvance.map((debtId) => {
+    const promise = debtLabels.get(debtId);
+    if (promise === undefined) throw new Error('Mission debt cannot be projected.');
+    return promise;
+  });
+  const characterDeltas = mission.characterDeltas.map((delta) => {
+    const label = characterLabels.get(delta.characterId);
+    if (label === undefined) throw new Error('Mission delta cannot be projected.');
+    return `${label}：${delta.from} → ${delta.to}；${delta.evidenceRequired}`;
+  });
+  return ChapterAuthorAdjustmentCandidateSchema.parse({
+    artifactKind: 'mission',
+    title: '调整后的本章任务',
+    markdown: missionCandidateMarkdown([
+      ['本章目的', [mission.chapterFunction]],
+      ['必须完成', mission.requiredObjectives.map(({ text }) => text)],
+      [
+        '推进的悬念与承诺',
+        [...advancedDebts, ...mission.debtsToIntroduce.map(({ promise }) => promise)]
+      ],
+      ['人物变化', characterDeltas],
+      ['本章人物', participants],
+      ['读者会知道', mission.readerInformationDelta.newKnowledge],
+      ['读者会产生的猜测', mission.readerInformationDelta.newSuspicions],
+      ['读者会继续追问', mission.readerInformationDelta.questionsToMaintain],
+      ['本章会回答的问题', mission.readerInformationDelta.questionsToAnswer],
+      ['本章不能做', mission.forbiddenMoves],
+      ['情绪节奏', mission.targetEmotionalCurve],
+      [
+        '目标字数',
+        mission.targetWordCount === undefined
+          ? []
+          : [`${mission.targetWordCount} 字`]
+      ]
+    ])
+  });
+}
+
+function missionCandidateMarkdown(sections: Array<[string, string[]]>): string {
+  return sections.flatMap(([title, rows]) => [
+    `## ${title}`,
+    '',
+    rows.length > 0 ? rows.map((row) => `- ${row}`).join('\n') : '暂无',
+    ''
+  ]).join('\n');
+}
+
+function summarizeMissionForPlan(mission: ChapterMission): string {
+  const summary = {
+    chapterNumber: mission.chapterNumber,
+    chapterFunction: clipText(mission.chapterFunction, 500),
+    objectives: mission.requiredObjectives.slice(0, 8).map((objective) => ({
+      text: clipText(objective.text, 200),
+      type: objective.type,
+      priority: objective.priority
+    })),
+    debtsToPayOrAdvance: boundedStrings(mission.debtsToPayOrAdvance, 10, 100),
+    debtsToIntroduce: mission.debtsToIntroduce.slice(0, 5).map((debt) => ({
+      type: clipText(debt.type, 60),
+      promise: clipText(debt.promise, 200)
+    })),
+    participatingCharacterIds: boundedStrings(
+      mission.participatingCharacterIds,
+      12,
+      100
+    ),
+    charactersToIntroduce: mission.charactersToIntroduce.slice(0, 5).map(
+      (character) => ({
+        characterId: clipText(character.characterId, 100),
+        name: clipText(character.name, 80),
+        role: clipText(character.role, 80)
+      })
+    ),
+    characterDeltas: mission.characterDeltas.slice(0, 5).map((delta) => ({
+      characterId: clipText(delta.characterId, 100),
+      from: clipText(delta.from, 120),
+      to: clipText(delta.to, 120),
+      evidenceRequired: clipText(delta.evidenceRequired, 200)
+    })),
+    readerInformationDelta: {
+      newKnowledge: boundedStrings(
+        mission.readerInformationDelta.newKnowledge,
+        4,
+        160
+      ),
+      newSuspicions: boundedStrings(
+        mission.readerInformationDelta.newSuspicions,
+        4,
+        160
+      ),
+      questionsToMaintain: boundedStrings(
+        mission.readerInformationDelta.questionsToMaintain,
+        4,
+        160
+      ),
+      questionsToAnswer: boundedStrings(
+        mission.readerInformationDelta.questionsToAnswer,
+        4,
+        160
+      )
+    },
+    forbiddenMoves: boundedStrings(mission.forbiddenMoves, 6, 160),
+    targetEmotionalCurve: boundedStrings(mission.targetEmotionalCurve, 6, 80),
+    targetWordCount: mission.targetWordCount ?? null
+  };
+  const serialized = JSON.stringify(summary, null, 2);
+  if (serialized.length <= MAX_MISSION_PLAN_CONTEXT_CHARACTERS) {
+    return serialized;
+  }
+  return JSON.stringify({
+    chapterNumber: mission.chapterNumber,
+    chapterFunction: clipText(mission.chapterFunction, 200),
+    objectives: mission.requiredObjectives.slice(0, 3).map((objective) => ({
+      text: clipText(objective.text, 100),
+      type: objective.type,
+      priority: objective.priority
+    })),
+    forbiddenMoves: boundedStrings(mission.forbiddenMoves, 3, 100),
+    targetEmotionalCurve: boundedStrings(mission.targetEmotionalCurve, 3, 80),
+    targetWordCount: mission.targetWordCount ?? null
+  }, null, 2);
+}
+
+function boundedStrings(
+  values: string[],
+  maxItems: number,
+  maxCharacters: number
+): string[] {
+  return values.slice(0, maxItems).map((value) => clipText(value, maxCharacters));
+}
+
+function clipText(value: string, maxCharacters: number): string {
+  return value.slice(0, maxCharacters);
+}
+
+function isAuthorFacingText(value: string): boolean {
+  return !(
+    /(?:^|[\s([{"'`=:])\/(?!\/)[^\s<>{}\[\]]+/u.test(value)
+    || /\b(?:author_revision|candidate|chapter|character|char|debt|event|mission|objective|obj|plan|revision|run|scene|task)_[A-Za-z0-9][A-Za-z0-9_-]*\b/iu.test(value)
+    || /\b[a-f0-9]{64}\b/iu.test(value)
+    || /\b[A-Za-z0-9_.-]+\.schema(?:\.json)?\b/iu.test(value)
+    || /\b(?:auth|authorization|candidateId|profile|provider|runId|sourceHash|taskId)\s*[:=]/iu.test(value)
+  );
 }
 
 function validateInput(input: ChapterAuthorAdjustmentInput): void {

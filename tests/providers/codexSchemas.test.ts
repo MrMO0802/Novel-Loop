@@ -43,13 +43,32 @@ describe('Codex chapter adjustment schemas', () => {
     });
 
     expect(result).toMatchObject({
+      id: 'mission_ch001',
       chapterNumber: 1,
       chapterFunction: '把开场提前到事故现场。',
+      requiredObjectives: [{
+        id: 'obj_001',
+        text: '让林澈核对重复事故。',
+        type: 'character',
+        priority: 'must'
+      }],
       participatingCharacterIds: ['char_lincheng']
     });
     expect(() => normalizeMissionAdjustment({
       ...missionOutput(),
       extra: true
+    }, {
+      projectId: 'adjustment',
+      chapterNumber: 1
+    })).toThrow();
+    const { targetEmotionalCurve: _missing, ...incomplete } = missionOutput();
+    expect(() => normalizeMissionAdjustment(incomplete, {
+      projectId: 'adjustment',
+      chapterNumber: 1
+    })).toThrow();
+    expect(() => normalizeMissionAdjustment({
+      ...missionOutput(),
+      chapterNumber: 2
     }, {
       projectId: 'adjustment',
       chapterNumber: 1
@@ -83,11 +102,21 @@ describe('Codex chapter adjustment schemas', () => {
 
 function missionOutput() {
   return {
+    id: 'mission_ch001',
     chapterNumber: 1,
     chapterFunction: '把开场提前到事故现场。',
-    objectives: ['让林澈核对重复事故。'],
+    requiredObjectives: [{
+      id: 'obj_001',
+      text: '让林澈核对重复事故。',
+      type: 'character',
+      priority: 'must'
+    }],
     debtsToPayOrAdvance: ['debt_0001'],
-    debtsToIntroduce: [],
+    debtsToIntroduce: [{
+      type: 'mystery',
+      promise: '事故记录会在午夜被改写。',
+      importance: 8
+    }],
     participatingCharacterIds: ['char_lincheng'],
     charactersToIntroduce: [],
     characterDeltas: [{
@@ -96,8 +125,14 @@ function missionOutput() {
       to: '主动核对事故',
       evidenceRequired: '他保存两份互相冲突的记录。'
     }],
-    readerKnowledge: ['事故在同一时间重复。'],
-    readerQuestions: ['是谁改写事故记录？'],
-    forbiddenMoves: ['不要新增人物。']
+    readerInformationDelta: {
+      newKnowledge: ['事故在同一时间重复。'],
+      newSuspicions: ['记录可能被同一人改写。'],
+      questionsToMaintain: ['是谁改写事故记录？'],
+      questionsToAnswer: ['事故是否真实发生？']
+    },
+    forbiddenMoves: ['不要新增人物。'],
+    targetEmotionalCurve: ['警觉', '紧迫'],
+    targetWordCount: 3_500
   };
 }

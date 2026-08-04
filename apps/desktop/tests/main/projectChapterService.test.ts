@@ -145,6 +145,7 @@ interface DeferredAdjustment {
     authorInstruction: string;
     expectedSourceHash: string;
     shouldStop(): boolean;
+    onCommitPoint(): void;
     onStage(stage: 'requesting_adjustment' | 'validating_adjustment' | 'ready_for_review'): void;
   };
   kind: 'mission' | 'plan';
@@ -299,6 +300,12 @@ class DeferredChapterGateway implements ChapterEngineGateway {
     stage: 'requesting_adjustment' | 'validating_adjustment' | 'ready_for_review'
   ): void {
     this.adjustments[index]?.input.onStage(stage);
+  }
+
+  commitAdjustment(index: number): void {
+    const adjustment = this.adjustments[index];
+    if (adjustment === undefined) throw new Error(`Expected adjustment ${index}.`);
+    adjustment.input.onCommitPoint();
   }
 
   succeedAdjustment(index: number): void {
@@ -892,6 +899,117 @@ describe('ProjectChapterService', () => {
         canRetry: true
       });
       expect(cancelled.resultRevisionToken).toBeUndefined();
+    });
+  });
+
+  test('coalesces only an identical active adjustment request', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const request = {
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    };
+
+    const first = await service.adjustMission(request);
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+    const identicalRetry = await service.adjustMission(request);
+    const differentRequest = await service.adjustMission({
+      ...request,
+      authorInstruction: '保留节奏，只修正人物。'
+    });
+
+    expect(identicalRetry.taskId).toBe(first.taskId);
+    expect(differentRequest).toMatchObject({
+      kind: 'mission_adjustment',
+      status: 'failed',
+      error: { kind: 'generation_busy' }
+    });
+    expect(differentRequest.taskId).not.toBe(first.taskId);
+    expect(gateway.adjustments).toHaveLength(1);
+
+    gateway.failAdjustment(0, withCode(
+      'CHAPTER_ADJUSTMENT_CANCELLED',
+      'test cleanup'
+    ));
+  });
+
+  test('cancels a late gateway result when stop was requested before commit', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    await service.cancel(task.taskId);
+    gateway.succeedAdjustment(0);
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'cancelled',
+        canRetry: true
+      });
+    });
+    const cancelled = await service.get(task.taskId);
+    expect(cancelled.resultRevisionToken).toBeUndefined();
+    expect(cancelled.resultCandidate).toBeUndefined();
+  });
+
+  test('makes the tiny adjustment commit section non-cancellable', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    gateway.commitAdjustment(0);
+    await expect(service.cancel(task.taskId)).resolves.toMatchObject({
+      status: 'running',
+      canCancel: false
+    });
+    expect(gateway.adjustments[0]!.input.shouldStop()).toBe(false);
+    gateway.succeedAdjustment(0);
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'succeeded',
+        canCancel: false
+      });
+    });
+  });
+
+  test('maps an atomic author revision source race to stale chapter', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    gateway.failAdjustment(0, withCode(
+      'AUTHOR_REVISION_SOURCE_STALE',
+      '/private/project changed'
+    ));
+
+    await eventually(async () => {
+      const failed = await service.get(task.taskId);
+      expect(failed).toMatchObject({
+        status: 'failed',
+        error: { kind: 'stale_chapter' }
+      });
+      expect(failed.error?.message).not.toContain('/private/project');
     });
   });
 

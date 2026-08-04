@@ -354,6 +354,14 @@ describe('chapter plan review', () => {
     });
     fireEvent.click(screen.getByRole('button', { name: '开始调整' }));
     expect(await screen.findByText('正在请求 AI 调整')).toBeVisible();
+    expect(screen.getByRole('button', {
+      name: '让 AI 调整本章任务'
+    })).toBeDisabled();
+    for (const trigger of screen.getAllByRole('button', {
+      name: '让 AI 调整此方向'
+    })) {
+      expect(trigger).toBeDisabled();
+    }
     fireEvent.click(screen.getByRole('button', { name: '取消调整' }));
 
     await waitFor(() => expect(api.chapter.cancel).toHaveBeenCalledWith({

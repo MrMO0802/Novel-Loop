@@ -44,6 +44,7 @@ type AdjustmentState =
     artifactKind: 'mission';
     autoStart?: boolean;
     initialInstruction?: string;
+    requestMode?: 'manual' | 'participant_repair';
   }
   | {
     artifactKind: 'plan';
@@ -69,6 +70,7 @@ export function ChapterPlanReview({
   project
 }: ChapterPlanReviewProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
+  const suppressInitialHeadingFocus = useRef(initialEditor === 'mission');
   const confirmationHeadingRef = useRef<HTMLHeadingElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmationWasOpen = useRef(false);
@@ -119,7 +121,9 @@ export function ChapterPlanReview({
   }, [initialEditor, project.projectKey]);
 
   useEffect(() => {
-    headingRef.current?.focus();
+    if (!suppressInitialHeadingFocus.current) {
+      headingRef.current?.focus();
+    }
   }, []);
 
   useEffect(() => {
@@ -263,7 +267,8 @@ export function ChapterPlanReview({
                     setAdjustment({
                       artifactKind: 'mission',
                       autoStart: true,
-                      initialInstruction: PARTICIPANT_REPAIR_INSTRUCTION
+                      initialInstruction: PARTICIPANT_REPAIR_INSTRUCTION,
+                      requestMode: 'participant_repair'
                     });
                   }}
                   type="button"
@@ -278,6 +283,7 @@ export function ChapterPlanReview({
         {available && (
           <>
             <MissionReview
+              disabled={adjustment !== null}
               mission={available.mission}
               onEdit={() => {
                 setAuthoringIssue(null);
@@ -294,6 +300,7 @@ export function ChapterPlanReview({
             />
 
             <ChapterDirectionChooser
+              disabled={adjustment !== null}
               directions={available.directions}
               onAdjust={(direction, authorTitle, trigger) => {
                 adjustmentTriggerRef.current = trigger;
@@ -339,6 +346,11 @@ export function ChapterPlanReview({
             {adjustment && (
               <ChapterAdjustmentPanel
                 artifactKind={adjustment.artifactKind}
+                key={`${available.reviewToken}:${adjustment.artifactKind}:${
+                  adjustment.artifactKind === 'plan'
+                    ? adjustment.direction.optionToken
+                    : adjustment.requestMode ?? 'manual'
+                }`}
                 {...(adjustment.artifactKind === 'mission'
                   ? {
                     autoStart: adjustment.autoStart ?? false,
@@ -427,11 +439,13 @@ export function ChapterPlanReview({
 }
 
 function MissionReview({
+  disabled,
   mission,
   onAdjust,
   onEdit,
   title
 }: {
+  disabled: boolean;
   mission: AvailablePlan['mission'];
   onAdjust: (trigger: HTMLButtonElement) => void;
   onEdit: () => void;
@@ -450,6 +464,7 @@ function MissionReview({
         <div className="nl-chapter-section-heading__actions">
           <button
             className="nl-secondary-action"
+            disabled={disabled}
             onClick={onEdit}
             type="button"
           >
@@ -458,6 +473,7 @@ function MissionReview({
           </button>
           <button
             className="nl-secondary-action"
+            disabled={disabled}
             onClick={(event) => onAdjust(event.currentTarget)}
             type="button"
           >

@@ -168,7 +168,7 @@ describe('chapter participant repair', () => {
 
     expect(screen.getByRole('heading', {
       name: '审阅第 1 章方向'
-    })).toHaveFocus();
+    })).not.toHaveFocus();
     await act(async () => repairRead.resolve(noParticipantsPlan));
     const editorHeading = await screen.findByRole('heading', {
       name: '编辑本章任务'

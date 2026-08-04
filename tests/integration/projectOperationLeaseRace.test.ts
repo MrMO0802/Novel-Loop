@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -18,7 +18,7 @@ const takeoverRace = vi.hoisted(() => {
     enterFirst,
     firstReleased,
     releaseFirst,
-    claimPath: '',
+    lockPath: '',
     matchingCalls: 0
   };
 });
@@ -27,12 +27,14 @@ vi.mock('node:fs/promises', async (importOriginal) => {
   const original = await importOriginal<typeof import('node:fs/promises')>();
   return {
     ...original,
-    writeFile: async (...args: Parameters<typeof original.writeFile>) => {
-      const [filePath] = args;
+    rename: async (...args: Parameters<typeof original.rename>) => {
+      const [oldPath, newPath] = args;
       if (
         takeoverRace.enabled
-        && typeof filePath === 'string'
-        && path.resolve(filePath) === takeoverRace.claimPath
+        && typeof oldPath === 'string'
+        && typeof newPath === 'string'
+        && path.resolve(oldPath) === takeoverRace.lockPath
+        && newPath.includes('.stale-')
       ) {
         takeoverRace.matchingCalls += 1;
         if (takeoverRace.matchingCalls === 1) {
@@ -40,7 +42,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
           await takeoverRace.firstReleased;
         }
       }
-      return original.writeFile(...args);
+      return original.rename(...args);
     }
   };
 });
@@ -60,42 +62,41 @@ afterEach(async () => {
 });
 
 describe('project operation lease stale takeover', () => {
-  test('two reclaimers cannot remove a replacement live lock', async () => {
+  test('a delayed live reclaimer keeps a second owner from stealing its claim', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-lease-race-'));
     const lockPath = path.join(root, PROJECT_OPERATION_LOCK_NAME);
-    await mkdir(lockPath);
-    await writeFile(path.join(lockPath, 'owner.json'), `${JSON.stringify({
-      token: '22222222-2222-4222-8222-222222222222',
-      pid: 999_999_999,
-      processStartIdentity: 'linux-proc-start:1',
-      acquiredAt: '2026-08-04T01:00:00.000Z'
-    })}\n`, 'utf8');
-    takeoverRace.claimPath = path.resolve(lockPath, 'transition-claim.json');
+    await writeFile(lockPath, '{"invalid":"dead-owner"}\n', { mode: 0o600 });
+    const old = new Date('2020-01-01T00:00:00.000Z');
+    await utimes(lockPath, old, old);
+    takeoverRace.lockPath = path.resolve(lockPath);
     takeoverRace.enabled = true;
 
     const firstPromise = settleLease(acquireProjectOperationLease(root));
     await takeoverRace.firstEntered;
-    const secondPromise = settleLease(acquireProjectOperationLease(root));
-    const second = await withTimeout(secondPromise, 2_000);
-    expect(second.outcome).toBe('acquired');
-    const liveOwnerBefore = await readFile(path.join(lockPath, 'owner.json'));
+    const claim = JSON.parse(await readFile(`${lockPath}.transition-claim`, 'utf8')) as {
+      claimant?: { pid?: unknown };
+    };
+    expect(claim.claimant?.pid).toBe(process.pid);
+
+    const second = await withTimeout(
+      settleLease(acquireProjectOperationLease(root)),
+      2_000
+    );
+    expect(second.outcome).toBe('rejected');
 
     takeoverRace.releaseFirst();
     const first = await withTimeout(firstPromise, 2_000);
-    const leases = [first, second].flatMap((result) => (
-      result.outcome === 'acquired' ? [result.lease] : []
-    ));
-
-    expect(leases).toHaveLength(1);
-    expect(first.outcome).toBe('rejected');
-    expect(await readFile(path.join(lockPath, 'owner.json'))).toEqual(liveOwnerBefore);
-    const currentOwner = JSON.parse(
-      await readFile(path.join(lockPath, 'owner.json'), 'utf8')
-    ) as { token?: unknown };
+    expect(first.outcome).toBe('acquired');
+    if (first.outcome !== 'acquired') throw first.error;
+    const currentOwner = JSON.parse(await readFile(lockPath, 'utf8')) as {
+      token?: unknown;
+      pid?: unknown;
+    };
     expect(typeof currentOwner.token).toBe('string');
+    expect(currentOwner.pid).toBe(process.pid);
     await expect(acquireProjectOperationLease(root))
       .rejects.toMatchObject({ code: 'PROJECT_OPERATION_LOCKED' });
-    await Promise.all(leases.map(async (lease) => lease.release()));
+    await first.lease.release();
   });
 });
 

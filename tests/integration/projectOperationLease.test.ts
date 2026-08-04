@@ -207,17 +207,19 @@ describe('project operation lease', () => {
     async () => {
       const first = await acquireProjectOperationLease(paths.projectRoot);
       const lockPath = path.join(paths.projectRoot, PROJECT_OPERATION_LOCK_NAME);
-      const owner = JSON.parse(await readFile(path.join(lockPath, 'owner.json'), 'utf8')) as {
+      const owner = JSON.parse(await readFile(lockPath, 'utf8')) as {
         processStartIdentity?: unknown;
+        bootId?: unknown;
       };
       expect(owner.processStartIdentity).toMatch(/^linux-proc-start:\d+$/u);
+      expect(owner.bootId).toMatch(/^[0-9a-f-]{36}$/u);
       await first.release();
 
-      await mkdir(lockPath);
-      await writeFile(path.join(lockPath, 'owner.json'), `${JSON.stringify({
+      await writeFile(lockPath, `${JSON.stringify({
         token: '11111111-1111-4111-8111-111111111111',
         pid: process.pid,
         processStartIdentity: 'linux-proc-start:0',
+        bootId: owner.bootId,
         acquiredAt: new Date().toISOString()
       })}\n`, 'utf8');
 

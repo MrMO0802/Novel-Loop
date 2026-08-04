@@ -2,14 +2,12 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
-  mkdir,
+  link,
+  lstat,
   open,
   readFile,
   rename,
-  rm,
-  stat,
-  utimes,
-  writeFile
+  rm
 } from 'node:fs/promises';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -25,30 +23,48 @@ const PROJECT_OPERATION_OWNERLESS_GRACE_MS = 5 * 1000;
 const PROJECT_OPERATION_HEARTBEAT_MS = 30 * 1000;
 const STALE_RECOVERY_ATTEMPTS = 4;
 const LOCK_OWNER_FILE = 'owner.json';
-const LOCK_TRANSITION_CLAIM_FILE = 'transition-claim.json';
+const LOCK_TRANSITION_CLAIM_SUFFIX = '.transition-claim';
 const MAX_LOCK_METADATA_BYTES = 8 * 1024;
+const ABANDONED_BOOT_ID = '00000000-0000-4000-8000-000000000000';
 
 const ProjectOperationLeaseOwnerSchema = z.object({
   token: z.string().uuid(),
   pid: z.number().int().positive(),
   processStartIdentity: z.string().min(1).max(128),
+  bootId: z.string().min(1).max(128),
   acquiredAt: z.string().datetime({ offset: true })
 }).strict();
 
 const ProjectOperationLeaseClaimSchema = z.object({
-  claimantToken: z.string().uuid(),
+  claimant: ProjectOperationLeaseOwnerSchema,
   observedOwnerToken: z.string().uuid().nullable(),
-  observedDirectoryIdentity: z.string().min(1).max(128),
+  observedLockIdentity: z.string().min(1).max(128),
   claimedAt: z.string().datetime({ offset: true })
 }).strict();
 
 type ProjectOperationLeaseOwner = z.infer<typeof ProjectOperationLeaseOwnerSchema>;
+type ProjectOperationLeaseClaim = z.infer<typeof ProjectOperationLeaseClaimSchema>;
 
 interface LockObservation {
-  directoryIdentity: string;
+  lockIdentity: string;
+  kind: 'regular' | 'legacy_directory' | 'unsafe';
   mtimeMs: number;
   owner: ProjectOperationLeaseOwner | null;
   ownerText: string | null;
+}
+
+interface TransitionClaimObservation {
+  claimIdentity: string;
+  mtimeMs: number;
+  claim: ProjectOperationLeaseClaim | null;
+  claimText: string | null;
+}
+
+interface TransitionClaimHandle {
+  claimPath: string;
+  claimIdentity: string;
+  claim: ProjectOperationLeaseClaim;
+  release(): Promise<void>;
 }
 
 export interface ProjectOperationLease {
@@ -105,7 +121,7 @@ export async function acquireProjectOperationLease(
       return await publishOwnedLock(lockPath, owner);
     } catch (error) {
       if (!isLockExistsError(error)) throw error;
-      if (!(await recoverStaleLock(lockPath, token))) {
+      if (!(await recoverStaleLock(lockPath, owner))) {
         throw new AppError(busyError.code, busyError.message, 2);
       }
     }
@@ -278,75 +294,138 @@ async function publishOwnedLock(
   owner: ProjectOperationLeaseOwner
 ): Promise<ProjectOperationLease> {
   const candidatePath = `${lockPath}.candidate-${owner.token}`;
-  let published = false;
+  let candidateIdentity: string | null = null;
   try {
-    await mkdir(candidatePath, { mode: 0o700 });
-    await writeLeaseOwner(candidatePath, owner);
-    await rename(candidatePath, lockPath);
-    published = true;
+    candidateIdentity = await writeMetadataCandidate(candidatePath, owner);
+    await link(candidatePath, lockPath);
+    await syncParentDirectory(lockPath);
     const observation = await observeLock(lockPath);
-    if (!isDeepStrictEqual(observation.owner, owner)) {
+    if (
+      observation.kind !== 'regular'
+      || observation.lockIdentity !== candidateIdentity
+      || !isDeepStrictEqual(observation.owner, owner)
+    ) {
       throw new Error('Published project lease owner could not be verified.');
     }
-    return ownLock(lockPath, owner, observation.directoryIdentity);
+    await rm(candidatePath, { force: true });
+    await syncParentDirectory(candidatePath);
+    return ownLock(lockPath, owner, observation.lockIdentity);
   } catch (error) {
-    if (!published) await rm(candidatePath, { recursive: true, force: true });
+    if (candidateIdentity !== null) {
+      const removed = await removeExactPath(
+        lockPath,
+        candidateIdentity,
+        `publication-failed-${owner.token}`
+      ).catch(() => false);
+      if (!removed && await pathHasIdentity(lockPath, candidateIdentity)) {
+        await rewriteMetadataCandidate(candidatePath, candidateIdentity, {
+          ...owner,
+          bootId: ABANDONED_BOOT_ID
+        }).catch(() => undefined);
+      }
+    }
     throw error;
+  } finally {
+    await rm(candidatePath, { force: true }).catch(() => undefined);
   }
 }
 
 async function ownLock(
   lockPath: string,
   owner: ProjectOperationLeaseOwner,
-  directoryIdentity: string
+  lockIdentity: string
 ): Promise<ProjectOperationLease> {
   const heartbeat = setInterval(() => {
-    void heartbeatOwnedLock(lockPath, owner, directoryIdentity);
+    void heartbeatOwnedLock(lockPath, owner, lockIdentity);
   }, PROJECT_OPERATION_HEARTBEAT_MS);
   heartbeat.unref();
   let released = false;
+  let releaseAttempt: Promise<void> | null = null;
+
+  function finishRelease(): void {
+    if (released) return;
+    released = true;
+    clearInterval(heartbeat);
+  }
 
   return {
     async release(): Promise<void> {
       if (released) return;
-      released = true;
-      clearInterval(heartbeat);
-      try {
-        const observation = await observeLock(lockPath);
-        if (
-          observation.directoryIdentity !== directoryIdentity
-          || !isDeepStrictEqual(observation.owner, owner)
-        ) return;
-        const claimed = await claimLockTransition(lockPath, observation, owner.token);
-        if (!claimed) return;
-        const releasedPath = `${lockPath}.released-${owner.token}`;
-        await rename(lockPath, releasedPath);
-        if ((await observeLock(releasedPath)).directoryIdentity === directoryIdentity) {
-          await rm(releasedPath, { recursive: true, force: true });
+      if (releaseAttempt !== null) return releaseAttempt;
+      releaseAttempt = (async () => {
+        let observation: LockObservation;
+        try {
+          observation = await observeLock(lockPath);
+        } catch (error) {
+          if (hasCode(error, 'ENOENT')) {
+            finishRelease();
+            return;
+          }
+          throw error;
         }
-      } catch {
-        // Failed cleanup remains recoverable through stale-lock handling.
-      }
+        if (
+          observation.lockIdentity !== lockIdentity
+          || !isDeepStrictEqual(observation.owner, owner)
+        ) {
+          finishRelease();
+          return;
+        }
+        const claim = await claimLockTransition(lockPath, observation, owner);
+        if (claim === null) {
+          throw new AppError(
+            'PROJECT_OPERATION_LOCKED',
+            'Project operation lease release is already in transition.',
+            2
+          );
+        }
+        const releasedPath = `${lockPath}.released-${owner.token}-${randomUUID()}`;
+        try {
+          await rename(lockPath, releasedPath);
+          await syncParentDirectory(lockPath);
+          const moved = await observeLock(releasedPath);
+          if (moved.lockIdentity !== lockIdentity) {
+            await rename(releasedPath, lockPath).catch(() => undefined);
+            throw new Error('Released project lease identity changed during transition.');
+          }
+          await claim.release();
+          finishRelease();
+          await rm(releasedPath, { recursive: true, force: true });
+          await syncParentDirectory(releasedPath);
+        } catch (error) {
+          await claim.release().catch(() => undefined);
+          throw error;
+        }
+      })().finally(() => {
+        releaseAttempt = null;
+      });
+      return releaseAttempt;
     }
   };
 }
 
 async function recoverStaleLock(
   lockPath: string,
-  token: string
+  claimant: ProjectOperationLeaseOwner
 ): Promise<boolean> {
   try {
     const observation = await observeLock(lockPath);
     if (!(await mayRecoverLock(observation))) return false;
-    if (!(await claimLockTransition(lockPath, observation, token))) return false;
-    const stalePath = `${lockPath}.stale-${token}`;
-    await rename(lockPath, stalePath);
-    if ((await observeLock(stalePath)).directoryIdentity !== observation.directoryIdentity) {
-      await rename(stalePath, lockPath).catch(() => undefined);
-      return false;
+    const claim = await claimLockTransition(lockPath, observation, claimant);
+    if (claim === null) return false;
+    const stalePath = `${lockPath}.stale-${claimant.token}-${randomUUID()}`;
+    try {
+      await rename(lockPath, stalePath);
+      await syncParentDirectory(lockPath);
+      if ((await observeLock(stalePath)).lockIdentity !== observation.lockIdentity) {
+        await rename(stalePath, lockPath).catch(() => undefined);
+        return false;
+      }
+      await rm(stalePath, { recursive: true, force: true });
+      await syncParentDirectory(stalePath);
+      return true;
+    } finally {
+      await claim.release().catch(() => undefined);
     }
-    await rm(stalePath, { recursive: true, force: true });
-    return true;
   } catch (error) {
     if (hasCode(error, 'ENOENT')) return true;
     return false;
@@ -354,81 +433,124 @@ async function recoverStaleLock(
 }
 
 async function createLeaseOwner(token: string): Promise<ProjectOperationLeaseOwner> {
-  const processStartIdentity = await readProcessStartIdentity(process.pid)
-    ?? `runtime-start:${Math.max(0, Math.round(Date.now() - process.uptime() * 1000))}`;
+  const linuxBootId = await readLinuxBootId();
+  const linuxProcessStart = await readProcessStartIdentity(process.pid);
+  if (process.platform === 'linux' && (linuxBootId === null || linuxProcessStart === null)) {
+    throw new AppError(
+      'PROJECT_OPERATION_LOCK_UNAVAILABLE',
+      'The local process identity required for a safe project lease is unavailable.',
+      2
+    );
+  }
+  const runtimeStart = Math.max(0, Math.round(Date.now() - process.uptime() * 1000));
   return ProjectOperationLeaseOwnerSchema.parse({
     token,
     pid: process.pid,
-    processStartIdentity,
+    processStartIdentity: linuxProcessStart ?? `runtime-start:${runtimeStart}`,
+    bootId: linuxBootId ?? `runtime-boot:${runtimeStart}`,
     acquiredAt: new Date().toISOString()
   });
 }
 
-async function writeLeaseOwner(
+async function writeMetadataCandidate(
   candidatePath: string,
-  owner: ProjectOperationLeaseOwner
-): Promise<void> {
-  const ownerPath = path.join(candidatePath, LOCK_OWNER_FILE);
-  const ownerHandle = await open(
-    ownerPath,
+  value: ProjectOperationLeaseOwner | ProjectOperationLeaseClaim
+): Promise<string> {
+  const handle = await open(
+    candidatePath,
     constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW,
     0o600
   );
   try {
-    await ownerHandle.writeFile(`${JSON.stringify(owner)}\n`, { encoding: 'utf8' });
-    await ownerHandle.sync();
+    await handle.writeFile(`${JSON.stringify(value)}\n`, { encoding: 'utf8' });
+    await handle.sync();
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) throw new Error('Project lease metadata candidate is not regular.');
+    return nodeIdentity(metadata);
   } finally {
-    await ownerHandle.close();
-  }
-  const directoryHandle = await open(
-    candidatePath,
-    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
-  );
-  try {
-    await directoryHandle.sync();
-  } finally {
-    await directoryHandle.close();
+    await handle.close();
   }
 }
 
 async function heartbeatOwnedLock(
   lockPath: string,
   owner: ProjectOperationLeaseOwner,
-  directoryIdentity: string
+  lockIdentity: string
 ): Promise<void> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    const observation = await observeLock(lockPath);
+    handle = await open(
+      lockPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || nodeIdentity(metadata) !== lockIdentity) return;
+    const parsed = await readMetadataFromHandle(handle, ProjectOperationLeaseOwnerSchema);
     if (
-      observation.directoryIdentity !== directoryIdentity
-      || !isDeepStrictEqual(observation.owner, owner)
+      parsed.value === null
+      || !isDeepStrictEqual(parsed.value, owner)
     ) return;
-    const now = new Date();
-    await utimes(lockPath, now, now);
+    await handle.utimes(new Date(), new Date());
   } catch {
     // A lost lock is surfaced by the guarded project operation writes.
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
 }
 
 async function observeLock(lockPath: string): Promise<LockObservation> {
-  const lockStat = await stat(lockPath);
-  let ownerText: string | null = null;
-  let owner: ProjectOperationLeaseOwner | null = null;
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
-    ownerText = await readFile(path.join(lockPath, LOCK_OWNER_FILE), 'utf8');
-    if (Buffer.byteLength(ownerText, 'utf8') <= MAX_LOCK_METADATA_BYTES) {
-      const parsed: unknown = JSON.parse(ownerText);
-      const result = ProjectOperationLeaseOwnerSchema.safeParse(parsed);
-      owner = result.success ? result.data : null;
+    handle = await open(
+      lockPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    const lockStat = await handle.stat();
+    if (lockStat.isFile()) {
+      const parsed = await readMetadataFromHandle(handle, ProjectOperationLeaseOwnerSchema);
+      return {
+        lockIdentity: nodeIdentity(lockStat),
+        kind: 'regular',
+        mtimeMs: lockStat.mtimeMs,
+        owner: parsed.value,
+        ownerText: parsed.text
+      };
     }
-  } catch {
-    ownerText = null;
+    if (lockStat.isDirectory()) {
+      const parsed = process.platform === 'linux'
+        ? await readMetadataAtPath(
+            `/proc/self/fd/${handle.fd}/${LOCK_OWNER_FILE}`,
+            ProjectOperationLeaseOwnerSchema
+          )
+        : { text: null, value: null };
+      return {
+        lockIdentity: nodeIdentity(lockStat),
+        kind: 'legacy_directory',
+        mtimeMs: lockStat.mtimeMs,
+        owner: parsed.value,
+        ownerText: parsed.text
+      };
+    }
+    return {
+      lockIdentity: nodeIdentity(lockStat),
+      kind: 'unsafe',
+      mtimeMs: lockStat.mtimeMs,
+      owner: null,
+      ownerText: null
+    };
+  } catch (error) {
+    if (!hasCode(error, 'ELOOP')) throw error;
+    const metadata = await lstat(lockPath);
+    return {
+      lockIdentity: nodeIdentity(metadata),
+      kind: 'unsafe',
+      mtimeMs: metadata.mtimeMs,
+      owner: null,
+      ownerText: null
+    };
+  } finally {
+    await handle?.close().catch(() => undefined);
   }
-  return {
-    directoryIdentity: `${lockStat.dev}:${lockStat.ino}`,
-    mtimeMs: lockStat.mtimeMs,
-    owner,
-    ownerText
-  };
 }
 
 async function mayRecoverLock(observation: LockObservation): Promise<boolean> {
@@ -445,6 +567,11 @@ async function mayRecoverLock(observation: LockObservation): Promise<boolean> {
 async function isLockOwnerAlive(
   owner: ProjectOperationLeaseOwner
 ): Promise<boolean | null> {
+  if (process.platform === 'linux') {
+    const currentBootId = await readLinuxBootId();
+    if (currentBootId === null) return null;
+    if (currentBootId !== owner.bootId) return false;
+  }
   try {
     process.kill(owner.pid, 0);
   } catch (error) {
@@ -474,60 +601,313 @@ async function readProcessStartIdentity(pid: number): Promise<string | null> {
   }
 }
 
+async function readLinuxBootId(): Promise<string | null> {
+  if (process.platform !== 'linux') return null;
+  try {
+    const bootId = (await readFile('/proc/sys/kernel/random/boot_id', 'utf8')).trim();
+    return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu
+      .test(bootId)
+      ? bootId
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 async function claimLockTransition(
   lockPath: string,
   observation: LockObservation,
-  claimantToken: string
-): Promise<boolean> {
+  claimant: ProjectOperationLeaseOwner
+): Promise<TransitionClaimHandle | null> {
+  const claimPath = `${lockPath}${LOCK_TRANSITION_CLAIM_SUFFIX}`;
   const claim = ProjectOperationLeaseClaimSchema.parse({
-    claimantToken,
+    claimant,
     observedOwnerToken: observation.owner?.token ?? null,
-    observedDirectoryIdentity: observation.directoryIdentity,
+    observedLockIdentity: observation.lockIdentity,
     claimedAt: new Date().toISOString()
   });
-  const claimPath = path.join(lockPath, LOCK_TRANSITION_CLAIM_FILE);
+
+  for (let attempt = 0; attempt < STALE_RECOVERY_ATTEMPTS; attempt += 1) {
+    let handle: TransitionClaimHandle;
+    try {
+      handle = await publishTransitionClaim(claimPath, claim);
+    } catch (error) {
+      if (!isLockExistsError(error)) throw error;
+      if (await recoverStaleTransitionClaim(claimPath)) continue;
+      return null;
+    }
+    try {
+      const [afterClaim, observedClaim] = await Promise.all([
+        observeLock(lockPath),
+        observeTransitionClaim(claimPath)
+      ]);
+      if (
+        afterClaim.lockIdentity !== observation.lockIdentity
+        || afterClaim.ownerText !== observation.ownerText
+        || observedClaim === null
+        || observedClaim.claimIdentity !== handle.claimIdentity
+        || !isDeepStrictEqual(observedClaim.claim, claim)
+      ) {
+        await handle.release();
+        return null;
+      }
+      return handle;
+    } catch (error) {
+      await handle.release().catch(() => undefined);
+      if (hasCode(error, 'ENOENT')) return null;
+      throw error;
+    }
+  }
+  return null;
+}
+
+async function publishTransitionClaim(
+  claimPath: string,
+  claim: ProjectOperationLeaseClaim
+): Promise<TransitionClaimHandle> {
+  const candidatePath = `${claimPath}.candidate-${claim.claimant.token}-${randomUUID()}`;
+  let candidateIdentity: string | null = null;
   try {
-    await writeFile(claimPath, `${JSON.stringify(claim)}\n`, {
-      encoding: 'utf8',
-      flag: 'wx',
-      mode: 0o600
-    });
+    candidateIdentity = await writeMetadataCandidate(candidatePath, claim);
+    await link(candidatePath, claimPath);
+    await syncParentDirectory(claimPath);
+    const observed = await observeTransitionClaim(claimPath);
+    if (
+      observed === null
+      || observed.claimIdentity !== candidateIdentity
+      || !isDeepStrictEqual(observed.claim, claim)
+    ) {
+      throw new Error('Published project lease transition claim could not be verified.');
+    }
+    await rm(candidatePath, { force: true });
+    const publishedIdentity = candidateIdentity;
+    return {
+      claimPath,
+      claimIdentity: publishedIdentity,
+      claim,
+      async release(): Promise<void> {
+        await removeExactPath(
+          claimPath,
+          publishedIdentity,
+          `claim-finished-${claim.claimant.token}`
+        );
+      }
+    };
   } catch (error) {
-    if (hasCode(error, 'EEXIST') || hasCode(error, 'ENOENT')) return false;
+    if (candidateIdentity !== null) {
+      const removed = await removeExactPath(
+        claimPath,
+        candidateIdentity,
+        `claim-publication-failed-${claim.claimant.token}`
+      ).catch(() => false);
+      if (!removed && await pathHasIdentity(claimPath, candidateIdentity)) {
+        await rewriteMetadataCandidate(candidatePath, candidateIdentity, {
+          ...claim,
+          claimant: {
+            ...claim.claimant,
+            bootId: ABANDONED_BOOT_ID
+          }
+        }).catch(() => undefined);
+      }
+    }
+    throw error;
+  } finally {
+    await rm(candidatePath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function recoverStaleTransitionClaim(claimPath: string): Promise<boolean> {
+  const observation = await observeTransitionClaim(claimPath).catch((error: unknown) => {
+    if (hasCode(error, 'ENOENT')) return null;
+    throw error;
+  });
+  if (observation === null) return true;
+  const ageMs = Date.now() - (
+    observation.claim === null
+      ? observation.mtimeMs
+      : Date.parse(observation.claim.claimedAt)
+  );
+  if (observation.claim !== null) {
+    const alive = await isLockOwnerAlive(observation.claim.claimant);
+    if (alive === true) return false;
+    if (alive === null && ageMs <= PROJECT_OPERATION_LOCK_STALE_MS) return false;
+  } else if (ageMs <= PROJECT_OPERATION_OWNERLESS_GRACE_MS) {
+    return false;
+  }
+  const removed = await removeExactPath(
+    claimPath,
+    observation.claimIdentity,
+    `stale-claim-${randomUUID()}`
+  );
+  return removed || !(await pathExistsNoFollow(claimPath));
+}
+
+async function observeTransitionClaim(
+  claimPath: string
+): Promise<TransitionClaimObservation | null> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(
+      claimPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    const metadata = await handle.stat();
+    const parsed = metadata.isFile()
+      ? await readMetadataFromHandle(handle, ProjectOperationLeaseClaimSchema)
+      : { text: null, value: null };
+    return {
+      claimIdentity: nodeIdentity(metadata),
+      mtimeMs: metadata.mtimeMs,
+      claim: parsed.value,
+      claimText: parsed.text
+    };
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return null;
+    if (!hasCode(error, 'ELOOP')) throw error;
+    const metadata = await lstat(claimPath);
+    return {
+      claimIdentity: nodeIdentity(metadata),
+      mtimeMs: metadata.mtimeMs,
+      claim: null,
+      claimText: null
+    };
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function readMetadataAtPath<T>(
+  filePath: string,
+  schema: z.ZodType<T>
+): Promise<{ text: string | null; value: T | null }> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(
+      filePath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    const metadata = await handle.stat();
+    if (!metadata.isFile()) return { text: null, value: null };
+    return await readMetadataFromHandle(handle, schema);
+  } catch {
+    return { text: null, value: null };
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function readMetadataFromHandle<T>(
+  handle: Awaited<ReturnType<typeof open>>,
+  schema: z.ZodType<T>
+): Promise<{ text: string | null; value: T | null }> {
+  const metadata = await handle.stat();
+  if (!metadata.isFile() || metadata.size > MAX_LOCK_METADATA_BYTES) {
+    return { text: null, value: null };
+  }
+  const chunks: Buffer[] = [];
+  let total = 0;
+  while (total <= MAX_LOCK_METADATA_BYTES) {
+    const chunk = Buffer.alloc(Math.min(1024, MAX_LOCK_METADATA_BYTES + 1 - total));
+    const { bytesRead } = await handle.read(chunk, 0, chunk.length, total);
+    if (bytesRead === 0) break;
+    chunks.push(chunk.subarray(0, bytesRead));
+    total += bytesRead;
+  }
+  if (total > MAX_LOCK_METADATA_BYTES) return { text: null, value: null };
+  let text: string;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
+  } catch {
+    return { text: null, value: null };
+  }
+  try {
+    const parsed: unknown = JSON.parse(text);
+    const result = schema.safeParse(parsed);
+    return { text, value: result.success ? result.data : null };
+  } catch {
+    return { text, value: null };
+  }
+}
+
+async function removeExactPath(
+  sourcePath: string,
+  expectedIdentity: string,
+  reason: string
+): Promise<boolean> {
+  let metadata;
+  try {
+    metadata = await lstat(sourcePath);
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return false;
     throw error;
   }
+  if (nodeIdentity(metadata) !== expectedIdentity) return false;
+  const quarantinedPath = `${sourcePath}.${reason}-${randomUUID()}`;
+  await rename(sourcePath, quarantinedPath);
+  await syncParentDirectory(sourcePath);
+  const moved = await lstat(quarantinedPath);
+  if (nodeIdentity(moved) !== expectedIdentity) {
+    await rename(quarantinedPath, sourcePath).catch(() => undefined);
+    return false;
+  }
+  await rm(quarantinedPath, { recursive: true, force: true });
+  await syncParentDirectory(quarantinedPath);
+  return true;
+}
 
+async function rewriteMetadataCandidate(
+  candidatePath: string,
+  expectedIdentity: string,
+  value: ProjectOperationLeaseOwner | ProjectOperationLeaseClaim
+): Promise<void> {
+  const handle = await open(
+    candidatePath,
+    constants.O_WRONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
   try {
-    const afterClaim = await observeLock(lockPath);
-    if (
-      afterClaim.directoryIdentity !== observation.directoryIdentity
-      || afterClaim.ownerText !== observation.ownerText
-    ) {
-      await removeOwnTransitionClaim(claimPath, claimantToken);
-      return false;
-    }
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || nodeIdentity(metadata) !== expectedIdentity) return;
+    await handle.truncate(0);
+    await handle.writeFile(`${JSON.stringify(value)}\n`, { encoding: 'utf8' });
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function syncParentDirectory(filePath: string): Promise<void> {
+  const handle = await open(
+    path.dirname(filePath),
+    constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW
+  );
+  try {
+    await handle.sync();
+  } finally {
+    await handle.close();
+  }
+}
+
+async function pathExistsNoFollow(filePath: string): Promise<boolean> {
+  try {
+    await lstat(filePath);
     return true;
   } catch (error) {
-    await removeOwnTransitionClaim(claimPath, claimantToken);
     if (hasCode(error, 'ENOENT')) return false;
     throw error;
   }
 }
 
-async function removeOwnTransitionClaim(
-  claimPath: string,
-  claimantToken: string
-): Promise<void> {
+async function pathHasIdentity(filePath: string, expectedIdentity: string): Promise<boolean> {
   try {
-    const text = await readFile(claimPath, 'utf8');
-    if (Buffer.byteLength(text, 'utf8') > MAX_LOCK_METADATA_BYTES) return;
-    const parsed = ProjectOperationLeaseClaimSchema.parse(JSON.parse(text) as unknown);
-    if (parsed.claimantToken === claimantToken) {
-      await rm(claimPath, { force: true });
-    }
-  } catch {
-    // A mismatched claim belongs to another transition and must be left alone.
+    return nodeIdentity(await lstat(filePath)) === expectedIdentity;
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return false;
+    throw error;
   }
+}
+
+function nodeIdentity(metadata: { dev: number | bigint; ino: number | bigint }): string {
+  return `${metadata.dev}:${metadata.ino}`;
 }
 
 function isLockExistsError(error: unknown): boolean {

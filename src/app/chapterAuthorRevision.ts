@@ -36,6 +36,7 @@ const ADOPTION_JOURNAL_FILE_PATTERN = /^(mission|plan|draft)_adoption_journal_v(
 const REVISION_ID_PATTERN = /^author_revision_ch(\d{3})_(mission|plan|draft)_v([1-9]\d*)$/u;
 const ADOPTION_JOURNAL_ARCHIVE_DIR = 'adoption_journal_archive';
 const MAX_TERMINAL_ADOPTION_JOURNALS = 8;
+const MAX_CANONICAL_REVISION_VERSION = Number.MAX_SAFE_INTEGER - 1;
 
 const ARCHIVED_JSON_SCHEMAS = {
   'mission.json': ChapterMissionSchema,
@@ -826,9 +827,10 @@ async function nextRevisionVersion(
   artifactKind: AuthorRevisionArtifactKind
 ): Promise<number> {
   const entries = await readRevisionEntries(context, chapterNumber);
-  return entries
+  const highest = entries
     .filter((entry) => entry.record.artifactKind === artifactKind)
-    .reduce((highest, entry) => Math.max(highest, revisionVersion(entry.fileName)), 0) + 1;
+    .reduce((current, entry) => Math.max(current, revisionVersion(entry.fileName)), 0);
+  return nextCanonicalVersion(highest);
 }
 
 async function createPreparedAdoptionJournal(input: {
@@ -887,12 +889,14 @@ async function nextAdoptionJournalVersion(
     ...await store.list(revisionDir),
     ...(await store.exists(archiveDir) ? await store.list(archiveDir) : [])
   ];
-  return fileNames.reduce((highest, fileName) => {
+  const highest = fileNames.reduce((current, fileName) => {
     const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
-    return match?.[1] === label
-      ? Math.max(highest, Number(match[2]))
-      : highest;
-  }, 0) + 1;
+    const version = match?.[1] === label
+      ? parseCanonicalVersion(match[2])
+      : null;
+    return version === null ? current : Math.max(current, version);
+  }, 0);
+  return nextCanonicalVersion(highest);
 }
 
 async function recoverPreparedAdoptionJournals(
@@ -909,6 +913,8 @@ async function recoverPreparedAdoptionJournals(
   for (const fileName of await context.store.list(revisionDir)) {
     const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
     if (match === null) continue;
+    const version = parseCanonicalVersion(match[2]);
+    if (version === null) continue;
     const absolutePath = path.join(revisionDir, fileName);
     const record = await context.store.readJson(
       absolutePath,
@@ -919,7 +925,7 @@ async function recoverPreparedAdoptionJournals(
       absolutePath,
       fileName,
       record,
-      version: Number(match[2])
+      version
     });
   }
 
@@ -1073,6 +1079,11 @@ async function archiveTerminalAdoptionJournal(
   if (journal.state === 'prepared') {
     throw recoveryFailed('A prepared adoption journal cannot be archived.');
   }
+  await assertJournalRecordsMatch(
+    context,
+    journal,
+    journal.state === 'committed' ? 'intended' : 'before'
+  );
   const revisionDir = context.paths.chapterArtifact(
     journal.chapterNumber,
     'author_revisions'
@@ -1113,9 +1124,10 @@ async function pruneTerminalAdoptionJournals(
   const terminal = (await store.list(archiveDir))
     .flatMap((fileName) => {
       const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
-      return match === null
+      const version = match === null ? null : parseCanonicalVersion(match[2]);
+      return version === null
         ? []
-        : [{ fileName, version: Number(match[2]) }];
+        : [{ fileName, version }];
     })
     .sort((left, right) => right.version - left.version);
   for (const entry of terminal.slice(MAX_TERMINAL_ADOPTION_JOURNALS)) {
@@ -1132,6 +1144,7 @@ function validateAdoptionJournalBinding(
   const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
   const label = match?.[1];
   const version = match?.[2];
+  const parsedVersion = parseCanonicalVersion(version);
   const expectedLabel = revisionArtifactLabel(journal.artifactKind);
   const expectedId = `author_adoption_ch${String(chapterNumber).padStart(3, '0')}_${expectedLabel}_v${version ?? ''}`;
   const targetIdentity = REVISION_ID_PATTERN.exec(journal.targetRevisionId);
@@ -1145,6 +1158,7 @@ function validateAdoptionJournalBinding(
   });
   if (
     label !== expectedLabel
+    || parsedVersion === null
     || journal.journalId !== expectedId
     || journal.projectId !== context.paths.projectId
     || journal.chapterNumber !== chapterNumber
@@ -1166,10 +1180,12 @@ function canonicalMutationRecordPath(
   mutation: AuthorRevisionAdoptionMutation
 ): string {
   const identity = REVISION_ID_PATTERN.exec(mutation.beforeRecord.revisionId);
+  const mutationVersion = parseCanonicalVersion(identity?.[3]);
   const expectedLabel = revisionArtifactLabel(journal.artifactKind);
   const chapterLabel = String(journal.chapterNumber).padStart(3, '0');
   if (
     identity === null
+    || mutationVersion === null
     || identity[1] !== chapterLabel
     || identity[2] !== expectedLabel
     || mutation.intendedRecord.revisionId !== mutation.beforeRecord.revisionId
@@ -1181,7 +1197,7 @@ function canonicalMutationRecordPath(
     context.paths.chapterArtifact(
       journal.chapterNumber,
       'author_revisions',
-      `${expectedLabel}_revision_v${identity[3]}.json`
+      `${expectedLabel}_revision_v${mutationVersion}.json`
     )
   );
   const expectedWorkingCopyPath = expectedRecordPath.replace(/\.json$/u, '.md');
@@ -1231,10 +1247,11 @@ async function readRevisionEntries(
   for (const fileName of await context.store.list(revisionDir)) {
     const match = REVISION_FILE_PATTERN.exec(fileName);
     if (match === null) continue;
+    const version = parseCanonicalVersion(match[2]);
+    if (version === null) continue;
     const absoluteRecordPath = path.join(revisionDir, fileName);
     const record = await context.store.readJson(absoluteRecordPath, AuthorRevisionRecordSchema);
     const label = match[1]!;
-    const version = Number(match[2]);
     const expectedKind = artifactKindForLabel(label);
     const expectedRevisionId = `author_revision_ch${String(chapterNumber).padStart(3, '0')}_${label}_v${version}`;
     const expectedMarkdownPath = toProjectRelativePath(
@@ -1444,8 +1461,32 @@ function artifactKindForLabel(label: string): AuthorRevisionArtifactKind {
 
 function revisionVersion(fileName: string): number {
   const match = REVISION_FILE_PATTERN.exec(fileName);
-  if (match === null) throw new AppError('AUTHOR_REVISION_RECORD_INVALID', `Invalid revision file name: ${fileName}`, 2);
-  return Number(match[2]);
+  const version = match === null ? null : parseCanonicalVersion(match[2]);
+  if (version === null) {
+    throw new AppError('AUTHOR_REVISION_RECORD_INVALID', `Invalid revision file name: ${fileName}`, 2);
+  }
+  return version;
+}
+
+function parseCanonicalVersion(value: string | undefined): number | null {
+  if (value === undefined || !/^[1-9]\d{0,15}$/u.test(value)) return null;
+  const version = Number(value);
+  return Number.isSafeInteger(version)
+    && version <= MAX_CANONICAL_REVISION_VERSION
+    && String(version) === value
+    ? version
+    : null;
+}
+
+function nextCanonicalVersion(highest: number): number {
+  if (!Number.isSafeInteger(highest) || highest >= MAX_CANONICAL_REVISION_VERSION) {
+    throw new AppError(
+      'AUTHOR_REVISION_VERSION_EXHAUSTED',
+      'Author revision version range is exhausted.',
+      2
+    );
+  }
+  return highest + 1;
 }
 
 function archiveNodeForPath(editedNode: AuthorInvalidatedNode, allowedPath: string): AuthorInvalidatedNode {

@@ -28,9 +28,11 @@ export function ChapterDraftEditor({
   onAdopted
 }: ChapterDraftEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const recoveryActionRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const saveTail = useRef<Promise<string | null>>(Promise.resolve(null));
   const editVersion = useRef(0);
+  const latestQueuedSaveVersion = useRef(-1);
   const revisionTokenRef = useRef<string | null>(
     workingCopy.recoveryAvailable ? null : workingCopy.revisionToken
   );
@@ -63,9 +65,12 @@ export function ChapterDraftEditor({
     adoptionRecoveryRequired,
     dialog,
     markdown,
-    recoveryPending,
-    saveState
+    recoveryPending
   ]);
+
+  useEffect(() => {
+    if (adoptionRecoveryRequired) recoveryActionRef.current?.focus();
+  }, [adoptionRecoveryRequired]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -114,10 +119,14 @@ export function ChapterDraftEditor({
       || actionState !== 'idle'
       || dialog !== null
     ) return Promise.resolve(null);
-    const snapshot = markdown;
-    const version = editVersion.current;
+    return enqueueSave(markdown, editVersion.current);
+  }
+
+  function enqueueSave(snapshot: string, version: number): Promise<string | null> {
+    if (version <= latestQueuedSaveVersion.current) return saveTail.current;
+    latestQueuedSaveVersion.current = version;
     const queued = saveTail.current.catch(() => null).then(async () => {
-      setSaveState('saving');
+      if (version === editVersion.current) setSaveState('saving');
       try {
         const result = await window.novelLoop.chapter.saveDraftWorkingCopy({
           projectKey,
@@ -130,6 +139,9 @@ export function ChapterDraftEditor({
         }
         return result.revisionToken;
       } catch {
+        if (latestQueuedSaveVersion.current === version) {
+          latestQueuedSaveVersion.current = version - 1;
+        }
         if (version === editVersion.current) {
           setSaveState('unsaved');
           setActionError('编辑草稿暂时无法保存，请稍后重试。');
@@ -237,20 +249,7 @@ export function ChapterDraftEditor({
   }
 
   async function saveCurrentForAdoption(): Promise<string | null> {
-    const snapshot = markdown;
-    const version = editVersion.current;
-    const queued = saveTail.current.catch(() => null).then(async () => {
-      const result = await window.novelLoop.chapter.saveDraftWorkingCopy({
-        projectKey,
-        markdown: snapshot
-      });
-      if (version !== editVersion.current) return null;
-      updateRevisionToken(result.revisionToken);
-      setSaveState('saved');
-      return result.revisionToken;
-    });
-    saveTail.current = queued;
-    return queued.catch(() => null);
+    return enqueueSave(markdown, editVersion.current).catch(() => null);
   }
 
   function openDialog(next: Exclude<DialogKind, null>, opener: HTMLButtonElement): void {
@@ -309,6 +308,7 @@ export function ChapterDraftEditor({
         <div className="nl-draft-editor__recovery" role="alert">
           <p>采用过程需要恢复后才能继续编辑。</p>
           <button
+            ref={recoveryActionRef}
             type="button"
             onClick={() => { void reloadAfterAdoptionRecovery(); }}
           >

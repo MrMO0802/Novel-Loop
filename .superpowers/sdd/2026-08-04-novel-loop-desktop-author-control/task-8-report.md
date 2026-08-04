@@ -2,13 +2,14 @@
 
 ## Scope
 
-Completed Task 8 and reviewer fix rounds 1-4 for recoverable Chapter Draft
+Completed Task 8 and reviewer fix rounds 1-5 for recoverable Chapter Draft
 editing on `codex/novel-loop-desktop-prototype`.
 
 - Base implementation: `4763142de0844979bfcde85271271bd6a2ce0b46`
 - Fix round 1: `1486154474ee30ebb6bdf00847ea4a1f7050358e`
 - Fix round 2: `07cad6426fcb97c3a9867ad4f30f25f741061988`
 - Fix round 3: `4806191b669e351c56952e4af107c4d899efd1d0`
+- Fix round 5 base: `b5ea893f8055c22f29272238216d0ce0cf8922f2`
 
 The implementation remains inside the approved desktop boundary: no Story
 State or chapter-queue mutation, no diagnostics/final/canon-patch/commit work,
@@ -94,6 +95,41 @@ and no provider or renderer filesystem expansion.
   remounts the editor state. Recovery-required mode blocks autosave, Ctrl+S,
   Ctrl+Shift+P, edit/preview controls, discard, compare, and adoption until that
   reload succeeds.
+
+### Round 5 Save Generations And Recovery Protocol
+
+- Renderer autosave now uses explicit edit generations and one serialized save
+  queue. An older queued save cannot switch a newer edit to `saving`, cancel its
+  timer, or suppress its persistence. Manual and timed saves of the same
+  generation are deduplicated.
+- Project lease publication is now a complete regular metadata file published
+  with a same-filesystem hard link. The link is the atomic no-replace primitive;
+  an existing fresh owner cannot be replaced by `rename` behavior on Linux.
+- Lease and transition-claim identity includes PID, process-start identity, and
+  Linux boot ID. Missing required Linux identity fails closed, and a matching
+  PID/start identity from another boot is not considered live.
+- Transition claims are complete regular metadata files published by the same
+  no-replace protocol. A contender performs bounded no-follow reads, checks
+  claimant age and liveness, and takes over or removes only the exact observed
+  inode. A delayed live claimant cannot be stolen.
+- Failed lease release or stale takeover removes only its own claim and leaves
+  the lease heartbeat active and retryable. Post-publication verification
+  failure removes the exact published inode; if cleanup itself cannot rename
+  it, the private candidate is used to mark the orphan immediately reclaimable
+  rather than leaving a live-PID owner record.
+- Owner and claim metadata reads use descriptors with `O_NOFOLLOW` and
+  `O_NONBLOCK`, accept regular files only, enforce an 8 KiB cap, and decode UTF-8
+  fatally. Symlinks, FIFOs, oversized files, and invalid UTF-8 cannot block or
+  redirect recovery.
+- Before a terminal adoption journal is archived, every current mutation record
+  must match its terminal expectation: `committed` requires the intended value;
+  `recovered_rolled_back` requires the before value. A mixed or mismatched disk
+  state fails closed and retains the active journal.
+- Historical revision and journal filenames are parsed only as bounded canonical
+  decimal safe integers. Oversized values, exponent notation, leading zeros, and
+  exhausted future versions are ignored or rejected without collision.
+- Recovery-required mode moves focus to the recovery action while preserving
+  the existing modal keyboard and focus-restoration behavior.
 
 ### Working-Copy Storage
 
@@ -200,6 +236,43 @@ RED:
   terminal cleanup on the next read.
 
 The minimal production changes then made the same matrices GREEN.
+
+## Round 5 TDD Evidence
+
+The round-5 regressions were written and observed RED before redesigning the
+affected code:
+
+- The deferred autosave A/B/C test showed queued save B setting edit C to
+  `saving` and cancelling C's timer. A separate same-generation test observed
+  Ctrl+S and autosave issuing two writes, and the recovery-required focus test
+  left focus on the document body.
+- Both terminal-journal mismatch cases archived inconsistent active journals
+  instead of failing closed. Unsafe MAX_SAFE_INTEGER, oversized decimal, and
+  exponent-form history filenames also entered version selection or parsing.
+- The first lease safety matrix failed all `12` cases under the directory-lock
+  protocol, including Linux no-replace, dead-claim recovery, live delayed
+  claimants, boot mismatch, symlink, oversized, FIFO, and invalid UTF-8 cases.
+- Fault injection initially proved post-link verification failures could leave
+  a published orphan, release rename failure could stop ownership prematurely,
+  and stale-takeover failure could retain the transition claim. The cleanup
+  fallback test then observed the real boot ID remaining on an unremovable
+  live-PID orphan before the abandoned identity fallback was added.
+
+The final generation queue, regular-file publication protocol, exact-inode
+cleanup, and fail-closed journal/version validation make the same cases GREEN.
+
+## Round 5 Changed Files
+
+- `apps/desktop/src/renderer/src/features/chapter/ChapterDraftEditor.tsx`
+- `apps/desktop/tests/renderer/chapterDraftEditor.test.tsx`
+- `src/app/chapterAuthorRevision.ts`
+- `src/app/projectOperationLease.ts`
+- `tests/integration/desktopDraftAdoption.test.ts`
+- `tests/integration/projectOperationLease.test.ts`
+- `tests/integration/projectOperationLeaseRace.test.ts`
+- `tests/integration/projectOperationLeaseFaults.test.ts`
+- `tests/integration/projectOperationLeaseSafety.test.ts`
+- This Task 8 implementation report.
 
 ## Round 4 Changed Files
 
@@ -316,6 +389,21 @@ Final round-4 verification on 2026-08-05:
 - Desktop recovery service/editor/workspace focused matrix: `3` files, `91`
   tests passed, `0` failed.
 - Complete desktop suite with two workers: `36` files, `574` tests passed,
+  `0` failed.
+- `corepack pnpm build` passed.
+- `corepack pnpm --dir apps/desktop check` passed.
+- `corepack pnpm --dir apps/desktop build` passed.
+- `corepack pnpm check:diff` and `git diff --check` passed after the report
+  update.
+
+Final round-5 verification on 2026-08-05:
+
+- Root revision-schema, infrastructure, author-revision, invalidation, draft,
+  adoption, lease, race, and fault matrix: `12` files, `102` tests passed,
+  `0` failed.
+- Desktop service, contract, IPC, preload, working-copy, editor, and workspace
+  focused matrix: `7` files, `236` tests passed, `0` failed.
+- Complete desktop suite with two workers: `36` files, `576` tests passed,
   `0` failed.
 - `corepack pnpm build` passed.
 - `corepack pnpm --dir apps/desktop check` passed.

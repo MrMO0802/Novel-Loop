@@ -121,6 +121,73 @@ describe('ChapterDraftEditor', () => {
     }));
   });
 
+  test('persists a third edit when an older queued save starts after that edit', async () => {
+    vi.useFakeTimers();
+    const first = deferred<{ saveState: 'saved'; revisionToken: string }>();
+    const second = deferred<{ saveState: 'saved'; revisionToken: string }>();
+    const third = deferred<{ saveState: 'saved'; revisionToken: string }>();
+    const api = installApi();
+    api.saveDraftWorkingCopy
+      .mockImplementationOnce(() => first.promise)
+      .mockImplementationOnce(() => second.promise)
+      .mockImplementationOnce(() => third.promise);
+    render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{ recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null }} onAdopted={vi.fn()} />);
+
+    const textbox = screen.getByRole('textbox', { name: '章节正文' });
+    fireEvent.change(textbox, { target: { value: '# 第一章\n\nA' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    fireEvent.change(textbox, { target: { value: '# 第一章\n\nB' } });
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    fireEvent.change(textbox, { target: { value: '# 第一章\n\nC' } });
+    expect(screen.getByRole('status')).toHaveTextContent('尚未保存');
+
+    first.resolve({ saveState: 'saved', revisionToken: `chapter_revision_${'1'.repeat(48)}` });
+    await act(async () => { await Promise.resolve(); });
+    expect(api.saveDraftWorkingCopy).toHaveBeenNthCalledWith(2, {
+      projectKey: 'project_author_draft',
+      markdown: '# 第一章\n\nB'
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('尚未保存');
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    expect(api.saveDraftWorkingCopy).toHaveBeenCalledTimes(2);
+    second.resolve({ saveState: 'saved', revisionToken: `chapter_revision_${'2'.repeat(48)}` });
+    await act(async () => { await Promise.resolve(); });
+    expect(api.saveDraftWorkingCopy).toHaveBeenNthCalledWith(3, {
+      projectKey: 'project_author_draft',
+      markdown: '# 第一章\n\nC'
+    });
+    expect(screen.getByRole('status')).toHaveTextContent('正在保存');
+
+    third.resolve({ saveState: 'saved', revisionToken: `chapter_revision_${'3'.repeat(48)}` });
+    await act(async () => { await Promise.resolve(); });
+    expect(screen.getByRole('status')).toHaveTextContent('已自动保存');
+    fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
+    expect(api.adoptDraftRevision).toHaveBeenCalledWith(expect.objectContaining({
+      revisionToken: `chapter_revision_${'3'.repeat(48)}`
+    }));
+  });
+
+  test('deduplicates Ctrl+S and the pending autosave for the same edit generation', async () => {
+    vi.useFakeTimers();
+    const api = installApi();
+    render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{ recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null }} onAdopted={vi.fn()} />);
+
+    fireEvent.change(screen.getByRole('textbox', { name: '章节正文' }), {
+      target: { value: '# 第一章\n\n只保存一次。' }
+    });
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await act(async () => { await Promise.resolve(); });
+    expect(api.saveDraftWorkingCopy).toHaveBeenCalledTimes(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(750); });
+    expect(api.saveDraftWorkingCopy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('status')).toHaveTextContent('已自动保存');
+  });
+
   test('keeps stale recovery gated until durable discard succeeds', async () => {
     const discard = deferred<{ discarded: true }>();
     const api = installApi();
@@ -207,6 +274,7 @@ describe('ChapterDraftEditor', () => {
 
     expect(await screen.findByText('采用过程需要恢复后才能继续编辑。')).toBeVisible();
     expect(onAdopted).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '重新载入本章' })).toHaveFocus();
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0));
     });

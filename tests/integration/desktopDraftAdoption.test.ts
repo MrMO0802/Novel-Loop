@@ -651,6 +651,128 @@ describe('desktop draft adoption', () => {
       });
   }, 30_000);
 
+  test.each([
+    {
+      state: 'committed' as const,
+      recoveryReason: null,
+      expectedRecordState: 'intended' as const
+    },
+    {
+      state: 'recovered_rolled_back' as const,
+      recoveryReason: 'read_time_recovery' as const,
+      expectedRecordState: 'before' as const
+    }
+  ])(
+    'retains a $state terminal journal when current records do not all match $expectedRecordState',
+    async ({ state, recoveryReason }) => {
+      const store = new FileStore();
+      const second = await prepareSecondDraftRevision(store);
+      const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+      const firstPath = path.join(revisionDir, 'draft_revision_v1.json');
+      const firstBefore = await store.readJson(firstPath, AuthorRevisionRecordSchema);
+      const adoptedAt = '2026-08-05T01:00:00.000Z';
+      const firstIntended = AuthorRevisionRecordSchema.parse({
+        ...firstBefore,
+        state: 'superseded'
+      });
+      const secondIntended = AuthorRevisionRecordSchema.parse({
+        ...second.record,
+        state: 'adopted',
+        adoptedAt
+      });
+      await store.writeJson(firstPath, firstIntended, AuthorRevisionRecordSchema);
+      await store.writeJson(
+        paths.projectArtifact(second.relativeRecordPath),
+        second.record,
+        AuthorRevisionRecordSchema
+      );
+      const journalPath = path.join(revisionDir, 'draft_adoption_journal_v2.json');
+      const journal = AuthorRevisionAdoptionJournalSchema.parse({
+        schemaVersion: '1.0',
+        journalId: 'author_adoption_ch001_draft_v2',
+        projectId,
+        chapterNumber: 1,
+        artifactKind: 'draft',
+        targetRevisionId: second.record.revisionId,
+        invalidationReportPath: null,
+        state,
+        mutations: [{
+          recordPath: 'chapters/chapter_001/author_revisions/draft_revision_v1.json',
+          beforeRecord: firstBefore,
+          intendedRecord: firstIntended
+        }, {
+          recordPath: second.relativeRecordPath,
+          beforeRecord: second.record,
+          intendedRecord: secondIntended
+        }],
+        createdAt: adoptedAt,
+        updatedAt: adoptedAt,
+        recoveryReason,
+        storyStateMutated: false
+      });
+      await store.writeJson(journalPath, journal, AuthorRevisionAdoptionJournalSchema);
+
+      await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+        .rejects.toMatchObject({ code: 'AUTHOR_REVISION_RECOVERY_FAILED' });
+      await expect(store.exists(journalPath)).resolves.toBe(true);
+      await expect(store.exists(path.join(
+        revisionDir,
+        'adoption_journal_archive',
+        'draft_adoption_journal_v2.json'
+      ))).resolves.toBe(false);
+    },
+    30_000
+  );
+
+  test('ignores unsafe historical version filenames without blocking future draft adoption', async () => {
+    const store = new FileStore();
+    const current = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!current.available) throw new Error('Expected a generated draft.');
+    const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+    const archiveDir = path.join(revisionDir, 'adoption_journal_archive');
+    await store.ensureDir(archiveDir);
+    const unsafeNames = [
+      'draft_revision_v9007199254740991.json',
+      'draft_revision_v9007199254740992.json',
+      `draft_revision_v${'9'.repeat(128)}.json`,
+      'draft_revision_v1e3.json',
+      'draft_adoption_journal_v9007199254740991.json',
+      'draft_adoption_journal_v9007199254740992.json',
+      `draft_adoption_journal_v${'9'.repeat(128)}.json`,
+      'draft_adoption_journal_v1e3.json'
+    ];
+    const unsafePaths = unsafeNames.flatMap((fileName) => (
+      fileName.includes('_adoption_journal_')
+        ? [path.join(revisionDir, fileName), path.join(archiveDir, fileName)]
+        : [path.join(revisionDir, fileName)]
+    ));
+    for (const unsafePath of unsafePaths) {
+      await writeFile(unsafePath, `unsafe:${path.relative(revisionDir, unsafePath)}\n`, 'utf8');
+    }
+
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({ available: true, versionKind: 'generated' });
+    await adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${current.markdown}\n\n安全版本编号后的作者正文。\n`,
+      expectedSourceHash: current.sourceHash
+    }, store);
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        available: true,
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('安全版本编号后的作者正文。')
+      });
+    await expect(store.exists(path.join(
+      revisionDir,
+      'draft_revision_v1.json'
+    ))).resolves.toBe(true);
+    for (const unsafePath of unsafePaths) {
+      await expect(readFile(unsafePath, 'utf8'))
+        .resolves.toBe(`unsafe:${path.relative(revisionDir, unsafePath)}\n`);
+    }
+  }, 30_000);
+
   test('keeps a corrupt active nonterminal journal fail-closed', async () => {
     const store = new FileStore();
     const revisionDir = paths.chapterArtifact(1, 'author_revisions');

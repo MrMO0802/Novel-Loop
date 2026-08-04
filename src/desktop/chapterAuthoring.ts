@@ -369,7 +369,9 @@ export async function adoptDesktopChapterDraft(
         invalidationReportPath: relativeReportPath
       }, store);
     } catch (error) {
-      await store.removePath(reportPath).catch(() => undefined);
+      if (!hasErrorCode(error, 'AUTHOR_REVISION_ROLLBACK_FAILED')) {
+        await store.removePath(reportPath).catch(() => undefined);
+      }
       throw error;
     }
     return {
@@ -1594,6 +1596,13 @@ function normalizeRequiredText(value: string, label: string): string {
 
 function invalidMissionEdit(message: string): AppError {
   return new AppError('DESKTOP_CHAPTER_EDIT_INVALID', message, 2);
+}
+
+function hasErrorCode(error: unknown, code: string): boolean {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && error.code === code;
 }
 
 function sha256(value: string): string {

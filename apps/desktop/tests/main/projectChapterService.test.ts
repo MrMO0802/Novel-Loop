@@ -559,6 +559,68 @@ describe('ProjectChapterService', () => {
     }
   });
 
+  test('rejects an old token when the same generated markdown belongs to a different chapter', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-identity-'));
+    try {
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot);
+      const { gateway, service } = createService({ workingCopies });
+      gateway.draftReviews.set(projectRoot, draftReview);
+      const saved = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nChapter one author copy.\n'
+      });
+      gateway.draftReviews.set(projectRoot, {
+        ...draftReview,
+        chapterNumber: 2
+      });
+
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmAdoption: true
+      })).rejects.toMatchObject({ code: 'DRAFT_ADOPTION_STALE' });
+      expect(gateway.draftAdoptions).toHaveLength(0);
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('classifies an uncompensated adoption failure without exposing filesystem details', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-recovery-'));
+    try {
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot);
+      const { gateway, service } = createService({ workingCopies });
+      gateway.draftReviews.set(projectRoot, draftReview);
+      const saved = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nRecovery required.\n'
+      });
+      gateway.draftAdoptionError = Object.assign(
+        new Error(`/private/userData/working-copies/${projectKey}/draft.json`),
+        { code: 'AUTHOR_REVISION_ROLLBACK_FAILED' }
+      );
+
+      const failure = await service.adoptDraftRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmAdoption: true
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({ code: 'DRAFT_ADOPTION_RECOVERY_REQUIRED' });
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).not.toContain('/private/userData');
+      gateway.draftAdoptionError = undefined;
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmAdoption: true
+      })).rejects.toMatchObject({ code: 'DRAFT_ADOPTION_STALE' });
+      expect(gateway.draftAdoptionCalls).toBe(1);
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
   test('serializes draft adoption and discard without deleting a later save', async () => {
     const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-race-'));
     try {

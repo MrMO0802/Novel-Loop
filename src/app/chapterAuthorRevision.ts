@@ -339,7 +339,7 @@ export async function adoptAuthorRevision(
       invalidationReportPath: input.invalidationReportPath
         ?? target.record.invalidationReportPath
     });
-    const written: RevisionEntry[] = [];
+    const rollbackCandidates: RevisionEntry[] = [];
     try {
       for (const entry of revisions) {
         if (
@@ -347,24 +347,18 @@ export async function adoptAuthorRevision(
           && entry.record.artifactKind === target.record.artifactKind
           && entry.record.state === 'adopted'
         ) {
+          rollbackCandidates.push(entry);
           await store.writeJson(entry.absoluteRecordPath, {
             ...entry.record,
             state: 'superseded'
           }, AuthorRevisionRecordSchema);
-          written.push(entry);
         }
       }
+      rollbackCandidates.push(target);
       await store.writeJson(target.absoluteRecordPath, adopted, AuthorRevisionRecordSchema);
     } catch (error) {
       let rollbackFailed = false;
-      await store.writeJson(
-        target.absoluteRecordPath,
-        target.record,
-        AuthorRevisionRecordSchema
-      ).catch(() => {
-        rollbackFailed = true;
-      });
-      for (const entry of written.reverse()) {
+      for (const entry of rollbackCandidates.reverse()) {
         await store.writeJson(
           entry.absoluteRecordPath,
           entry.record,

@@ -28,10 +28,21 @@ import {
   EngineSystemReadinessService
 } from './services/EngineSystemReadinessService';
 import { installSessionPermissionDenial } from './sessionPermissionPolicy';
+import { installSingleInstancePolicy } from './singleInstancePolicy';
 import { SupportedDesktopPlatformSchema } from '../shared/systemContract';
 
 app.enableSandbox();
 
+const isPrimaryInstance = installSingleInstancePolicy({
+  requestLock: () => app.requestSingleInstanceLock(),
+  quit: () => app.quit(),
+  onSecondInstance: (listener) => {
+    app.on('second-instance', listener);
+  },
+  getWindows: () => BrowserWindow.getAllWindows()
+});
+
+if (isPrimaryInstance) {
 void app.whenReady().then(() => {
   const rendererTarget = selectRendererTarget({
     environmentUrl: process.env['ELECTRON_RENDERER_URL'],
@@ -150,3 +161,4 @@ app.on('window-all-closed', () => {
     app.quit();
   }
 });
+}

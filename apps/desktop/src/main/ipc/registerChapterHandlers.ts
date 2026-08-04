@@ -197,10 +197,25 @@ export function registerChapterHandlers(
 async function safeDraftIpc<T>(operation: () => Promise<T>): Promise<T> {
   try {
     return await operation();
-  } catch {
+  } catch (error) {
+    if (errorCode(error) === 'DRAFT_ADOPTION_RECOVERY_REQUIRED') {
+      throw Object.assign(
+        new Error('The draft adoption needs review before another edit is adopted.'),
+        { code: 'CHAPTER_DRAFT_RECOVERY_REQUIRED' }
+      );
+    }
     throw Object.assign(
       new Error('The local chapter draft operation could not be completed.'),
       { code: 'CHAPTER_DRAFT_OPERATION_FAILED' }
     );
   }
+}
+
+function errorCode(error: unknown): string {
+  return typeof error === 'object'
+    && error !== null
+    && 'code' in error
+    && typeof error.code === 'string'
+    ? error.code
+    : '';
 }

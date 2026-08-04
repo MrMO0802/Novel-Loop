@@ -1,20 +1,19 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
-  chmod,
-  lstat,
   mkdir,
   open,
   rename,
-  rm,
-  writeFile
+  rm
 } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import { z } from 'zod';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
 const MAX_RECORD_BYTES = MAX_MARKDOWN_BYTES + 16 * 1024;
+const DEFAULT_DESCRIPTOR_ROOT = '/proc/self/fd';
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const ProjectKeySchema = z.string().regex(/^project_[A-Za-z0-9_-]+$/u).max(96);
 
@@ -49,40 +48,70 @@ export interface DraftWorkingCopyReadResult {
 
 export interface DraftWorkingCopyStoreOptions {
   replace?: (temporaryPath: string, targetPath: string) => Promise<void>;
+  descriptorRoot?: string;
+}
+
+interface AnchoredDirectory {
+  handle: FileHandle;
+  handles: FileHandle[];
 }
 
 export class DraftWorkingCopyStore {
   private readonly replace: (temporaryPath: string, targetPath: string) => Promise<void>;
+  private readonly descriptorRoot: string;
+  private readonly userDataRoot: string;
   private readonly operations = new Map<string, Promise<void>>();
 
   constructor(
-    private readonly userDataRoot: string,
+    userDataRoot: string,
     options: DraftWorkingCopyStoreOptions = {}
   ) {
+    this.userDataRoot = path.resolve(userDataRoot);
     this.replace = options.replace ?? rename;
+    this.descriptorRoot = options.descriptorRoot ?? DEFAULT_DESCRIPTOR_ROOT;
   }
 
   async save(record: DraftWorkingCopySaveInput): Promise<void> {
     const parsed = parseRecord({ schemaVersion: '1.0', ...record });
-    const directory = this.directoryFor(parsed.projectKey, parsed.chapterNumber);
-    const target = path.join(directory, 'draft.json');
-    await this.enqueue(target, async () => {
+    const operationKey = this.operationKey(parsed.projectKey, parsed.chapterNumber);
+    await this.enqueue(operationKey, async () => {
+      const directory = await this.openDirectory(
+        parsed.projectKey,
+        parsed.chapterNumber,
+        true
+      );
+      if (directory === null) throw draftStoreError();
+      const directoryPath = this.descriptorPath(directory.handle);
+      const target = path.join(directoryPath, 'draft.json');
       const temporary = path.join(
-        directory,
+        directoryPath,
         `draft.${process.pid}.${randomBytes(12).toString('hex')}.tmp`
       );
-      await this.ensureSafeDirectory(directory, true);
-      await chmod(directory, 0o700);
-      await writeFile(temporary, JSON.stringify(parsed), {
-        encoding: 'utf8',
-        flag: 'wx',
-        mode: 0o600
-      });
+      let temporaryCreated = false;
       try {
+        await directory.handle.chmod(0o700);
+        const temporaryHandle = await open(
+          temporary,
+          writeExclusiveFlags(),
+          0o600
+        );
+        temporaryCreated = true;
+        try {
+          await temporaryHandle.chmod(0o600);
+          await temporaryHandle.writeFile(JSON.stringify(parsed), 'utf8');
+          await temporaryHandle.sync();
+        } finally {
+          await temporaryHandle.close();
+        }
         await this.replace(temporary, target);
+        temporaryCreated = false;
       } catch (error) {
-        await rm(temporary, { force: true }).catch(() => undefined);
+        if (temporaryCreated) {
+          await rm(temporary, { force: true }).catch(() => undefined);
+        }
         throw error;
+      } finally {
+        await closeDirectory(directory);
       }
     });
   }
@@ -92,75 +121,85 @@ export class DraftWorkingCopyStore {
     chapterNumber: number,
     expectedSourceHash?: string
   ): Promise<DraftWorkingCopyReadResult> {
-    const directory = this.directoryFor(ProjectKeySchema.parse(projectKey), positiveChapter(chapterNumber));
-    const target = path.join(directory, 'draft.json');
-    await this.operations.get(target)?.catch(() => undefined);
-    if (!(await this.ensureSafeDirectory(directory, false))) return unavailable();
-    let text: string;
+    const parsedProjectKey = ProjectKeySchema.parse(projectKey);
+    const parsedChapterNumber = positiveChapter(chapterNumber);
+    await this.operations.get(this.operationKey(parsedProjectKey, parsedChapterNumber))
+      ?.catch(() => undefined);
+    const directory = await this.openDirectory(
+      parsedProjectKey,
+      parsedChapterNumber,
+      false
+    );
+    if (directory === null) return unavailable();
+    const target = path.join(this.descriptorPath(directory.handle), 'draft.json');
     try {
-      const metadata = await lstat(target);
+      let text: string;
+      try {
+        text = await readBoundedText(target);
+      } catch (error: unknown) {
+        if (isMissing(error)) return unavailable();
+        if (isUnsafeLink(error) || errorCode(error) === 'DRAFT_WORKING_COPY_OVERSIZED') {
+          await this.quarantine(target);
+          return unavailable();
+        }
+        throw error;
+      }
+
+      let record: DraftWorkingCopyRecord;
+      try {
+        record = parseRecord(JSON.parse(text));
+      } catch {
+        await this.quarantine(target);
+        return unavailable();
+      }
       if (
-        metadata.isSymbolicLink()
-        || !metadata.isFile()
-        || metadata.size > MAX_RECORD_BYTES
+        record.projectKey !== parsedProjectKey
+        || record.chapterNumber !== parsedChapterNumber
       ) {
         await this.quarantine(target);
         return unavailable();
       }
-      text = await readBoundedText(target);
-    } catch (error: unknown) {
-      if (isMissing(error)) return unavailable();
-      if (isUnsafeLink(error)) {
-        await this.quarantine(target);
-        return unavailable();
+      if (
+        expectedSourceHash !== undefined
+        && record.sourceHash !== Sha256Schema.parse(expectedSourceHash)
+      ) {
+        return {
+          recoveryAvailable: true,
+          stale: true,
+          markdown: null,
+          savedAt: record.savedAt
+        };
       }
-      if (errorCode(error) === 'DRAFT_WORKING_COPY_OVERSIZED') {
-        await this.quarantine(target);
-        return unavailable();
-      }
-      throw error;
-    }
-
-    let record: DraftWorkingCopyRecord;
-    try {
-      record = parseRecord(JSON.parse(text));
-    } catch {
-      await this.quarantine(target);
-      return unavailable();
-    }
-    if (record.projectKey !== projectKey || record.chapterNumber !== chapterNumber) {
-      await this.quarantine(target);
-      return unavailable();
-    }
-    if (expectedSourceHash !== undefined && record.sourceHash !== Sha256Schema.parse(expectedSourceHash)) {
       return {
         recoveryAvailable: true,
-        stale: true,
-        markdown: null,
+        stale: false,
+        markdown: record.markdown,
         savedAt: record.savedAt
       };
+    } finally {
+      await closeDirectory(directory);
     }
-    return {
-      recoveryAvailable: true,
-      stale: false,
-      markdown: record.markdown,
-      savedAt: record.savedAt
-    };
   }
 
   async discard(projectKey: string, chapterNumber: number): Promise<void> {
-    const directory = this.directoryFor(ProjectKeySchema.parse(projectKey), positiveChapter(chapterNumber));
-    const target = path.join(directory, 'draft.json');
-    await this.enqueue(target, async () => {
-      if (!(await this.ensureSafeDirectory(directory, false))) return;
-      const metadata = await lstat(target).catch((error: unknown) => (
-        isMissing(error) ? null : Promise.reject(error)
-      ));
-      if (metadata?.isSymbolicLink()) {
-        await this.quarantine(target);
-        return;
+    const parsedProjectKey = ProjectKeySchema.parse(projectKey);
+    const parsedChapterNumber = positiveChapter(chapterNumber);
+    const operationKey = this.operationKey(parsedProjectKey, parsedChapterNumber);
+    await this.enqueue(operationKey, async () => {
+      const directory = await this.openDirectory(
+        parsedProjectKey,
+        parsedChapterNumber,
+        false
+      );
+      if (directory === null) return;
+      try {
+        await rm(
+          path.join(this.descriptorPath(directory.handle), 'draft.json'),
+          { force: true }
+        );
+      } finally {
+        await closeDirectory(directory);
       }
-      await rm(target, { force: true });
     });
   }
 
@@ -174,77 +213,127 @@ export class DraftWorkingCopyStore {
     const parsedChapterNumber = positiveChapter(chapterNumber);
     const sourceHash = Sha256Schema.parse(expectedSourceHash);
     const contentHash = Sha256Schema.parse(expectedContentHash);
-    const directory = this.directoryFor(parsedProjectKey, parsedChapterNumber);
-    const target = path.join(directory, 'draft.json');
+    const operationKey = this.operationKey(parsedProjectKey, parsedChapterNumber);
     let discarded = false;
-    await this.enqueue(target, async () => {
-      if (!(await this.ensureSafeDirectory(directory, false))) return;
-      let record: DraftWorkingCopyRecord;
+    await this.enqueue(operationKey, async () => {
+      const directory = await this.openDirectory(
+        parsedProjectKey,
+        parsedChapterNumber,
+        false
+      );
+      if (directory === null) return;
+      const target = path.join(this.descriptorPath(directory.handle), 'draft.json');
       try {
-        const metadata = await lstat(target);
-        if (metadata.isSymbolicLink() || !metadata.isFile()) return;
-        record = parseRecord(JSON.parse(await readBoundedText(target)));
-      } catch (error) {
-        if (isMissing(error) || isUnsafeLink(error)) return;
-        throw error;
+        let record: DraftWorkingCopyRecord;
+        try {
+          record = parseRecord(JSON.parse(await readBoundedText(target)));
+        } catch (error) {
+          if (isMissing(error) || isUnsafeLink(error)) return;
+          throw error;
+        }
+        if (
+          record.projectKey !== parsedProjectKey
+          || record.chapterNumber !== parsedChapterNumber
+          || record.sourceHash !== sourceHash
+          || sha256(record.markdown) !== contentHash
+        ) return;
+        await rm(target, { force: true });
+        discarded = true;
+      } finally {
+        await closeDirectory(directory);
       }
-      if (
-        record.projectKey !== parsedProjectKey
-        || record.chapterNumber !== parsedChapterNumber
-        || record.sourceHash !== sourceHash
-        || sha256(record.markdown) !== contentHash
-      ) return;
-      await rm(target, { force: true });
-      discarded = true;
     });
     return discarded;
   }
 
-  private directoryFor(projectKey: string, chapterNumber: number): string {
-    return path.join(
-      this.userDataRoot,
-      'working-copies',
-      projectKey,
-      `chapter_${String(chapterNumber).padStart(3, '0')}`
+  private operationKey(projectKey: string, chapterNumber: number): string {
+    return `${projectKey}:${chapterNumber}`;
+  }
+
+  private descriptorPath(directory: FileHandle): string {
+    return path.join(this.descriptorRoot, String(directory.fd));
+  }
+
+  private async openDirectory(
+    projectKey: string,
+    chapterNumber: number,
+    createMissing: boolean
+  ): Promise<AnchoredDirectory | null> {
+    const flags = directoryFlags();
+    const handles: FileHandle[] = [];
+    try {
+      let current: FileHandle;
+      try {
+        current = await open(this.userDataRoot, flags);
+      } catch (error) {
+        if (!createMissing && isMissing(error)) return null;
+        throw error;
+      }
+      handles.push(current);
+      await this.verifyDescriptorRoot(current, flags);
+
+      const segments = [
+        'working-copies',
+        projectKey,
+        `chapter_${String(chapterNumber).padStart(3, '0')}`
+      ];
+      for (const segment of segments) {
+        const childPath = path.join(this.descriptorPath(current), segment);
+        let child: FileHandle;
+        try {
+          child = await open(childPath, flags);
+        } catch (error) {
+          if (!isMissing(error)) throw error;
+          if (!createMissing) {
+            await closeHandles(handles);
+            return null;
+          }
+          await mkdir(childPath, { mode: 0o700 }).catch((mkdirError: unknown) => {
+            if (!isAlreadyExists(mkdirError)) throw mkdirError;
+          });
+          child = await open(childPath, flags);
+          await child.chmod(0o700);
+        }
+        const metadata = await child.stat();
+        if (!metadata.isDirectory()) {
+          await child.close();
+          throw draftStoreError();
+        }
+        handles.push(child);
+        current = child;
+      }
+      return { handle: current, handles };
+    } catch (error) {
+      await closeHandles(handles);
+      if (errorCode(error) === 'DRAFT_WORKING_COPY_UNAVAILABLE') throw error;
+      throw draftStoreError();
+    }
+  }
+
+  private async verifyDescriptorRoot(
+    directory: FileHandle,
+    flags: number
+  ): Promise<void> {
+    if (process.platform !== 'linux') throw draftStoreError();
+    const original = await directory.stat();
+    const probe = await open(
+      `${this.descriptorPath(directory)}${path.sep}.`,
+      flags
     );
+    try {
+      const anchored = await probe.stat();
+      if (original.dev !== anchored.dev || original.ino !== anchored.ino) {
+        throw draftStoreError();
+      }
+    } finally {
+      await probe.close();
+    }
   }
 
   private async quarantine(target: string): Promise<void> {
-    await rm(`${target}.quarantine`, { force: true });
-    await rename(target, `${target}.quarantine`).catch(() => undefined);
-  }
-
-  private async ensureSafeDirectory(
-    directory: string,
-    createMissing: boolean
-  ): Promise<boolean> {
-    const root = path.resolve(this.userDataRoot);
-    const resolved = path.resolve(directory);
-    if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) {
-      throw draftStoreError();
-    }
-    const rootMetadata = await lstat(root).catch(async (error: unknown) => {
-      if (!isMissing(error) || !createMissing) return null;
-      await mkdir(root, { mode: 0o700 });
-      return lstat(root);
-    });
-    if (rootMetadata === null) return false;
-    if (rootMetadata.isSymbolicLink() || !rootMetadata.isDirectory()) {
-      throw draftStoreError();
-    }
-
-    let current = root;
-    for (const segment of path.relative(root, resolved).split(path.sep).filter(Boolean)) {
-      current = path.join(current, segment);
-      const metadata = await lstat(current).catch(async (error: unknown) => {
-        if (!isMissing(error) || !createMissing) return null;
-        await mkdir(current, { mode: 0o700 });
-        return lstat(current);
-      });
-      if (metadata === null) return false;
-      if (metadata.isSymbolicLink() || !metadata.isDirectory()) throw draftStoreError();
-    }
-    return true;
+    const quarantine = `${target}.quarantine`;
+    await rm(quarantine, { force: true });
+    await rename(target, quarantine).catch(() => undefined);
   }
 
   private async enqueue(target: string, operation: () => Promise<void>): Promise<void> {
@@ -278,18 +367,34 @@ function unavailable(): DraftWorkingCopyReadResult {
   return { recoveryAvailable: false, stale: false, markdown: null, savedAt: null };
 }
 
+function directoryFlags(): number {
+  if (
+    process.platform !== 'linux'
+    || typeof constants.O_DIRECTORY !== 'number'
+    || typeof constants.O_NOFOLLOW !== 'number'
+  ) throw draftStoreError();
+  return constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW;
+}
+
+function writeExclusiveFlags(): number {
+  if (typeof constants.O_NOFOLLOW !== 'number') throw draftStoreError();
+  return constants.O_WRONLY
+    | constants.O_CREAT
+    | constants.O_EXCL
+    | constants.O_NOFOLLOW;
+}
+
 function isMissing(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && error.code === 'ENOENT';
+  return errorCode(error) === 'ENOENT';
+}
+
+function isAlreadyExists(error: unknown): boolean {
+  return errorCode(error) === 'EEXIST';
 }
 
 function isUnsafeLink(error: unknown): boolean {
-  return typeof error === 'object'
-    && error !== null
-    && 'code' in error
-    && (error.code === 'ELOOP' || error.code === 'EMLINK');
+  const code = errorCode(error);
+  return code === 'ELOOP' || code === 'EMLINK';
 }
 
 function errorCode(error: unknown): string {
@@ -302,8 +407,8 @@ function errorCode(error: unknown): string {
 }
 
 async function readBoundedText(target: string): Promise<string> {
-  const noFollow = 'O_NOFOLLOW' in constants ? constants.O_NOFOLLOW : 0;
-  const handle = await open(target, constants.O_RDONLY | noFollow);
+  if (typeof constants.O_NOFOLLOW !== 'number') throw draftStoreError();
+  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile() || metadata.size > MAX_RECORD_BYTES) {
@@ -334,7 +439,17 @@ async function readBoundedText(target: string): Promise<string> {
   }
 }
 
-function draftStoreError(): Error {
+async function closeDirectory(directory: AnchoredDirectory): Promise<void> {
+  await closeHandles(directory.handles);
+}
+
+async function closeHandles(handles: FileHandle[]): Promise<void> {
+  for (const handle of [...handles].reverse()) {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+function draftStoreError(): Error & { code: string } {
   return Object.assign(new Error('Draft working copy is unavailable.'), {
     code: 'DRAFT_WORKING_COPY_UNAVAILABLE'
   });

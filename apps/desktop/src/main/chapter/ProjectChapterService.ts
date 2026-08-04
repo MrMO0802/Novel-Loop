@@ -384,6 +384,7 @@ export class ProjectChapterService implements ChapterApplicationService {
         if (
           !review.available
           || projectRoot !== pending.projectRoot
+          || review.chapterNumber !== pending.chapterNumber
           || sourceHash !== pending.sourceHash
           || this.workingCopies === null
         ) {
@@ -408,11 +409,18 @@ export class ProjectChapterService implements ChapterApplicationService {
         if (this.dependencies.gateway.adoptDraft === undefined) {
           throw draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
         }
-        await this.dependencies.gateway.adoptDraft({
-          projectRoot: pending.projectRoot,
-          markdown: pending.markdown,
-          expectedSourceHash: pending.sourceHash
-        });
+        try {
+          await this.dependencies.gateway.adoptDraft({
+            projectRoot: pending.projectRoot,
+            markdown: pending.markdown,
+            expectedSourceHash: pending.sourceHash
+          });
+        } catch (error) {
+          if (errorCode(error) === 'AUTHOR_REVISION_ROLLBACK_FAILED') {
+            this.retireDraftAdoption(parsed.revisionToken);
+          }
+          throw error;
+        }
         this.revokeDraftAdoptions(parsed.projectKey, pending.chapterNumber);
         await this.workingCopies.discardIfMatches(
           parsed.projectKey,
@@ -2010,11 +2018,14 @@ function errorName(error: unknown): string {
 type DraftBoundaryErrorCode =
   | 'DRAFT_ADOPTION_STALE'
   | 'DRAFT_ADOPTION_UNAVAILABLE'
+  | 'DRAFT_ADOPTION_RECOVERY_REQUIRED'
   | 'DRAFT_WORKING_COPY_UNAVAILABLE';
 
 function draftBoundaryError(code: DraftBoundaryErrorCode): Error & { code: string } {
   const message = code === 'DRAFT_ADOPTION_STALE'
     ? 'This edit is no longer current. Review the latest draft before adopting it.'
+    : code === 'DRAFT_ADOPTION_RECOVERY_REQUIRED'
+      ? 'This edit could not be finalized safely. Review the chapter before trying another adoption.'
     : code === 'DRAFT_ADOPTION_UNAVAILABLE'
       ? 'This edit could not be adopted. The official story state was not changed.'
       : 'The local editing draft is temporarily unavailable.';
@@ -2032,6 +2043,9 @@ function mapDraftBoundaryError(error: unknown): Error & { code: string } {
   }
   if (code === 'DRAFT_ADOPTION_UNAVAILABLE') {
     return draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
+  }
+  if (code === 'AUTHOR_REVISION_ROLLBACK_FAILED') {
+    return draftBoundaryError('DRAFT_ADOPTION_RECOVERY_REQUIRED');
   }
   return draftBoundaryError('DRAFT_WORKING_COPY_UNAVAILABLE');
 }

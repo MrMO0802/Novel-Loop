@@ -1,9 +1,12 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
 
-import { DraftWorkingCopyStore } from '../../src/main/chapter/DraftWorkingCopyStore';
+import {
+  DraftWorkingCopyRecordSchema,
+  DraftWorkingCopyStore
+} from '../../src/main/chapter/DraftWorkingCopyStore';
 
 const roots: string[] = [];
 const projectKey = 'project_author_draft';
@@ -180,6 +183,71 @@ describe('DraftWorkingCopyStore', () => {
       savedAt: '2026-08-04T01:00:00.000Z'
     })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
     expect(await readFile(outsideDraft, 'utf8')).toBe('outside remains unchanged');
+  });
+
+  test('keeps replacement descriptor-anchored when a validated component is swapped for a symlink', async () => {
+    const root = await makeRoot();
+    const outside = await makeRoot();
+    const projectDirectory = path.join(root, 'working-copies', projectKey);
+    const movedProjectDirectory = path.join(root, 'working-copies', `${projectKey}-moved`);
+    const outsideChapter = path.join(outside, 'chapter_001');
+    const outsideDraft = path.join(outsideChapter, 'draft.json');
+    const stableStore = new DraftWorkingCopyStore(root);
+    await stableStore.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: '# 第一章\n\n原有草稿。\n',
+      savedAt: '2026-08-04T01:00:00.000Z'
+    });
+    await mkdir(outsideChapter, { recursive: true, mode: 0o700 });
+    await writeFile(outsideDraft, 'outside remains unchanged', 'utf8');
+    const swappingStore = new DraftWorkingCopyStore(root, {
+      replace: async (temporary, target) => {
+        await rename(projectDirectory, movedProjectDirectory);
+        await symlink(outside, projectDirectory);
+        await writeFile(
+          path.join(outsideChapter, path.basename(temporary)),
+          'attacker-controlled temporary file',
+          'utf8'
+        );
+        await rename(temporary, target);
+      }
+    });
+
+    await swappingStore.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: '# 第一章\n\n安全的新草稿。\n',
+      savedAt: '2026-08-04T01:01:00.000Z'
+    });
+
+    expect(await readFile(outsideDraft, 'utf8')).toBe('outside remains unchanged');
+    await expect(new DraftWorkingCopyStore(root).read(projectKey, 1, sourceHash))
+      .rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+    const movedRecord = DraftWorkingCopyRecordSchema.parse(JSON.parse(
+      await readFile(
+        path.join(movedProjectDirectory, 'chapter_001', 'draft.json'),
+        'utf8'
+      )
+    ) as unknown);
+    expect(movedRecord.markdown).toBe('# 第一章\n\n安全的新草稿。\n');
+  });
+
+  test('fails closed when descriptor-anchored filesystem access is unavailable', async () => {
+    const root = await makeRoot();
+    const store = new DraftWorkingCopyStore(root, {
+      descriptorRoot: path.join(root, 'missing-proc-fd')
+    });
+
+    await expect(store.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: '# 第一章\n\n不得降级为路径写入。\n',
+      savedAt: '2026-08-04T01:00:00.000Z'
+    })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
   });
 });
 

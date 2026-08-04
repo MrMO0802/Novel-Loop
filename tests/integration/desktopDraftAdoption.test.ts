@@ -166,8 +166,10 @@ describe('desktop draft adoption', () => {
       authorInstruction: null
     }, store);
     const writeJson = store.writeJson.bind(store);
+    let failed = false;
     store.writeJson = async (filePath, value, schema) => {
-      if (filePath.endsWith('draft_revision_v1.json')) {
+      if (!failed && filePath.endsWith('draft_revision_v1.json')) {
+        failed = true;
         throw new Error('forced supersede failure');
       }
       return writeJson(filePath, value, schema);
@@ -184,5 +186,118 @@ describe('desktop draft adoption', () => {
         versionKind: 'author_adopted',
         markdown: expect.stringContaining('第一版。')
       });
+  }, 30_000);
+
+  test('restores a superseded revision when its write persists and then throws', async () => {
+    const store = new FileStore();
+    const initial = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!initial.available) throw new Error('Expected a generated draft.');
+    await adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${initial.markdown}\n\n第一版。\n`,
+      expectedSourceHash: initial.sourceHash
+    }, store);
+    const active = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!active.available) throw new Error('Expected an adopted draft.');
+    const second = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'draft',
+      mode: 'direct_edit',
+      sourceArtifactPath: 'chapters/chapter_001/author_revisions/draft_revision_v1.md',
+      sourceCandidateId: null,
+      expectedSourceHash: active.sourceHash,
+      content: `${active.markdown}\n\n第二版。\n`,
+      authorInstruction: null
+    }, store);
+    const writeJson = store.writeJson.bind(store);
+    let failed = false;
+    store.writeJson = async (filePath, value, schema) => {
+      if (!failed && filePath.endsWith('draft_revision_v1.json')) {
+        failed = true;
+        await writeJson(filePath, value, schema);
+        throw new Error('forced post-write supersede failure');
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: active.sourceHash
+    }, store)).rejects.toThrow('forced post-write supersede failure');
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v1.json'),
+      AuthorRevisionRecordSchema
+    )).resolves.toMatchObject({ state: 'adopted' });
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v2.json'),
+      AuthorRevisionRecordSchema
+    )).resolves.toMatchObject({ state: 'ready', adoptedAt: null });
+  }, 30_000);
+
+  test('retains recovery provenance when adoption and its compensation both fail', async () => {
+    const store = new FileStore();
+    const initial = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!initial.available) throw new Error('Expected a generated draft.');
+    await adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${initial.markdown}\n\n第一版。\n`,
+      expectedSourceHash: initial.sourceHash
+    }, store);
+    const active = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!active.available) throw new Error('Expected an adopted draft.');
+    const writeJson = store.writeJson.bind(store);
+    let adoptedTargetWrites = 0;
+    store.writeJson = async (filePath, value, schema) => {
+      const recordState = typeof value === 'object'
+        && value !== null
+        && 'state' in value
+        && typeof value.state === 'string'
+        ? value.state
+        : null;
+      if (
+        filePath.endsWith('draft_revision_v2.json')
+        && (recordState === 'adopted' || adoptedTargetWrites > 0)
+      ) {
+        adoptedTargetWrites += 1;
+        if (adoptedTargetWrites === 1) {
+          await writeJson(filePath, value, schema);
+          throw new Error('forced post-write adoption failure');
+        }
+        if (adoptedTargetWrites === 2) {
+          throw new Error('forced target compensation failure');
+        }
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${active.markdown}\n\n第二版。\n`,
+      expectedSourceHash: active.sourceHash
+    }, store)).rejects.toMatchObject({ code: 'AUTHOR_REVISION_ROLLBACK_FAILED' });
+
+    const target = await store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v2.json'),
+      AuthorRevisionRecordSchema
+    );
+    expect(target).toMatchObject({
+      state: 'adopted',
+      invalidationReportPath: 'chapters/chapter_001/author_revisions/edit_invalidation_report_v2.json'
+    });
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v1.json'),
+      AuthorRevisionRecordSchema
+    )).resolves.toMatchObject({ state: 'adopted' });
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'edit_invalidation_report_v2.json'),
+      AuthorEditInvalidationReportSchema
+    )).resolves.toMatchObject({
+      revisionId: target.revisionId,
+      invalidatedNodes: ['future_diagnostics'],
+      storyStateMutated: false
+    });
   }, 30_000);
 });

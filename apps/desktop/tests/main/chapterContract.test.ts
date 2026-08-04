@@ -2,16 +2,29 @@ import { describe, expect, test } from 'vitest';
 
 import * as chapterContract from '../../src/shared/chapterContract';
 import {
+  ChapterAdoptRevisionRequestSchema,
+  ChapterAuthoringResultSchema,
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
   ChapterPlanReviewResultSchema,
+  ChapterSaveMissionWorkingCopyRequestSchema,
+  ChapterSavePlanWorkingCopyRequestSchema,
+  ChapterSelectDirectionRequestSchema,
   ChapterTaskSchema
 } from '../../src/shared/chapterContract';
+
+const reviewToken = 'chapter_review_0123456789abcdef01234567';
+const activeOptionToken = 'chapter_option_0123456789abcdef01234567';
+const alternativeOptionToken = 'chapter_option_89abcdef0123456701234567';
+const objectiveToken = 'chapter_option_111111111111111111111111';
+const participantToken = 'chapter_option_222222222222222222222222';
+const debtToken = 'chapter_option_333333333333333333333333';
 
 const validPlanReview = {
   available: true,
   chapterNumber: 1,
   title: 'The Radio Wakes',
+  reviewToken,
   mission: {
     chapterFunction: 'Open the impossible broadcast.',
     objectives: ['Introduce the powerless radio.'],
@@ -19,7 +32,39 @@ const validPlanReview = {
     readerQuestions: ['Who is calling?'],
     narrativePromises: ['Advance the mystery of the impossible signal.'],
     characterDeltas: ['Lin Cheng moves from skeptical to alert.'],
-    forbiddenMoves: ['Do not reveal the caller.']
+    forbiddenMoves: ['Do not reveal the caller.'],
+    objectiveItems: [{
+      itemToken: objectiveToken,
+      text: 'Introduce the powerless radio.',
+      type: 'plot',
+      priority: 'must'
+    }],
+    debtItems: [{
+      itemToken: debtToken,
+      promise: 'Who powers the impossible signal?'
+    }],
+    introducedDebts: [],
+    characterDeltaItems: [{
+      participantToken,
+      participantName: 'Lin Cheng',
+      from: 'skeptical',
+      to: 'alert',
+      evidenceRequired: 'He records the frequency.'
+    }],
+    participantOptions: [{
+      participantToken,
+      name: 'Lin Cheng',
+      role: 'protagonist',
+      selected: true
+    }],
+    readerInformation: {
+      newKnowledge: ['The radio works without power.'],
+      newSuspicions: [],
+      questionsToMaintain: ['Who is calling?'],
+      questionsToAnswer: []
+    },
+    targetEmotionalCurve: ['unease', 'resolve'],
+    targetWordCount: 3_000
   },
   selectedPlan: {
     title: 'Signal First',
@@ -31,6 +76,28 @@ const validPlanReview = {
       excerpt: 'Open at the abandoned building.',
       strengths: ['Immediate atmosphere.'],
       risks: ['Delays the radio hook.']
+    }
+  ],
+  directions: [
+    {
+      optionToken: activeOptionToken,
+      title: 'Signal First',
+      markdown: '# Signal First\n\nThe radio speaks before dawn.\n',
+      excerpt: 'The radio speaks before dawn.',
+      strengths: ['Immediate hook.'],
+      risks: ['Needs a grounded reaction.'],
+      aiRecommended: true,
+      active: true
+    },
+    {
+      optionToken: alternativeOptionToken,
+      title: 'Building First',
+      markdown: '# Building First\n\nOpen at the abandoned building.\n',
+      excerpt: 'Open at the abandoned building.',
+      strengths: ['Immediate atmosphere.'],
+      risks: ['Delays the radio hook.'],
+      aiRecommended: false,
+      active: false
     }
   ]
 } as const;
@@ -109,6 +176,172 @@ describe('chapter workspace contract', () => {
   test('parses valid plan and draft reviews', () => {
     expect(ChapterPlanReviewResultSchema.parse(validPlanReview)).toEqual(validPlanReview);
     expect(ChapterDraftReviewResultSchema.parse(validDraftReview)).toEqual(validDraftReview);
+  });
+
+  test('accepts only opaque authoring request fields', () => {
+    const selectRequest = ChapterSelectDirectionRequestSchema.parse({
+      projectKey: 'project_radio',
+      reviewToken,
+      optionToken: alternativeOptionToken
+    });
+    expect(() => ChapterSelectDirectionRequestSchema.parse({
+      ...selectRequest,
+      candidateId: 'plan_002'
+    })).toThrow();
+
+    expect(ChapterSavePlanWorkingCopyRequestSchema.parse({
+      projectKey: 'project_radio',
+      reviewToken,
+      optionToken: alternativeOptionToken,
+      markdown: '# Revised direction\n\nThe radio speaks twice.\n'
+    })).toBeDefined();
+    expect(() => ChapterSavePlanWorkingCopyRequestSchema.parse({
+      projectKey: 'project_radio',
+      reviewToken,
+      optionToken: alternativeOptionToken,
+      markdown: '# Revised direction',
+      sourceHash: 'a'.repeat(64)
+    })).toThrow();
+
+    expect(ChapterAdoptRevisionRequestSchema.parse({
+      projectKey: 'project_radio',
+      revisionToken: 'chapter_revision_0123456789abcdef01234567',
+      confirmInvalidation: true
+    })).toBeDefined();
+    expect(() => ChapterAdoptRevisionRequestSchema.parse({
+      projectKey: 'project_radio',
+      revisionToken: 'chapter_revision_0123456789abcdef01234567',
+      confirmInvalidation: false
+    })).toThrow();
+  });
+
+  test('accepts structured mission edits without trusted identifiers', () => {
+    const request = ChapterSaveMissionWorkingCopyRequestSchema.parse({
+      projectKey: 'project_radio',
+      reviewToken,
+      mission: {
+        chapterFunction: 'Open the impossible broadcast.',
+        requiredObjectives: [{
+          itemToken: objectiveToken,
+          text: 'Introduce the powerless radio.',
+          type: 'plot',
+          priority: 'must'
+        }, {
+          itemToken: null,
+          text: 'Show a second impossible pulse.',
+          type: 'foreshadowing',
+          priority: 'should'
+        }],
+        debtTokens: [debtToken],
+        debtsToIntroduce: [{
+          type: 'mystery',
+          promise: 'The caller knows tomorrow.',
+          importance: 8
+        }],
+        characterDeltas: [{
+          participantToken,
+          from: 'skeptical',
+          to: 'alert',
+          evidenceRequired: 'He records the frequency.'
+        }],
+        participantTokens: [participantToken],
+        newParticipants: [{ name: 'Mara', role: 'caller' }],
+        readerInformation: {
+          newKnowledge: ['The radio works without power.'],
+          newSuspicions: [],
+          questionsToMaintain: ['Who is calling?'],
+          questionsToAnswer: []
+        },
+        forbiddenMoves: ['Do not reveal the caller.'],
+        targetEmotionalCurve: ['unease', 'resolve'],
+        targetWordCount: 3_000
+      }
+    });
+    expect(request.mission.newParticipants).toEqual([
+      { name: 'Mara', role: 'caller' }
+    ]);
+    expect(() => ChapterSaveMissionWorkingCopyRequestSchema.parse({
+      ...request,
+      mission: {
+        ...request.mission,
+        participatingCharacterIds: ['char_secret']
+      }
+    })).toThrow();
+  });
+
+  test('requires one active and one AI-recommended full direction', () => {
+    const parsed = ChapterPlanReviewResultSchema.parse(validPlanReview);
+    if (!parsed.available) throw new Error('Expected an available plan review.');
+
+    expect(parsed.directions).toHaveLength(2);
+    expect(parsed.directions.every(({ markdown, optionToken }) => (
+      markdown.length > 0 && optionToken.startsWith('chapter_option_')
+    ))).toBe(true);
+    expect(parsed.directions.filter(({ active }) => active)).toHaveLength(1);
+    expect(parsed.directions.filter(({ aiRecommended }) => aiRecommended))
+      .toHaveLength(1);
+
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: validPlanReview.directions.map((direction) => ({
+        ...direction,
+        active: false
+      }))
+    }).success).toBe(false);
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: validPlanReview.directions.map((direction) => ({
+        ...direction,
+        aiRecommended: true
+      }))
+    }).success).toBe(false);
+  });
+
+  test.each([
+    { candidateId: 'plan_002' },
+    { path: '/home/author/private-plan.md' },
+    { sourceHash: 'a'.repeat(64) },
+    { schemaName: 'planning.plan_candidates.schema.json' },
+    { runId: 'run_private' },
+    { provider: 'codex-text' },
+    { profile: 'author-machine' },
+    { auth: 'secret' }
+  ])('rejects internal direction fields: %j', (internal) => {
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: [{ ...validPlanReview.directions[0], ...internal }]
+    }).success).toBe(false);
+  });
+
+  test.each([
+    '/home/author/private-plan.md',
+    'chapters/chapter_001/selected_plan.md',
+    'Use plan_002 as the source.',
+    `Source hash: ${'a'.repeat(64)}`,
+    'run_private produced this direction.',
+    'planning.plan_candidates.schema.json'
+  ])('rejects internal values embedded in author Markdown: %s', (internal) => {
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: validPlanReview.directions.map((direction, index) => (
+        index === 0 ? { ...direction, markdown: internal } : direction
+      ))
+    }).success).toBe(false);
+  });
+
+  test('exposes only bounded authoring outcomes and message keys', () => {
+    expect(ChapterAuthoringResultSchema.parse({
+      outcome: 'saved',
+      revisionToken: 'chapter_revision_0123456789abcdef01234567'
+    })).toBeDefined();
+    expect(ChapterAuthoringResultSchema.parse({
+      outcome: 'blocked',
+      messageKey: 'generation_busy'
+    })).toBeDefined();
+    expect(() => ChapterAuthoringResultSchema.parse({
+      outcome: 'stale',
+      message: '/home/author/private stale hash'
+    })).toThrow();
   });
 
   test('requires bounded natural-language mission promises and character deltas', () => {

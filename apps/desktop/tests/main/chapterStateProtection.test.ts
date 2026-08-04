@@ -35,9 +35,8 @@ describe('chapter workspace Story State protection', () => {
     try {
       await context.gateway.plan(runInput(context.paths.projectRoot));
       expect(await sha256(context.paths.storyState())).toBe(before);
-      const planReview = await context.gateway.readPlan(
-        context.paths.projectRoot
-      );
+      const service = chapterServiceFor(context, 'project_state_success');
+      const planReview = await service.readPlan('project_state_success');
       expect(planReview).toMatchObject({
         available: true,
         mission: {
@@ -50,7 +49,7 @@ describe('chapter workspace Story State protection', () => {
         }
       });
       expect(JSON.stringify(planReview)).not.toMatch(
-        /char_lincheng|mission_ch001_codex|debt_[a-z0-9_-]+/i
+        /char_lincheng|mission_ch001_codex|debt_[a-z0-9_-]+|plan_\d|[a-f0-9]{64}|\/home\//i
       );
 
       await context.gateway.draft(runInput(context.paths.projectRoot));
@@ -194,6 +193,121 @@ describe('chapter workspace Story State protection', () => {
     }
   }, 30_000);
 
+  test('preserves Story State bytes after opaque direction selection', async () => {
+    const context = await createChapterProject(
+      'chapter-state-direction-selection',
+      'valid'
+    );
+    const before = await sha256(context.paths.storyState());
+    const projectKey = 'project_state_direction';
+    const service = chapterServiceFor(context, projectKey);
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      const review = await availablePlan(service, projectKey);
+      const alternative = review.directions.find(({ active }) => !active)!;
+
+      await expect(service.selectDirection({
+        projectKey,
+        reviewToken: review.reviewToken,
+        optionToken: alternative.optionToken
+      })).resolves.toEqual({ outcome: 'adopted' });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
+  test('preserves Story State bytes while saving and adopting a plan revision', async () => {
+    const context = await createChapterProject(
+      'chapter-state-plan-revision',
+      'valid'
+    );
+    const before = await sha256(context.paths.storyState());
+    const projectKey = 'project_state_plan_revision';
+    const service = chapterServiceFor(context, projectKey);
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      const review = await availablePlan(service, projectKey);
+      const active = review.directions.find((direction) => direction.active)!;
+      const saved = await service.savePlanWorkingCopy({
+        projectKey,
+        reviewToken: review.reviewToken,
+        optionToken: active.optionToken,
+        markdown: '# Author plan\n\nThe radio answers from the old building.\n'
+      });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+      if (saved.outcome !== 'saved') throw new Error('Expected plan save.');
+
+      await expect(service.adoptRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmInvalidation: true
+      })).resolves.toEqual({ outcome: 'adopted' });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
+  test('preserves Story State bytes while resolving and adopting a mission edit', async () => {
+    const context = await createChapterProject(
+      'chapter-state-mission-revision',
+      'valid'
+    );
+    const before = await sha256(context.paths.storyState());
+    const projectKey = 'project_state_mission_revision';
+    const service = chapterServiceFor(context, projectKey);
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      const review = await availablePlan(service, projectKey);
+      const saved = await service.saveMissionWorkingCopy({
+        projectKey,
+        reviewToken: review.reviewToken,
+        mission: {
+          chapterFunction: review.mission.chapterFunction,
+          requiredObjectives: review.mission.objectiveItems.map((item) => ({
+            itemToken: item.itemToken,
+            text: item.text,
+            type: item.type,
+            priority: item.priority
+          })),
+          debtTokens: review.mission.debtItems.map(({ itemToken }) => (
+            itemToken
+          )),
+          debtsToIntroduce: review.mission.introducedDebts,
+          characterDeltas: review.mission.characterDeltaItems.map((item) => ({
+            participantToken: item.participantToken,
+            from: item.from,
+            to: item.to,
+            evidenceRequired: item.evidenceRequired
+          })),
+          participantTokens: review.mission.participantOptions
+            .filter(({ selected }) => selected)
+            .map(({ participantToken }) => participantToken),
+          newParticipants: [{ name: '许薇', role: '调查搭档' }],
+          readerInformation: review.mission.readerInformation,
+          forbiddenMoves: review.mission.forbiddenMoves,
+          targetEmotionalCurve: review.mission.targetEmotionalCurve,
+          targetWordCount: review.mission.targetWordCount
+        }
+      });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+      if (saved.outcome !== 'saved') throw new Error('Expected mission save.');
+
+      await expect(service.adoptRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmInvalidation: true
+      })).resolves.toEqual({ outcome: 'adopted' });
+      expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
   test('serializes two real chapter service instances through the shared project lease', async () => {
     const context = await createChapterProject(
       'chapter-cross-service-lease',
@@ -249,6 +363,29 @@ function runInput(projectRoot: string) {
     onProgress: () => undefined,
     shouldStop: () => false
   };
+}
+
+function chapterServiceFor(
+  context: { gateway: EngineChapterGateway; paths: ProjectPaths },
+  projectKey: string
+): ProjectChapterService {
+  return new ProjectChapterService({
+    projects: {
+      resolveProjectRoot: async (candidate) => (
+        candidate === projectKey ? context.paths.projectRoot : null
+      )
+    },
+    gateway: context.gateway
+  });
+}
+
+async function availablePlan(
+  service: ProjectChapterService,
+  projectKey: string
+) {
+  const review = await service.readPlan(projectKey);
+  if (!review.available) throw new Error('Expected an available plan review.');
+  return review;
 }
 
 async function createChapterProject(

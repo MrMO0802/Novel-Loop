@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createMainWindow } from './createMainWindow';
 import { NativeProjectDialog } from './dialogs/NativeProjectDialog';
 import { EngineChapterGateway } from './chapter/EngineChapterGateway';
+import { ChapterReviewTokenStore } from './chapter/ChapterReviewTokenStore';
 import { ProjectChapterService } from './chapter/ProjectChapterService';
 import { EngineFoundationGateway } from './foundation/EngineFoundationGateway';
 import { ProjectFoundationService } from './foundation/ProjectFoundationService';
@@ -62,7 +63,8 @@ void app.whenReady().then(() => {
   });
   const chapterService = new ProjectChapterService({
     projects: projectService,
-    gateway: new EngineChapterGateway()
+    gateway: new EngineChapterGateway(),
+    tokenStore: new ChapterReviewTokenStore()
   });
 
   registerSystemHandlers(

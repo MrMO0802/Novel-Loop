@@ -22,7 +22,13 @@ export function createInertChapterApi() {
     readPlan: vi.fn<NovelLoopDesktopApi['chapter']['readPlan']>()
       .mockResolvedValue({ available: false, reason: 'not_ready' }),
     readDraft: vi.fn<NovelLoopDesktopApi['chapter']['readDraft']>()
-      .mockResolvedValue({ available: false, reason: 'not_ready' })
+      .mockResolvedValue({ available: false, reason: 'not_ready' }),
+    selectDirection: vi.fn<NovelLoopDesktopApi['chapter']['selectDirection']>(),
+    saveMissionWorkingCopy:
+      vi.fn<NovelLoopDesktopApi['chapter']['saveMissionWorkingCopy']>(),
+    savePlanWorkingCopy:
+      vi.fn<NovelLoopDesktopApi['chapter']['savePlanWorkingCopy']>(),
+    adoptRevision: vi.fn<NovelLoopDesktopApi['chapter']['adoptRevision']>()
   } satisfies NovelLoopDesktopApi['chapter'];
 }
 
@@ -37,6 +43,7 @@ export const completeChapterPlan: ChapterPlanReviewResult = {
   available: true,
   chapterNumber: 1,
   title: '凌晨三点十七分',
+  reviewToken: `chapter_review_${'1'.repeat(48)}`,
   mission: {
     chapterFunction: '让林默发现妹妹遗物中的异常报告，并建立城市循环的核心谜团。',
     objectives: [
@@ -62,7 +69,41 @@ export const completeChapterPlan: ChapterPlanReviewResult = {
     forbiddenMoves: [
       '不得揭示循环的最终成因',
       '不得让林默获得超出本章范围的答案'
-    ]
+    ],
+    objectiveItems: [{
+      itemToken: `chapter_option_${'2'.repeat(48)}`,
+      text: '确认报告会在每次循环后自动消失',
+      type: 'plot',
+      priority: 'must'
+    }, {
+      itemToken: `chapter_option_${'3'.repeat(48)}`,
+      text: '让林默决定追查下一轮循环',
+      type: 'character',
+      priority: 'must'
+    }],
+    debtItems: [],
+    introducedDebts: [],
+    characterDeltaItems: [],
+    participantOptions: [{
+      participantToken: `chapter_option_${'4'.repeat(48)}`,
+      name: '林默',
+      role: '主角',
+      selected: true
+    }],
+    readerInformation: {
+      newKnowledge: [
+        '读者知道白箱市正在重复同一天',
+        '读者知道林夕留下了异常回归测试'
+      ],
+      newSuspicions: [],
+      questionsToMaintain: [
+        '林夕是否仍在下一轮循环中',
+        '谁在删除异常报告'
+      ],
+      questionsToAnswer: []
+    },
+    targetEmotionalCurve: ['压抑', '警觉'],
+    targetWordCount: 3_000
   },
   selectedPlan: {
     title: '遗物中的异常报告',
@@ -86,6 +127,44 @@ export const completeChapterPlan: ChapterPlanReviewResult = {
       excerpt: '林默先发现同一段监控被重复覆盖。',
       strengths: ['循环证据清晰'],
       risks: ['人物动机需要额外铺垫']
+    }
+  ],
+  directions: [
+    {
+      optionToken: `chapter_option_${'5'.repeat(48)}`,
+      title: '遗物中的异常报告',
+      markdown: [
+        '# 遗物中的异常报告',
+        '',
+        '林默在凌晨整理妹妹遗物，发现一份会自动消失的“白箱市异常回归测试”。',
+        '',
+        '<img src=x onerror=alert(1)>'
+      ].join('\n'),
+      excerpt: '林默在凌晨整理妹妹遗物，发现异常报告。',
+      strengths: ['情感动机直接'],
+      risks: ['需要控制信息密度'],
+      aiRecommended: true,
+      active: true
+    },
+    {
+      optionToken: `chapter_option_${'6'.repeat(48)}`,
+      title: '从交通事故切入',
+      markdown: '# 从交通事故切入\n\n林默先追查三日前重复发生的交通事故。',
+      excerpt: '林默先追查三日前重复发生的交通事故。',
+      strengths: ['行动开场更直接'],
+      risks: ['妹妹遗物的情感线出现较晚'],
+      aiRecommended: false,
+      active: false
+    },
+    {
+      optionToken: `chapter_option_${'7'.repeat(48)}`,
+      title: '从监控记录切入',
+      markdown: '# 从监控记录切入\n\n林默先发现同一段监控被重复覆盖。',
+      excerpt: '林默先发现同一段监控被重复覆盖。',
+      strengths: ['循环证据清晰'],
+      risks: ['人物动机需要额外铺垫'],
+      aiRecommended: false,
+      active: false
     }
   ]
 };

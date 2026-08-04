@@ -1,5 +1,7 @@
 import { IPC_CHANNELS } from '../../shared/ipcChannels';
 import {
+  ChapterAdoptRevisionRequestSchema,
+  ChapterAuthoringResultSchema,
   ChapterCancelRequestSchema,
   ChapterDraftReviewResultSchema,
   ChapterGetRequestSchema,
@@ -8,9 +10,13 @@ import {
   ChapterPlanReviewResultSchema,
   ChapterReadDraftRequestSchema,
   ChapterReadPlanRequestSchema,
+  ChapterSaveMissionWorkingCopyRequestSchema,
+  ChapterSavePlanWorkingCopyRequestSchema,
+  ChapterSelectDirectionRequestSchema,
   ChapterStartDraftingRequestSchema,
   ChapterStartPlanningRequestSchema,
   ChapterTaskSchema,
+  type ChapterAuthoringResult,
   type ChapterDraftReviewResult,
   type ChapterInspection,
   type ChapterPlanReviewResult,
@@ -32,6 +38,7 @@ type ChapterHandler = (
   request: unknown
 ) => Promise<
   | ChapterDraftReviewResult
+  | ChapterAuthoringResult
   | ChapterInspection
   | ChapterPlanReviewResult
   | ChapterTask
@@ -86,5 +93,45 @@ export function registerChapterHandlers(
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterReadDraftRequestSchema.parse(request);
     return ChapterDraftReviewResultSchema.parse(await service.readDraft(parsedRequest.projectKey));
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterSelectDirection, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterSelectDirectionRequestSchema.parse(request);
+    return ChapterAuthoringResultSchema.parse(
+      await service.selectDirection(parsedRequest)
+    );
+  });
+
+  registrar.handle(
+    IPC_CHANNELS.chapterSaveMissionWorkingCopy,
+    async (event, request) => {
+      assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+      const parsedRequest = ChapterSaveMissionWorkingCopyRequestSchema
+        .parse(request);
+      return ChapterAuthoringResultSchema.parse(
+        await service.saveMissionWorkingCopy(parsedRequest)
+      );
+    }
+  );
+
+  registrar.handle(
+    IPC_CHANNELS.chapterSavePlanWorkingCopy,
+    async (event, request) => {
+      assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+      const parsedRequest = ChapterSavePlanWorkingCopyRequestSchema
+        .parse(request);
+      return ChapterAuthoringResultSchema.parse(
+        await service.savePlanWorkingCopy(parsedRequest)
+      );
+    }
+  );
+
+  registrar.handle(IPC_CHANNELS.chapterAdoptRevision, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterAdoptRevisionRequestSchema.parse(request);
+    return ChapterAuthoringResultSchema.parse(
+      await service.adoptRevision(parsedRequest)
+    );
   });
 }

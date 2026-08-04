@@ -6,9 +6,14 @@ import type {
 } from '../../src/main/chapter/ProjectChapterService';
 import { IPC_CHANNELS } from '../../src/shared/ipcChannels';
 import type {
+  ChapterAdoptRevisionRequest,
+  ChapterAuthoringResult,
   ChapterDraftReviewResult,
   ChapterInspection,
   ChapterPlanReviewResult,
+  ChapterSaveMissionWorkingCopyRequest,
+  ChapterSavePlanWorkingCopyRequest,
+  ChapterSelectDirectionRequest,
   ChapterTask
 } from '../../src/shared/chapterContract';
 
@@ -50,6 +55,51 @@ const draftReview: ChapterDraftReviewResult = {
   available: false,
   reason: 'not_ready'
 };
+const savedResult: ChapterAuthoringResult = {
+  outcome: 'saved',
+  revisionToken: 'chapter_revision_0123456789abcdef01234567'
+};
+const adoptedResult: ChapterAuthoringResult = { outcome: 'adopted' };
+const reviewToken = 'chapter_review_0123456789abcdef01234567';
+const optionToken = 'chapter_option_0123456789abcdef01234567';
+const participantToken = 'chapter_option_222222222222222222222222';
+
+const selectDirectionRequest: ChapterSelectDirectionRequest = {
+  projectKey: task.projectKey,
+  reviewToken,
+  optionToken
+};
+const savePlanRequest: ChapterSavePlanWorkingCopyRequest = {
+  ...selectDirectionRequest,
+  markdown: '# Revised direction\n\nThe radio speaks twice.\n'
+};
+const saveMissionRequest: ChapterSaveMissionWorkingCopyRequest = {
+  projectKey: task.projectKey,
+  reviewToken,
+  mission: {
+    chapterFunction: 'Open the impossible broadcast.',
+    requiredObjectives: [],
+    debtTokens: [],
+    debtsToIntroduce: [],
+    characterDeltas: [],
+    participantTokens: [participantToken],
+    newParticipants: [],
+    readerInformation: {
+      newKnowledge: [],
+      newSuspicions: [],
+      questionsToMaintain: ['Who is calling?'],
+      questionsToAnswer: []
+    },
+    forbiddenMoves: [],
+    targetEmotionalCurve: [],
+    targetWordCount: null
+  }
+};
+const adoptRequest: ChapterAdoptRevisionRequest = {
+  projectKey: task.projectKey,
+  revisionToken: 'chapter_revision_0123456789abcdef01234567',
+  confirmInvalidation: true
+};
 
 function createService(): ChapterApplicationService {
   return {
@@ -62,7 +112,11 @@ function createService(): ChapterApplicationService {
     get: vi.fn(async () => task),
     cancel: vi.fn(async () => task),
     readPlan: vi.fn(async () => planReview),
-    readDraft: vi.fn(async () => draftReview)
+    readDraft: vi.fn(async () => draftReview),
+    selectDirection: vi.fn(async () => adoptedResult),
+    saveMissionWorkingCopy: vi.fn(async () => savedResult),
+    savePlanWorkingCopy: vi.fn(async () => savedResult),
+    adoptRevision: vi.fn(async () => adoptedResult)
   };
 }
 
@@ -151,6 +205,38 @@ const cases = [
     serviceMethod: 'readDraft',
     response: draftReview,
     invalidResponse: { ...draftReview, path: '/private/draft.md' }
+  },
+  {
+    channel: 'chapterSelectDirection',
+    request: selectDirectionRequest,
+    invalidRequest: { ...selectDirectionRequest, candidateId: 'plan_001' },
+    serviceMethod: 'selectDirection',
+    response: adoptedResult,
+    invalidResponse: { ...adoptedResult, selectedCandidateId: 'plan_001' }
+  },
+  {
+    channel: 'chapterSaveMissionWorkingCopy',
+    request: saveMissionRequest,
+    invalidRequest: { ...saveMissionRequest, sourceMissionHash: 'a'.repeat(64) },
+    serviceMethod: 'saveMissionWorkingCopy',
+    response: savedResult,
+    invalidResponse: { ...savedResult, revisionId: 'author_revision_ch001_mission_v1' }
+  },
+  {
+    channel: 'chapterSavePlanWorkingCopy',
+    request: savePlanRequest,
+    invalidRequest: { ...savePlanRequest, path: 'chapters/chapter_001/selected_plan.md' },
+    serviceMethod: 'savePlanWorkingCopy',
+    response: savedResult,
+    invalidResponse: { ...savedResult, sourceHash: 'a'.repeat(64) }
+  },
+  {
+    channel: 'chapterAdoptRevision',
+    request: adoptRequest,
+    invalidRequest: { ...adoptRequest, confirmInvalidation: false },
+    serviceMethod: 'adoptRevision',
+    response: adoptedResult,
+    invalidResponse: { ...adoptedResult, invalidationReportPath: '/private/report.json' }
   }
 ] as const;
 
@@ -165,6 +251,14 @@ describe('chapter workspace IPC handlers', () => {
     expect(IPC_CHANNELS.chapterCancel).toBe('novel-loop:chapter:cancel');
     expect(IPC_CHANNELS.chapterReadPlan).toBe('novel-loop:chapter:read-plan');
     expect(IPC_CHANNELS.chapterReadDraft).toBe('novel-loop:chapter:read-draft');
+    expect(IPC_CHANNELS.chapterSelectDirection)
+      .toBe('novel-loop:chapter:select-direction');
+    expect(IPC_CHANNELS.chapterSaveMissionWorkingCopy)
+      .toBe('novel-loop:chapter:save-mission-working-copy');
+    expect(IPC_CHANNELS.chapterSavePlanWorkingCopy)
+      .toBe('novel-loop:chapter:save-plan-working-copy');
+    expect(IPC_CHANNELS.chapterAdoptRevision)
+      .toBe('novel-loop:chapter:adopt-revision');
     expect(registrations.map(({ channel }) => channel)).toEqual([
       'novel-loop:chapter:inspect',
       'novel-loop:chapter:start-planning',
@@ -172,9 +266,13 @@ describe('chapter workspace IPC handlers', () => {
       'novel-loop:chapter:get',
       'novel-loop:chapter:cancel',
       'novel-loop:chapter:read-plan',
-      'novel-loop:chapter:read-draft'
+      'novel-loop:chapter:read-draft',
+      'novel-loop:chapter:select-direction',
+      'novel-loop:chapter:save-mission-working-copy',
+      'novel-loop:chapter:save-plan-working-copy',
+      'novel-loop:chapter:adopt-revision'
     ]);
-    expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(7);
+    expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(11);
   });
 
   test.each(cases)('trusted $channel requests call only $serviceMethod', async ({
@@ -189,9 +287,16 @@ describe('chapter workspace IPC handlers', () => {
     await expect(handlerFor(IPC_CHANNELS[channel])(trustedEvent, request))
       .resolves.toEqual(response);
 
-    const expectedArgument = 'projectKey' in request
-      ? request.projectKey
-      : request.taskId;
+    const expectedArgument = [
+      'selectDirection',
+      'saveMissionWorkingCopy',
+      'savePlanWorkingCopy',
+      'adoptRevision'
+    ].includes(serviceMethod)
+      ? request
+      : 'projectKey' in request
+        ? request.projectKey
+        : request.taskId;
     expect(service[serviceMethod]).toHaveBeenCalledWith(expectedArgument);
   });
 

@@ -19,6 +19,8 @@ import type {
   PlanningTask
 } from '../shared/planningContract';
 import type {
+  ChapterAdoptRevisionRequest,
+  ChapterAuthoringResult,
   ChapterCancelRequest,
   ChapterDraftReviewResult,
   ChapterGetRequest,
@@ -27,6 +29,9 @@ import type {
   ChapterPlanReviewResult,
   ChapterReadDraftRequest,
   ChapterReadPlanRequest,
+  ChapterSaveMissionWorkingCopyRequest,
+  ChapterSavePlanWorkingCopyRequest,
+  ChapterSelectDirectionRequest,
   ChapterStartDraftingRequest,
   ChapterStartPlanningRequest,
   ChapterTask
@@ -202,6 +207,38 @@ const novelLoopApi: NovelLoopDesktopApi = {
         request
       );
       return response as ChapterDraftReviewResult;
+    },
+    selectDirection: async (request: ChapterSelectDirectionRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterSelectDirection,
+        request
+      );
+      return response as ChapterAuthoringResult;
+    },
+    saveMissionWorkingCopy: async (
+      request: ChapterSaveMissionWorkingCopyRequest
+    ) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterSaveMissionWorkingCopy,
+        request
+      );
+      return response as ChapterAuthoringResult;
+    },
+    savePlanWorkingCopy: async (
+      request: ChapterSavePlanWorkingCopyRequest
+    ) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterSavePlanWorkingCopy,
+        request
+      );
+      return response as ChapterAuthoringResult;
+    },
+    adoptRevision: async (request: ChapterAdoptRevisionRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterAdoptRevision,
+        request
+      );
+      return response as ChapterAuthoringResult;
     }
   }
 };

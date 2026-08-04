@@ -1,15 +1,17 @@
 import { describe, expect, test } from 'vitest';
 
+import { ChapterReviewTokenStore } from '../../src/main/chapter/ChapterReviewTokenStore';
+
 import type {
   ChapterDraftReviewResult,
   ChapterInspection,
-  ChapterPlanReviewResult,
   ChapterTaskKind
 } from '../../src/shared/chapterContract';
 import type {
   ChapterEngineGateway,
   ChapterEngineProgressEvent,
-  RunChapterInput
+  RunChapterInput,
+  TrustedChapterPlanReview
 } from '../../src/main/chapter/EngineChapterGateway';
 import {
   ProjectChapterService,
@@ -21,24 +23,68 @@ const secondProjectKey = 'project_building';
 const projectRoot = '/library/radio';
 const secondProjectRoot = '/library/building';
 
-const planReview: Extract<ChapterPlanReviewResult, { available: true }> = {
+const planReview: Extract<TrustedChapterPlanReview, { available: true }> = {
   available: true,
   chapterNumber: 1,
   title: 'The Radio Wakes',
+  latestCommittedChapter: 0,
+  reviewHash: 'a'.repeat(64),
+  missionHash: 'b'.repeat(64),
   mission: {
     chapterFunction: 'Open the impossible broadcast.',
-    objectives: ['Introduce the powerless radio.'],
-    readerKnowledge: ['The radio works without power.'],
-    readerQuestions: ['Who is calling?'],
-    narrativePromises: ['Advance the mystery of the impossible signal.'],
-    characterDeltas: ['Lin Cheng moves from skeptical to alert.'],
-    forbiddenMoves: ['Do not reveal the caller.']
+    requiredObjectives: [{
+      id: 'obj_secret',
+      text: 'Introduce the powerless radio.',
+      type: 'plot',
+      priority: 'must'
+    }],
+    debtsToPayOrAdvance: [{
+      id: 'debt_secret',
+      promise: 'Advance the mystery of the impossible signal.'
+    }],
+    debtsToIntroduce: [],
+    characterDeltas: [{
+      characterId: 'char_secret',
+      characterName: 'Lin Cheng',
+      from: 'skeptical',
+      to: 'alert',
+      evidenceRequired: 'He records the frequency.'
+    }],
+    participants: [{
+      characterId: 'char_secret',
+      name: 'Lin Cheng',
+      role: 'protagonist',
+      selected: true
+    }],
+    readerInformationDelta: {
+      newKnowledge: ['The radio works without power.'],
+      newSuspicions: [],
+      questionsToMaintain: ['Who is calling?'],
+      questionsToAnswer: []
+    },
+    forbiddenMoves: ['Do not reveal the caller.'],
+    targetEmotionalCurve: ['unease', 'resolve'],
+    targetWordCount: 3_000
   },
-  selectedPlan: {
+  directions: [{
+    candidateId: 'plan_001',
     title: 'Signal First',
-    markdown: '# Signal First\n\nThe radio speaks first.\n'
-  },
-  alternatives: []
+    markdown: '# Signal First\n\nThe radio speaks first.\n',
+    excerpt: 'The radio speaks first.',
+    strengths: ['Immediate hook.'],
+    risks: ['Needs a grounded reaction.'],
+    aiRecommended: true,
+    active: true
+  }, {
+    candidateId: 'plan_002',
+    title: 'Building First',
+    markdown: '# Building First\n\nOpen at the abandoned building.\n',
+    excerpt: 'Open at the abandoned building.',
+    strengths: ['Immediate atmosphere.'],
+    risks: ['Delays the radio hook.'],
+    aiRecommended: false,
+    active: false
+  }]
 };
 
 const draftReview: Extract<ChapterDraftReviewResult, { available: true }> = {
@@ -69,13 +115,18 @@ interface DeferredRun {
 
 class DeferredChapterGateway implements ChapterEngineGateway {
   readonly inspections = new Map<string, ChapterInspection>();
-  readonly planReviews = new Map<string, ChapterPlanReviewResult>();
+  readonly planReviews = new Map<string, TrustedChapterPlanReview>();
   readonly draftReviews = new Map<string, ChapterDraftReviewResult>();
   readonly runs: DeferredRun[] = [];
+  readonly selections: unknown[] = [];
+  readonly missionRevisions: unknown[] = [];
+  readonly planRevisions: unknown[] = [];
+  readonly adoptions: unknown[] = [];
   autoComplete = false;
   inspectError: unknown;
   planReviewError: unknown;
   draftReviewError: unknown;
+  authoringError: unknown;
 
   constructor() {
     this.inspections.set(projectRoot, availableInspection('not_started'));
@@ -95,7 +146,7 @@ class DeferredChapterGateway implements ChapterEngineGateway {
     return this.startRun('drafting', input);
   }
 
-  async readPlan(root: string): Promise<ChapterPlanReviewResult> {
+  async readPlan(root: string): Promise<TrustedChapterPlanReview> {
     if (this.planReviewError !== undefined) throw this.planReviewError;
     return this.planReviews.get(root) ?? { available: false, reason: 'not_ready' };
   }
@@ -103,6 +154,40 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   async readDraft(root: string): Promise<ChapterDraftReviewResult> {
     if (this.draftReviewError !== undefined) throw this.draftReviewError;
     return this.draftReviews.get(root) ?? { available: false, reason: 'not_ready' };
+  }
+
+  async selectDirection(input: unknown): Promise<void> {
+    if (this.authoringError !== undefined) throw this.authoringError;
+    this.selections.push(input);
+  }
+
+  async createMissionRevision(input: unknown): Promise<{
+    revisionId: string;
+    sourceHash: string;
+  }> {
+    if (this.authoringError !== undefined) throw this.authoringError;
+    this.missionRevisions.push(input);
+    return {
+      revisionId: `author_revision_ch001_mission_v${this.missionRevisions.length}`,
+      sourceHash: 'b'.repeat(64)
+    };
+  }
+
+  async createPlanRevision(input: unknown): Promise<{
+    revisionId: string;
+    sourceHash: string;
+  }> {
+    if (this.authoringError !== undefined) throw this.authoringError;
+    this.planRevisions.push(input);
+    return {
+      revisionId: `author_revision_ch001_plan_v${this.planRevisions.length}`,
+      sourceHash: 'c'.repeat(64)
+    };
+  }
+
+  async adoptRevision(input: unknown): Promise<void> {
+    if (this.authoringError !== undefined) throw this.authoringError;
+    this.adoptions.push(input);
   }
 
   emit(index: number, event: ChapterEngineProgressEvent): void {
@@ -130,8 +215,8 @@ class DeferredChapterGateway implements ChapterEngineGateway {
     if (run.kind === 'planning') {
       this.planReviews.set(run.input.projectRoot, {
         ...planReview,
-        projectRoot: '/private/library/radio'
-      } as unknown as ChapterPlanReviewResult);
+        reviewHash: 'not-a-hash'
+      });
     } else {
       this.draftReviews.set(run.input.projectRoot, {
         ...draftReview,
@@ -539,6 +624,419 @@ describe('ProjectChapterService', () => {
     await expect(service.get(started[1]!.taskId))
       .resolves.toMatchObject({ status: 'succeeded' });
   });
+
+  test('maps trusted plan, mission, and participant bindings to opaque renderer tokens', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+
+    const review = await readAvailablePlan(service);
+    expect(review.reviewToken).toMatch(/^chapter_review_[a-f0-9]{48}$/u);
+    expect(review.directions).toHaveLength(2);
+    expect(review.directions.every(({ optionToken }) => (
+      /^chapter_option_[a-f0-9]{48}$/u.test(optionToken)
+    ))).toBe(true);
+    expect(review.selectedPlan).toEqual({
+      title: 'Signal First',
+      markdown: '# Signal First\n\nThe radio speaks first.\n'
+    });
+    expect(review.alternatives).toEqual([{
+      title: 'Building First',
+      excerpt: 'Open at the abandoned building.',
+      strengths: ['Immediate atmosphere.'],
+      risks: ['Delays the radio hook.']
+    }]);
+    expect(JSON.stringify(review)).not.toMatch(
+      /\/library\/|plan_\d|obj_secret|debt_secret|char_secret|[a-f0-9]{64}|schema|runId|provider|profile|auth/iu
+    );
+  });
+
+  test('resolves direction tokens before selection or alternative plan save', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const alternative = review.directions.find(({ active }) => !active)!;
+
+    await expect(service.selectDirection({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: alternative.optionToken
+    })).resolves.toEqual({ outcome: 'adopted' });
+    expect(gateway.selections).toEqual([{
+      projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_002',
+      expectedReviewHash: 'a'.repeat(64)
+    }]);
+
+    const saved = await service.savePlanWorkingCopy({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: alternative.optionToken,
+      markdown: '# Building revised\n\nThe radio waits upstairs.\n'
+    });
+    expect(saved).toMatchObject({
+      outcome: 'saved',
+      revisionToken: expect.stringMatching(/^chapter_revision_[a-f0-9]{48}$/u)
+    });
+    expect(gateway.planRevisions).toEqual([{
+      projectRoot,
+      chapterNumber: 1,
+      candidateId: 'plan_002',
+      expectedReviewHash: 'a'.repeat(64),
+      markdown: '# Building revised\n\nThe radio waits upstairs.\n'
+    }]);
+  });
+
+  test('resolves mission item tokens while new participants remain name and role only', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const objective = review.mission.objectiveItems[0]!;
+    const debt = review.mission.debtItems[0]!;
+    const participant = review.mission.participantOptions[0]!;
+
+    const result = await service.saveMissionWorkingCopy({
+      projectKey,
+      reviewToken: review.reviewToken,
+      mission: {
+        chapterFunction: review.mission.chapterFunction,
+        requiredObjectives: [{
+          itemToken: objective.itemToken,
+          text: objective.text,
+          type: objective.type,
+          priority: objective.priority
+        }, {
+          itemToken: null,
+          text: 'Make the radio answer a second time.',
+          type: 'foreshadowing',
+          priority: 'should'
+        }],
+        debtTokens: [debt.itemToken],
+        debtsToIntroduce: [{
+          type: 'mystery',
+          promise: 'The caller remembers tomorrow.',
+          importance: 8
+        }],
+        characterDeltas: [{
+          participantToken: participant.participantToken,
+          from: 'skeptical',
+          to: 'alert',
+          evidenceRequired: 'He records the frequency.'
+        }],
+        participantTokens: [participant.participantToken],
+        newParticipants: [{ name: 'Mara', role: 'caller' }],
+        readerInformation: review.mission.readerInformation,
+        forbiddenMoves: review.mission.forbiddenMoves,
+        targetEmotionalCurve: review.mission.targetEmotionalCurve,
+        targetWordCount: review.mission.targetWordCount
+      }
+    });
+
+    expect(result.outcome).toBe('saved');
+    expect(gateway.missionRevisions).toEqual([{
+      projectRoot,
+      chapterNumber: 1,
+      edit: {
+        sourceMissionHash: 'b'.repeat(64),
+        chapterFunction: 'Open the impossible broadcast.',
+        requiredObjectives: [{
+          sourceObjectiveId: 'obj_secret',
+          text: 'Introduce the powerless radio.',
+          type: 'plot',
+          priority: 'must'
+        }, {
+          sourceObjectiveId: null,
+          text: 'Make the radio answer a second time.',
+          type: 'foreshadowing',
+          priority: 'should'
+        }],
+        debtsToPayOrAdvance: ['debt_secret'],
+        debtsToIntroduce: [{
+          type: 'mystery',
+          promise: 'The caller remembers tomorrow.',
+          importance: 8
+        }],
+        characterDeltas: [{
+          characterId: 'char_secret',
+          from: 'skeptical',
+          to: 'alert',
+          evidenceRequired: 'He records the frequency.'
+        }],
+        participatingCharacterIds: ['char_secret'],
+        newCharacters: [{ name: 'Mara', role: 'caller' }],
+        readerInformationDelta: review.mission.readerInformation,
+        forbiddenMoves: review.mission.forbiddenMoves,
+        targetEmotionalCurve: review.mission.targetEmotionalCurve,
+        targetWordCount: 3_000
+      }
+    }]);
+  });
+
+  test('rejects cross-project review tokens and consumes adoption tokens once', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    gateway.planReviews.set(secondProjectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const active = review.directions.find(({ active }) => active)!;
+
+    await expect(service.selectDirection({
+      projectKey: secondProjectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken
+    })).resolves.toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(gateway.selections).toHaveLength(0);
+
+    const saved = await service.savePlanWorkingCopy({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken,
+      markdown: '# Signal revised\n\nThe radio speaks twice.\n'
+    });
+    if (saved.outcome !== 'saved') throw new Error('Expected a saved revision.');
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'adopted' });
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(gateway.adoptions).toHaveLength(1);
+  });
+
+  test('blocks authoring during active and starting generation operations', async () => {
+    const { gateway, resolver, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const active = review.directions.find(({ active }) => active)!;
+
+    const task = await service.startPlanning(projectKey);
+    await eventually(() => expect(gateway.runs).toHaveLength(1));
+    await expect(service.selectDirection({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken
+    })).resolves.toEqual({
+      outcome: 'blocked',
+      messageKey: 'generation_busy'
+    });
+    gateway.succeed(0);
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'succeeded'
+      });
+    });
+
+    let releaseRoot!: () => void;
+    const rootGate = new Promise<void>((resolve) => {
+      releaseRoot = resolve;
+    });
+    let gateRoot = true;
+    const originalResolve = resolver.resolveProjectRoot.bind(resolver);
+    resolver.resolveProjectRoot = async (key) => {
+      if (gateRoot) await rootGate;
+      return originalResolve(key);
+    };
+    gateway.inspections.set(projectRoot, availableInspection('planning_partial'));
+    const starting = service.startPlanning(projectKey);
+    await Promise.resolve();
+    await expect(service.savePlanWorkingCopy({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken,
+      markdown: '# Busy edit\n'
+    })).resolves.toEqual({
+      outcome: 'blocked',
+      messageKey: 'generation_busy'
+    });
+    gateRoot = false;
+    releaseRoot();
+    const startingTask = await starting;
+    await eventually(() => expect(gateway.runs).toHaveLength(2));
+    gateway.succeed(1);
+    await eventually(async () => {
+      await expect(service.get(startingTask.taskId)).resolves.toMatchObject({
+        status: 'succeeded'
+      });
+    });
+  });
+
+  test.each([
+    ['DESKTOP_CHAPTER_EDIT_STALE', 'stale', 'stale_edit'],
+    ['CHAPTER_PARTICIPANT_ROSTER_MISSING', 'blocked', 'participant_roster_missing'],
+    ['DESKTOP_CHAPTER_INVALID_OUTPUT', 'invalid', 'invalid_output'],
+    ['PROJECT_OPERATION_BUSY', 'blocked', 'generation_busy']
+  ] as const)('maps %s without exposing engine errors', async (
+    code,
+    outcome,
+    messageKey
+  ) => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const active = review.directions.find(({ active }) => active)!;
+    gateway.authoringError = withCode(code, '/home/author/private engine error');
+
+    const result = await service.selectDirection({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken
+    });
+    expect(result).toEqual({ outcome, messageKey });
+    expect(JSON.stringify(result)).not.toMatch(/home|private|engine/i);
+  });
+});
+
+describe('ChapterReviewTokenStore', () => {
+  test('creates 192-bit project-bound and purpose-bound review options', () => {
+    const { store } = createTokenStore();
+    const created = store.createReview({
+      projectKey,
+      projectRoot,
+      chapterNumber: 1,
+      latestCommittedChapter: 0,
+      reviewHash: 'a'.repeat(64),
+      missionHash: 'b'.repeat(64),
+      options: [
+        { purpose: 'direction', trustedId: 'plan_001' },
+        { purpose: 'objective', trustedId: 'obj_secret' }
+      ]
+    });
+
+    expect(created.reviewToken).toMatch(/^chapter_review_[a-f0-9]{48}$/u);
+    expect(created.options).toHaveLength(2);
+    expect(created.options[0]?.optionToken)
+      .toMatch(/^chapter_option_[a-f0-9]{48}$/u);
+
+    expect(store.resolveOption({
+      projectKey,
+      projectRoot,
+      reviewToken: created.reviewToken,
+      optionToken: created.options[0]!.optionToken,
+      purpose: 'direction',
+      currentLatestCommittedChapter: 0,
+      currentReviewHash: 'a'.repeat(64)
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: {
+        chapterNumber: 1,
+        trustedId: 'plan_001',
+        missionHash: 'b'.repeat(64)
+      }
+    });
+    expect(store.resolveOption({
+      projectKey,
+      projectRoot,
+      reviewToken: created.reviewToken,
+      optionToken: created.options[0]!.optionToken,
+      purpose: 'objective',
+      currentLatestCommittedChapter: 0,
+      currentReviewHash: 'a'.repeat(64)
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+  });
+
+  test('returns fresh stale results for cross-project, re-bound, changed, and expired reviews', () => {
+    const context = createTokenStore();
+    const created = context.store.createReview(reviewTokenInput());
+    const base = {
+      projectKey,
+      projectRoot,
+      reviewToken: created.reviewToken,
+      currentLatestCommittedChapter: 0,
+      currentReviewHash: 'a'.repeat(64)
+    };
+
+    const failures = [
+      context.store.resolveReview({ ...base, projectKey: secondProjectKey }),
+      context.store.resolveReview({ ...base, projectRoot: secondProjectRoot }),
+      context.store.resolveReview({
+        ...base,
+        currentLatestCommittedChapter: 1
+      }),
+      context.store.resolveReview({ ...base, currentReviewHash: 'c'.repeat(64) })
+    ];
+    for (const failure of failures) {
+      expect(failure).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    }
+    expect(failures[0]).not.toBe(failures[1]);
+
+    context.advance(30 * 60 * 1_000);
+    expect(context.store.resolveReview(base)).toEqual({
+      outcome: 'stale',
+      messageKey: 'stale_edit'
+    });
+  });
+
+  test('retains at most two hundred review bindings', () => {
+    const { store } = createTokenStore();
+    const reviews = Array.from({ length: 201 }, (_, index) => (
+      store.createReview({
+        ...reviewTokenInput(),
+        chapterNumber: index + 1
+      })
+    ));
+    const resolution = (reviewToken: string) => store.resolveReview({
+      projectKey,
+      projectRoot,
+      reviewToken,
+      currentLatestCommittedChapter: 0,
+      currentReviewHash: 'a'.repeat(64)
+    });
+
+    expect(resolution(reviews[0]!.reviewToken).outcome).toBe('stale');
+    expect(resolution(reviews[1]!.reviewToken).outcome).toBe('resolved');
+    expect(resolution(reviews[200]!.reviewToken).outcome).toBe('resolved');
+  });
+
+  test('retains five hundred revision bindings and consumes adoption once', () => {
+    const { store } = createTokenStore();
+    const revisions = Array.from({ length: 501 }, (_, index) => (
+      store.createRevision({
+        projectKey,
+        projectRoot,
+        chapterNumber: 1,
+        latestCommittedChapter: 0,
+        purpose: index % 2 === 0 ? 'plan' : 'mission',
+        sourceHash: String(index).padStart(64, '0'),
+        revisionId: `author_revision_${index + 1}`
+      })
+    ));
+
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[0]!,
+      currentLatestCommittedChapter: 0
+    }).outcome).toBe('stale');
+    expect(store.consumeRevision({
+      projectKey: secondProjectKey,
+      projectRoot,
+      revisionToken: revisions[500]!,
+      currentLatestCommittedChapter: 0
+    }).outcome).toBe('stale');
+
+    const consumed = store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[500]!,
+      currentLatestCommittedChapter: 0
+    });
+    expect(consumed).toMatchObject({
+      outcome: 'resolved',
+      value: {
+        purpose: 'plan',
+        revisionId: 'author_revision_501'
+      }
+    });
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: revisions[500]!,
+      currentLatestCommittedChapter: 0
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+  });
 });
 
 function createService(overrides: {
@@ -551,10 +1049,50 @@ function createService(overrides: {
   const service = new ProjectChapterService({
     gateway,
     projects: resolver,
+    tokenStore: createTokenStore().store,
     clock: () => new Date(Date.UTC(2026, 6, 30, 1, 0, tick++)),
     randomBytes: (size) => new Uint8Array(size).fill(tick % 255)
   });
   return { gateway, resolver, service };
+}
+
+async function readAvailablePlan(service: ProjectChapterService) {
+  const review = await service.readPlan(projectKey);
+  if (!review.available) throw new Error('Expected an available plan review.');
+  return review;
+}
+
+function createTokenStore() {
+  let now = 1_000;
+  let sequence = 0;
+  const store = new ChapterReviewTokenStore({
+    now: () => now,
+    randomBytes: (size) => {
+      expect(size).toBe(24);
+      const bytes = new Uint8Array(size);
+      sequence += 1;
+      new DataView(bytes.buffer).setUint32(0, sequence);
+      return bytes;
+    }
+  });
+  return {
+    store,
+    advance(milliseconds: number) {
+      now += milliseconds;
+    }
+  };
+}
+
+function reviewTokenInput() {
+  return {
+    projectKey,
+    projectRoot,
+    chapterNumber: 1,
+    latestCommittedChapter: 0,
+    reviewHash: 'a'.repeat(64),
+    missionHash: 'b'.repeat(64),
+    options: [{ purpose: 'direction' as const, trustedId: 'plan_001' }]
+  };
 }
 
 function availableInspection(

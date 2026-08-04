@@ -22,6 +22,8 @@ import type {
   PlanningTask
 } from './planningContract';
 import type {
+  ChapterAdoptRevisionRequest,
+  ChapterAuthoringResult,
   ChapterCancelRequest,
   ChapterDraftReviewResult,
   ChapterGetRequest,
@@ -30,6 +32,9 @@ import type {
   ChapterPlanReviewResult,
   ChapterReadDraftRequest,
   ChapterReadPlanRequest,
+  ChapterSaveMissionWorkingCopyRequest,
+  ChapterSavePlanWorkingCopyRequest,
+  ChapterSelectDirectionRequest,
   ChapterStartDraftingRequest,
   ChapterStartPlanningRequest,
   ChapterTask
@@ -67,5 +72,17 @@ export interface NovelLoopDesktopApi {
     cancel(request: ChapterCancelRequest): Promise<ChapterTask>;
     readPlan(request: ChapterReadPlanRequest): Promise<ChapterPlanReviewResult>;
     readDraft(request: ChapterReadDraftRequest): Promise<ChapterDraftReviewResult>;
+    selectDirection(
+      request: ChapterSelectDirectionRequest
+    ): Promise<ChapterAuthoringResult>;
+    saveMissionWorkingCopy(
+      request: ChapterSaveMissionWorkingCopyRequest
+    ): Promise<ChapterAuthoringResult>;
+    savePlanWorkingCopy(
+      request: ChapterSavePlanWorkingCopyRequest
+    ): Promise<ChapterAuthoringResult>;
+    adoptRevision(
+      request: ChapterAdoptRevisionRequest
+    ): Promise<ChapterAuthoringResult>;
   };
 }

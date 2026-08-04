@@ -40,7 +40,7 @@ async function exposeApi(): Promise<NovelLoopDesktopApi> {
 }
 
 describe('typed preload boundary', () => {
-  test('exposes exactly the seven named chapter methods', async () => {
+  test('exposes exactly the eleven named chapter methods', async () => {
     const api = await exposeApi();
 
     expect(Object.keys(api)).toEqual([
@@ -57,7 +57,11 @@ describe('typed preload boundary', () => {
       'get',
       'cancel',
       'readPlan',
-      'readDraft'
+      'readDraft',
+      'selectDirection',
+      'saveMissionWorkingCopy',
+      'savePlanWorkingCopy',
+      'adoptRevision'
     ]);
   });
 
@@ -65,6 +69,9 @@ describe('typed preload boundary', () => {
     const api = await exposeApi();
     const projectRequest = { projectKey: 'project_radio' };
     const taskRequest = { taskId: 'chapter_0123456789abcdef' };
+    const reviewToken = `chapter_review_${'1'.repeat(48)}`;
+    const optionToken = `chapter_option_${'2'.repeat(48)}`;
+    const revisionToken = `chapter_revision_${'3'.repeat(48)}`;
 
     await api.chapter.inspect(projectRequest);
     await api.chapter.startPlanning(projectRequest);
@@ -73,6 +80,44 @@ describe('typed preload boundary', () => {
     await api.chapter.cancel(taskRequest);
     await api.chapter.readPlan(projectRequest);
     await api.chapter.readDraft(projectRequest);
+    await api.chapter.selectDirection({
+      ...projectRequest,
+      reviewToken,
+      optionToken
+    });
+    await api.chapter.saveMissionWorkingCopy({
+      ...projectRequest,
+      reviewToken,
+      mission: {
+        chapterFunction: 'Open the impossible broadcast.',
+        requiredObjectives: [],
+        debtTokens: [],
+        debtsToIntroduce: [],
+        characterDeltas: [],
+        participantTokens: [],
+        newParticipants: [],
+        readerInformation: {
+          newKnowledge: [],
+          newSuspicions: [],
+          questionsToMaintain: [],
+          questionsToAnswer: []
+        },
+        forbiddenMoves: [],
+        targetEmotionalCurve: [],
+        targetWordCount: null
+      }
+    });
+    await api.chapter.savePlanWorkingCopy({
+      ...projectRequest,
+      reviewToken,
+      optionToken,
+      markdown: '# Revised plan\n'
+    });
+    await api.chapter.adoptRevision({
+      ...projectRequest,
+      revisionToken,
+      confirmInvalidation: true
+    });
 
     expect(electron.invoke.mock.calls).toEqual([
       [IPC_CHANNELS.chapterInspect, projectRequest],
@@ -81,7 +126,28 @@ describe('typed preload boundary', () => {
       [IPC_CHANNELS.chapterGet, taskRequest],
       [IPC_CHANNELS.chapterCancel, taskRequest],
       [IPC_CHANNELS.chapterReadPlan, projectRequest],
-      [IPC_CHANNELS.chapterReadDraft, projectRequest]
+      [IPC_CHANNELS.chapterReadDraft, projectRequest],
+      [IPC_CHANNELS.chapterSelectDirection, {
+        ...projectRequest,
+        reviewToken,
+        optionToken
+      }],
+      [IPC_CHANNELS.chapterSaveMissionWorkingCopy, {
+        ...projectRequest,
+        reviewToken,
+        mission: expect.any(Object)
+      }],
+      [IPC_CHANNELS.chapterSavePlanWorkingCopy, {
+        ...projectRequest,
+        reviewToken,
+        optionToken,
+        markdown: '# Revised plan\n'
+      }],
+      [IPC_CHANNELS.chapterAdoptRevision, {
+        ...projectRequest,
+        revisionToken,
+        confirmInvalidation: true
+      }]
     ]);
   });
 

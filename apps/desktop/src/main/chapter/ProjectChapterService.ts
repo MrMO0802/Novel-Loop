@@ -1,22 +1,34 @@
 import { randomBytes as nodeRandomBytes } from 'node:crypto';
 
 import {
+  ChapterAuthoringResultSchema,
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
   ChapterPlanReviewResultSchema,
   ChapterTaskSchema,
+  type ChapterAdoptRevisionRequest,
+  type ChapterAuthoringResult,
   type ChapterDraftReviewResult,
   type ChapterErrorKind,
   type ChapterInspection,
   type ChapterPlanReviewResult,
+  type ChapterSaveMissionWorkingCopyRequest,
+  type ChapterSavePlanWorkingCopyRequest,
+  type ChapterSelectDirectionRequest,
   type ChapterTask,
   type ChapterTaskKind,
   type ChapterTaskStage
 } from '../../shared/chapterContract';
 import type {
   ChapterEngineGateway,
-  ChapterEngineProgressEvent
+  ChapterEngineProgressEvent,
+  TrustedChapterPlanReview,
+  TrustedMissionRevisionInput
 } from './EngineChapterGateway';
+import {
+  TrustedChapterPlanReviewSchema
+} from './EngineChapterGateway';
+import { ChapterReviewTokenStore } from './ChapterReviewTokenStore';
 
 const MAX_TERMINAL_TASKS = 100;
 
@@ -32,6 +44,18 @@ export interface ChapterApplicationService {
   cancel(taskId: string): Promise<ChapterTask>;
   readPlan(projectKey: string): Promise<ChapterPlanReviewResult>;
   readDraft(projectKey: string): Promise<ChapterDraftReviewResult>;
+  selectDirection(
+    request: ChapterSelectDirectionRequest
+  ): Promise<ChapterAuthoringResult>;
+  saveMissionWorkingCopy(
+    request: ChapterSaveMissionWorkingCopyRequest
+  ): Promise<ChapterAuthoringResult>;
+  savePlanWorkingCopy(
+    request: ChapterSavePlanWorkingCopyRequest
+  ): Promise<ChapterAuthoringResult>;
+  adoptRevision(
+    request: ChapterAdoptRevisionRequest
+  ): Promise<ChapterAuthoringResult>;
 }
 
 export interface ProjectChapterServiceDependencies {
@@ -39,6 +63,7 @@ export interface ProjectChapterServiceDependencies {
   gateway: ChapterEngineGateway;
   clock?: () => Date;
   randomBytes?: (size: number) => Uint8Array;
+  tokenStore?: ChapterReviewTokenStore;
 }
 
 interface InternalChapterTask {
@@ -56,14 +81,17 @@ interface StartingTask {
 export class ProjectChapterService implements ChapterApplicationService {
   private readonly clock: () => Date;
   private readonly randomBytes: (size: number) => Uint8Array;
+  private readonly tokenStore: ChapterReviewTokenStore;
   private readonly tasks = new Map<string, InternalChapterTask>();
   private readonly activeByProject = new Map<string, string>();
   private readonly startingByProject = new Map<string, StartingTask>();
+  private readonly authoringByProject = new Set<string>();
   private readonly terminalTaskIds: string[] = [];
 
   constructor(private readonly dependencies: ProjectChapterServiceDependencies) {
     this.clock = dependencies.clock ?? (() => new Date());
     this.randomBytes = dependencies.randomBytes ?? nodeRandomBytes;
+    this.tokenStore = dependencies.tokenStore ?? new ChapterReviewTokenStore();
   }
 
   async inspect(projectKey: string): Promise<ChapterInspection> {
@@ -126,9 +154,13 @@ export class ProjectChapterService implements ChapterApplicationService {
       });
     }
     try {
-      return ChapterPlanReviewResultSchema.parse(
+      const trusted = TrustedChapterPlanReviewSchema.parse(
         await this.dependencies.gateway.readPlan(projectRoot)
       );
+      if (!trusted.available) {
+        return ChapterPlanReviewResultSchema.parse(trusted);
+      }
+      return this.createPublicPlanReview(projectKey, projectRoot, trusted);
     } catch (error) {
       return ChapterPlanReviewResultSchema.parse({
         available: false,
@@ -157,10 +189,382 @@ export class ProjectChapterService implements ChapterApplicationService {
     }
   }
 
+  async selectDirection(
+    request: ChapterSelectDirectionRequest
+  ): Promise<ChapterAuthoringResult> {
+    return this.withAuthoringOperation(request.projectKey, async (
+      projectRoot,
+      trusted
+    ) => {
+      const resolved = this.tokenStore.resolveOption({
+        projectKey: request.projectKey,
+        projectRoot,
+        reviewToken: request.reviewToken,
+        optionToken: request.optionToken,
+        purpose: 'direction',
+        currentLatestCommittedChapter: trusted.latestCommittedChapter,
+        currentReviewHash: trusted.reviewHash
+      });
+      if (resolved.outcome === 'stale') return resolved;
+      await this.dependencies.gateway.selectDirection({
+        projectRoot,
+        chapterNumber: resolved.value.chapterNumber,
+        candidateId: resolved.value.trustedId,
+        expectedReviewHash: resolved.value.reviewHash
+      });
+      return { outcome: 'adopted' };
+    });
+  }
+
+  async savePlanWorkingCopy(
+    request: ChapterSavePlanWorkingCopyRequest
+  ): Promise<ChapterAuthoringResult> {
+    return this.withAuthoringOperation(request.projectKey, async (
+      projectRoot,
+      trusted
+    ) => {
+      const resolved = this.tokenStore.resolveOption({
+        projectKey: request.projectKey,
+        projectRoot,
+        reviewToken: request.reviewToken,
+        optionToken: request.optionToken,
+        purpose: 'direction',
+        currentLatestCommittedChapter: trusted.latestCommittedChapter,
+        currentReviewHash: trusted.reviewHash
+      });
+      if (resolved.outcome === 'stale') return resolved;
+      const created = await this.dependencies.gateway.createPlanRevision({
+        projectRoot,
+        chapterNumber: resolved.value.chapterNumber,
+        candidateId: resolved.value.trustedId,
+        expectedReviewHash: resolved.value.reviewHash,
+        markdown: request.markdown
+      });
+      return {
+        outcome: 'saved',
+        revisionToken: this.tokenStore.createRevision({
+          projectKey: request.projectKey,
+          projectRoot,
+          chapterNumber: resolved.value.chapterNumber,
+          latestCommittedChapter: resolved.value.latestCommittedChapter,
+          purpose: 'plan',
+          sourceHash: created.sourceHash,
+          revisionId: created.revisionId
+        })
+      };
+    });
+  }
+
+  async saveMissionWorkingCopy(
+    request: ChapterSaveMissionWorkingCopyRequest
+  ): Promise<ChapterAuthoringResult> {
+    return this.withAuthoringOperation(request.projectKey, async (
+      projectRoot,
+      trusted
+    ) => {
+      const resolved = this.tokenStore.resolveReview({
+        projectKey: request.projectKey,
+        projectRoot,
+        reviewToken: request.reviewToken,
+        currentLatestCommittedChapter: trusted.latestCommittedChapter,
+        currentReviewHash: trusted.reviewHash
+      });
+      if (resolved.outcome === 'stale') return resolved;
+      const trustedOption = (
+        optionToken: string,
+        purpose: 'objective' | 'debt' | 'participant'
+      ): string | null => {
+        if (resolved.value.optionPurposes.get(optionToken) !== purpose) {
+          return null;
+        }
+        return resolved.value.optionBindings.get(optionToken) ?? null;
+      };
+      const requiredObjectives = request.mission.requiredObjectives.map(
+        (objective) => ({
+          sourceObjectiveId: objective.itemToken === null
+            ? null
+            : trustedOption(objective.itemToken, 'objective'),
+          text: objective.text,
+          type: objective.type,
+          priority: objective.priority
+        })
+      );
+      const debtsToPayOrAdvance = request.mission.debtTokens.map((token) => (
+        trustedOption(token, 'debt')
+      ));
+      const characterDeltas = request.mission.characterDeltas.map((delta) => ({
+        characterId: trustedOption(delta.participantToken, 'participant'),
+        from: delta.from,
+        to: delta.to,
+        evidenceRequired: delta.evidenceRequired
+      }));
+      const participatingCharacterIds = request.mission.participantTokens.map(
+        (token) => trustedOption(token, 'participant')
+      );
+      if (
+        requiredObjectives.some((objective) => (
+          objective.sourceObjectiveId === null
+          && request.mission.requiredObjectives.find((candidate) => (
+            candidate.text === objective.text
+            && candidate.itemToken !== null
+          )) !== undefined
+        ))
+        || debtsToPayOrAdvance.includes(null)
+        || characterDeltas.some(({ characterId }) => characterId === null)
+        || participatingCharacterIds.includes(null)
+      ) {
+        return { outcome: 'stale', messageKey: 'stale_edit' };
+      }
+      const edit: TrustedMissionRevisionInput['edit'] = {
+        sourceMissionHash: resolved.value.missionHash,
+        chapterFunction: request.mission.chapterFunction,
+        requiredObjectives: requiredObjectives as Array<{
+          sourceObjectiveId: string | null;
+          text: string;
+          type: typeof request.mission.requiredObjectives[number]['type'];
+          priority: typeof request.mission.requiredObjectives[number]['priority'];
+        }>,
+        debtsToPayOrAdvance: debtsToPayOrAdvance as string[],
+        debtsToIntroduce: request.mission.debtsToIntroduce,
+        characterDeltas: characterDeltas as Array<{
+          characterId: string;
+          from: string;
+          to: string;
+          evidenceRequired: string;
+        }>,
+        participatingCharacterIds: participatingCharacterIds as string[],
+        newCharacters: request.mission.newParticipants,
+        readerInformationDelta: request.mission.readerInformation,
+        forbiddenMoves: request.mission.forbiddenMoves,
+        targetEmotionalCurve: request.mission.targetEmotionalCurve,
+        targetWordCount: request.mission.targetWordCount
+      };
+      const created = await this.dependencies.gateway.createMissionRevision({
+        projectRoot,
+        chapterNumber: resolved.value.chapterNumber,
+        edit
+      });
+      return {
+        outcome: 'saved',
+        revisionToken: this.tokenStore.createRevision({
+          projectKey: request.projectKey,
+          projectRoot,
+          chapterNumber: resolved.value.chapterNumber,
+          latestCommittedChapter: resolved.value.latestCommittedChapter,
+          purpose: 'mission',
+          sourceHash: created.sourceHash,
+          revisionId: created.revisionId
+        })
+      };
+    });
+  }
+
+  async adoptRevision(
+    request: ChapterAdoptRevisionRequest
+  ): Promise<ChapterAuthoringResult> {
+    return this.withAuthoringOperation(request.projectKey, async (
+      projectRoot,
+      trusted
+    ) => {
+      const resolved = this.tokenStore.consumeRevision({
+        projectKey: request.projectKey,
+        projectRoot,
+        revisionToken: request.revisionToken,
+        currentLatestCommittedChapter: trusted.latestCommittedChapter
+      });
+      if (resolved.outcome === 'stale') return resolved;
+      await this.dependencies.gateway.adoptRevision({
+        projectRoot,
+        chapterNumber: resolved.value.chapterNumber,
+        revisionId: resolved.value.revisionId,
+        sourceHash: resolved.value.sourceHash,
+        purpose: resolved.value.purpose
+      });
+      return { outcome: 'adopted' };
+    });
+  }
+
+  private createPublicPlanReview(
+    projectKey: string,
+    projectRoot: string,
+    trusted: Extract<TrustedChapterPlanReview, { available: true }>
+  ): ChapterPlanReviewResult {
+    const options = [
+      ...trusted.directions.map(({ candidateId }) => ({
+        purpose: 'direction' as const,
+        trustedId: candidateId
+      })),
+      ...trusted.mission.requiredObjectives.map(({ id }) => ({
+        purpose: 'objective' as const,
+        trustedId: id
+      })),
+      ...trusted.mission.debtsToPayOrAdvance.map(({ id }) => ({
+        purpose: 'debt' as const,
+        trustedId: id
+      })),
+      ...trusted.mission.participants.map(({ characterId }) => ({
+        purpose: 'participant' as const,
+        trustedId: characterId
+      }))
+    ];
+    const created = this.tokenStore.createReview({
+      projectKey,
+      projectRoot,
+      chapterNumber: trusted.chapterNumber,
+      latestCommittedChapter: trusted.latestCommittedChapter,
+      reviewHash: trusted.reviewHash,
+      missionHash: trusted.missionHash,
+      options
+    });
+    const tokenByBinding = new Map(created.options.map((option) => [
+      `${option.purpose}\0${option.trustedId}`,
+      option.optionToken
+    ]));
+    const tokenFor = (
+      purpose: 'direction' | 'objective' | 'debt' | 'participant',
+      trustedId: string
+    ): string => {
+      const token = tokenByBinding.get(`${purpose}\0${trustedId}`);
+      if (token === undefined) throw new Error('Opaque chapter binding missing.');
+      return token;
+    };
+    const active = trusted.directions.find((direction) => direction.active);
+    if (active === undefined) throw new Error('Active chapter direction missing.');
+    const narrativePromises = uniqueStrings([
+      ...trusted.mission.debtsToPayOrAdvance.map(({ promise }) => promise),
+      ...trusted.mission.debtsToIntroduce.map(({ promise }) => promise)
+    ]);
+    return ChapterPlanReviewResultSchema.parse({
+      available: true,
+      chapterNumber: trusted.chapterNumber,
+      title: trusted.title,
+      reviewToken: created.reviewToken,
+      mission: {
+        chapterFunction: trusted.mission.chapterFunction,
+        objectives: trusted.mission.requiredObjectives.map(({ text }) => text),
+        readerKnowledge: trusted.mission.readerInformationDelta.newKnowledge,
+        readerQuestions:
+          trusted.mission.readerInformationDelta.questionsToMaintain,
+        narrativePromises,
+        characterDeltas: trusted.mission.characterDeltas.map((delta) => (
+          `${delta.characterName}: ${delta.from} -> ${delta.to}; ${delta.evidenceRequired}`
+        )),
+        forbiddenMoves: trusted.mission.forbiddenMoves,
+        objectiveItems: trusted.mission.requiredObjectives.map((objective) => ({
+          itemToken: tokenFor('objective', objective.id),
+          text: objective.text,
+          type: objective.type,
+          priority: objective.priority
+        })),
+        debtItems: trusted.mission.debtsToPayOrAdvance.map((debt) => ({
+          itemToken: tokenFor('debt', debt.id),
+          promise: debt.promise
+        })),
+        introducedDebts: trusted.mission.debtsToIntroduce,
+        characterDeltaItems: trusted.mission.characterDeltas.map((delta) => ({
+          participantToken: tokenFor('participant', delta.characterId),
+          participantName: delta.characterName,
+          from: delta.from,
+          to: delta.to,
+          evidenceRequired: delta.evidenceRequired
+        })),
+        participantOptions: trusted.mission.participants.map((participant) => ({
+          participantToken: tokenFor(
+            'participant',
+            participant.characterId
+          ),
+          name: participant.name,
+          role: participant.role,
+          selected: participant.selected
+        })),
+        readerInformation: trusted.mission.readerInformationDelta,
+        targetEmotionalCurve: trusted.mission.targetEmotionalCurve,
+        targetWordCount: trusted.mission.targetWordCount
+      },
+      selectedPlan: {
+        title: active.title,
+        markdown: active.markdown
+      },
+      alternatives: trusted.directions
+        .filter((direction) => !direction.active)
+        .map((direction) => ({
+          title: direction.title,
+          excerpt: direction.excerpt,
+          strengths: direction.strengths,
+          risks: direction.risks
+        })),
+      directions: trusted.directions.map((direction) => ({
+        optionToken: tokenFor('direction', direction.candidateId),
+        title: direction.title,
+        markdown: direction.markdown,
+        excerpt: direction.excerpt,
+        strengths: direction.strengths,
+        risks: direction.risks,
+        aiRecommended: direction.aiRecommended,
+        active: direction.active
+      }))
+    });
+  }
+
+  private async withAuthoringOperation(
+    projectKey: string,
+    operation: (
+      projectRoot: string,
+      trusted: Extract<TrustedChapterPlanReview, { available: true }>
+    ) => Promise<ChapterAuthoringResult>
+  ): Promise<ChapterAuthoringResult> {
+    if (
+      this.activeTask(projectKey) !== null
+      || this.startingByProject.has(projectKey)
+      || this.authoringByProject.has(projectKey)
+    ) {
+      return ChapterAuthoringResultSchema.parse({
+        outcome: 'blocked',
+        messageKey: 'generation_busy'
+      });
+    }
+    this.authoringByProject.add(projectKey);
+    try {
+      const projectRoot = await this.resolveProjectRoot(projectKey);
+      if (projectRoot === null) {
+        return ChapterAuthoringResultSchema.parse({
+          outcome: 'invalid',
+          messageKey: 'project_unavailable'
+        });
+      }
+      const trusted = TrustedChapterPlanReviewSchema.parse(
+        await this.dependencies.gateway.readPlan(projectRoot)
+      );
+      if (!trusted.available) {
+        return ChapterAuthoringResultSchema.parse({
+          outcome: 'invalid',
+          messageKey: trusted.reason === 'project_unavailable'
+            ? 'project_unavailable'
+            : 'invalid_output'
+        });
+      }
+      return ChapterAuthoringResultSchema.parse(
+        await operation(projectRoot, trusted)
+      );
+    } catch (error) {
+      return ChapterAuthoringResultSchema.parse(mapAuthoringError(error));
+    } finally {
+      this.authoringByProject.delete(projectKey);
+    }
+  }
+
   private async start(
     projectKey: string,
     kind: ChapterTaskKind
   ): Promise<ChapterTask> {
+    if (this.authoringByProject.has(projectKey)) {
+      return this.createFailedTask(
+        projectKey,
+        kind,
+        1,
+        'generation_busy'
+      );
+    }
     const active = this.activeTask(projectKey);
     if (active !== null) {
       return active.task.kind === kind
@@ -298,7 +702,7 @@ export class ProjectChapterService implements ChapterApplicationService {
       };
       if (internal.task.kind === 'planning') {
         await this.dependencies.gateway.plan(input);
-        const review = ChapterPlanReviewResultSchema.parse(
+        const review = TrustedChapterPlanReviewSchema.parse(
           await this.dependencies.gateway.readPlan(projectRoot)
         );
         requireMatchingReview(review, internal.task.chapterNumber);
@@ -507,7 +911,7 @@ function blockedByArtifacts(
 }
 
 function requireMatchingReview(
-  review: ChapterPlanReviewResult | ChapterDraftReviewResult,
+  review: TrustedChapterPlanReview | ChapterDraftReviewResult,
   chapterNumber: number
 ): void {
   if (!review.available || review.chapterNumber !== chapterNumber) {
@@ -516,6 +920,31 @@ function requireMatchingReview(
       { code: 'DESKTOP_CHAPTER_INVALID_OUTPUT' }
     );
   }
+}
+
+function mapAuthoringError(error: unknown): ChapterAuthoringResult {
+  switch (errorCode(error)) {
+    case 'DESKTOP_CHAPTER_EDIT_STALE':
+    case 'DESKTOP_CHAPTER_EDIT_COMMITTED':
+    case 'DESKTOP_CHAPTER_REVISION_ALREADY_ADOPTED':
+      return { outcome: 'stale', messageKey: 'stale_edit' };
+    case 'CHAPTER_PARTICIPANT_ROSTER_MISSING':
+      return {
+        outcome: 'blocked',
+        messageKey: 'participant_roster_missing'
+      };
+    case 'PROJECT_OPERATION_BUSY':
+      return { outcome: 'blocked', messageKey: 'generation_busy' };
+    case 'DESKTOP_CHAPTER_INVALID_OUTPUT':
+    case 'DESKTOP_CHAPTER_EDIT_INVALID':
+      return { outcome: 'invalid', messageKey: 'invalid_output' };
+    default:
+      return { outcome: 'invalid', messageKey: 'invalid_output' };
+  }
+}
+
+function uniqueStrings(items: string[]): string[] {
+  return [...new Set(items)];
 }
 
 function addCompletedStage(

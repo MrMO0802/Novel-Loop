@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const PlanCandidateSchema = z.object({
   id: z.string(),
-  title: z.string(),
+  title: z.string().trim().min(1).max(240),
   summary: z.string(),
   markdown: z.string(),
   strengths: z.array(z.string()).default([]),

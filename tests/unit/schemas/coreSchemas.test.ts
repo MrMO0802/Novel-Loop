@@ -1,3 +1,5 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
 import {
@@ -8,6 +10,7 @@ import {
   DiagnosticsReportSchema,
   ForeshadowingSchema,
   NarrativeDebtSchema,
+  PlanCandidateSchema,
   ReaderStateSchema,
   RevisionPlanSchema,
   SceneCardSchema,
@@ -140,4 +143,52 @@ describe('core schemas', () => {
     expect(revisionPlan.operations).toHaveLength(1);
     expect(canonPatch.chapterNumber).toBe(1);
   });
+
+  test('rejects blank and oversized plan candidate titles in local and slim output validation', async () => {
+    const candidate = {
+      id: 'plan_001',
+      title: '可用标题',
+      summary: '候选方向摘要。',
+      markdown: '候选方向正文。'
+    };
+    const slimSchema = JSON.parse(await readFile(
+      path.resolve('schemas/codex-output/slim/planning.plan_candidates.slim.schema.json'),
+      'utf8'
+    )) as SlimPlanCandidatesSchema;
+    const titleSchema = slimSchema.properties.candidates.items.properties.title;
+
+    for (const title of ['   ', 'a'.repeat(241)]) {
+      expect(PlanCandidateSchema.safeParse({ ...candidate, title }).success).toBe(false);
+      expect(slimSchemaAcceptsTitle(titleSchema, title)).toBe(false);
+    }
+  });
 });
+
+interface SlimPlanCandidatesSchema {
+  properties: {
+    candidates: {
+      items: {
+        properties: {
+          title: SlimPlanCandidateTitleSchema;
+        };
+      };
+    };
+  };
+}
+
+interface SlimPlanCandidateTitleSchema {
+  type?: string;
+  minLength?: number;
+  maxLength?: number;
+  pattern?: string;
+}
+
+function slimSchemaAcceptsTitle(schema: SlimPlanCandidateTitleSchema, title: string): boolean {
+  const minLength = schema.minLength ?? 0;
+  const maxLength = schema.maxLength ?? Number.POSITIVE_INFINITY;
+  const pattern = schema.pattern === undefined ? undefined : new RegExp(schema.pattern, 'u');
+  return schema.type === 'string'
+    && title.length >= minLength
+    && title.length <= maxLength
+    && (pattern === undefined || pattern.test(title));
+}

@@ -17,6 +17,7 @@ import {
   MAX_SCENE_CARD_CHARACTERS,
   MAX_SCENE_CARD_FIELD_CHARS,
   MAX_SCENE_CARDS_BYTES,
+  expectedPlanCandidateId,
   utf8Bytes
 } from '../../utils/chapterWorkloadLimits.js';
 import { normalizeDiagnosticsWithReport } from './diagnosticsNormalizer.js';
@@ -329,8 +330,9 @@ export function normalizePlanCandidates(value: unknown, context: CodexNormalizat
   const slim = SlimPlanCandidatesSchema.parse(value);
   return PlanCandidatesSchema.parse({
     chapterNumber: context.chapterNumber ?? slim.chapterNumber,
-    candidates: slim.candidates.map((candidate) => ({
+    candidates: slim.candidates.map((candidate, index) => ({
       ...candidate,
+      id: expectedPlanCandidateId(index + 1),
       strengths: [],
       risks: []
     }))

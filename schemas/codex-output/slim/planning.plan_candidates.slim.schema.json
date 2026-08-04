@@ -10,7 +10,12 @@
         "required": ["id", "title", "summary", "markdown"],
         "properties": {
           "id": { "type": "string" },
-          "title": { "type": "string" },
+          "title": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 240,
+            "pattern": "\\S"
+          },
           "summary": { "type": "string" },
           "markdown": { "type": "string" }
         },

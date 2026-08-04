@@ -258,9 +258,9 @@ describe('desktop chapter workspace', () => {
           expect.stringMatching(/skeptical.*alert/i)
         ])
       },
-      selectedPlan: { title: 'Plan 001' },
+      selectedPlan: { title: 'Continuity First' },
       alternatives: expect.arrayContaining([
-        { title: 'Plan 001', excerpt: expect.any(String), strengths: expect.any(Array), risks: expect.any(Array) }
+        { title: 'Building First', excerpt: expect.any(String), strengths: expect.any(Array), risks: expect.any(Array) }
       ])
     });
     expect(JSON.stringify(planReview)).not.toMatch(
@@ -278,6 +278,23 @@ describe('desktop chapter workspace', () => {
     expect(JSON.stringify(draftReview)).not.toMatch(
       /artifactPath|runId|contextManifest|scene_cards\.json|draft_v1\.md|story_state/i
     );
+  }, 30_000);
+
+  test('uses localized ordinal titles for legacy heading-free directions', async () => {
+    await prepareGeneratedChapter();
+    await Promise.all([
+      store.writeText(paths.chapterArtifact(1, 'selected_plan.md'), '选定方向正文。\n'),
+      store.writeText(paths.chapterArtifact(1, 'plan_candidates', 'plan_001.md'), '方向一正文。\n'),
+      store.writeText(paths.chapterArtifact(1, 'plan_candidates', 'plan_002.md'), '方向二正文。\n'),
+      store.writeText(paths.chapterArtifact(1, 'plan_candidates', 'plan_003.md'), '方向三正文。\n')
+    ]);
+
+    const review = await readDesktopChapterPlan({ projectRoot: paths.projectRoot });
+
+    expect(review.available && review.selectedPlan.title).toBe('方案一');
+    expect(review.available && review.alternatives.map(({ title }) => title))
+      .toEqual(['方案二', '方案三']);
+    expect(JSON.stringify(review)).not.toContain('Untitled Plan');
   }, 30_000);
 
   test('rejects an impossible mission debt reference instead of showing an author-facing fallback', async () => {

@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -68,6 +68,22 @@ describe('chapter dry-run planning', () => {
   test('creates mission, candidates, ranking, and selected plan without writing prose or updating state', async () => {
     const paths = new ProjectPaths(tempRoot, 'demo-novel');
     const store = new FileStore();
+    const localizedFixturesRoot = path.join(tempRoot, 'localized-fixtures');
+    await cp(fixturesRoot, localizedFixturesRoot, { recursive: true });
+    const candidatesFixturePath = path.join(
+      localizedFixturesRoot,
+      'planning.generate_plan_candidates.default.json'
+    );
+    const candidatesFixture = JSON.parse(await readFile(candidatesFixturePath, 'utf8')) as {
+      candidates: Array<{ title: string; markdown: string }>;
+    };
+    candidatesFixture.candidates[0]!.title = '遗物中的异常报告';
+    candidatesFixture.candidates[0]!.markdown = '# 旧标题\n\n# 章节要点\n\n正文。\n';
+    await writeFile(
+      candidatesFixturePath,
+      `${JSON.stringify(candidatesFixture, null, 2)}\n`,
+      'utf8'
+    );
 
     const result = await runChapterDryRun({
       projectId: 'demo-novel',
@@ -76,7 +92,7 @@ describe('chapter dry-run planning', () => {
       candidates: 3,
       provider: 'mock',
       promptRoot,
-      fixturesRoot,
+      fixturesRoot: localizedFixturesRoot,
       runId: 'run_chapter_dry_run_test'
     });
 
@@ -96,9 +112,17 @@ describe('chapter dry-run planning', () => {
     expect(mission.characterDeltas[0]?.characterId).toBe('char_lincheng');
     expect(mission.forbiddenMoves).toContain('不要揭示旧收音机与林澈母亲失踪案的关系');
 
-    await expect(store.readText(paths.chapterArtifact(1, 'plan_candidates', 'plan_001.md'))).resolves.toContain('# Plan 001');
-    await expect(store.readText(paths.chapterArtifact(1, 'plan_candidates', 'plan_002.md'))).resolves.toContain('# Plan 002');
-    await expect(store.readText(paths.chapterArtifact(1, 'selected_plan.md'))).resolves.toContain('# Plan 002');
+    const first = await store.readText(
+      paths.chapterArtifact(1, 'plan_candidates', 'plan_001.md')
+    );
+    expect(first).toMatch(/^# 遗物中的异常报告\n/);
+    expect(first.match(/^# /gm)).toHaveLength(1);
+    await expect(
+      store.readText(paths.chapterArtifact(1, 'plan_candidates', 'plan_002.md'))
+    ).resolves.toMatch(/^# 雨夜误接求救频道\n/);
+    await expect(
+      store.readText(paths.chapterArtifact(1, 'selected_plan.md'))
+    ).resolves.toMatch(/^# 雨夜误接求救频道\n/);
 
     const ranking = await store.readJson(paths.chapterArtifact(1, 'ranking.json'), ChapterPlanRankingSchema);
     expect(ranking.selectedCandidateId).toBe('plan_002');

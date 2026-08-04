@@ -209,19 +209,28 @@ export async function readDesktopChapterPlan(
       forbiddenMoves: plan.mission.forbiddenMoves
     },
     selectedPlan: {
-      title: markdownTitle(plan.selectedPlan),
+      title: localizedPlanTitle(
+        plan.selectedPlan,
+        plan.ranking.candidates.findIndex(
+          (candidate) => candidate.candidateId === plan.ranking.selectedCandidateId
+        ) + 1
+      ),
       markdown: plan.selectedPlan
     },
-    alternatives: plan.ranking.candidates.slice(0, MAX_ALTERNATIVES).map((candidate) => {
-      const markdown = plan.candidates.get(candidate.candidateId);
-      if (markdown === undefined) throw invalidChapterOutput('A ranked plan candidate is missing.');
-      return {
-        title: markdownTitle(markdown),
-        excerpt: markdownExcerpt(markdown),
-        strengths: candidate.strengths,
-        risks: candidate.risks
-      };
-    })
+    alternatives: plan.ranking.candidates
+      .map((candidate, index) => ({ candidate, ordinal: index + 1 }))
+      .filter(({ candidate }) => candidate.candidateId !== plan.ranking.selectedCandidateId)
+      .slice(0, MAX_ALTERNATIVES)
+      .map(({ candidate, ordinal }) => {
+        const markdown = plan.candidates.get(candidate.candidateId);
+        if (markdown === undefined) throw invalidChapterOutput('A ranked plan candidate is missing.');
+        return {
+          title: localizedPlanTitle(markdown, ordinal),
+          excerpt: markdownExcerpt(markdown),
+          strengths: candidate.strengths,
+          risks: candidate.risks
+        };
+      })
   });
 }
 
@@ -629,9 +638,10 @@ async function pathExists(filePath: string): Promise<boolean> {
   }
 }
 
-function markdownTitle(markdown: string): string {
-  const heading = markdown.split(/\r?\n/).find((line) => /^#\s+\S/.test(line));
-  return heading?.replace(/^#\s+/, '').trim() || 'Untitled Plan';
+function localizedPlanTitle(markdown: string, ordinal: number): string {
+  const heading = markdown.split(/\r?\n/u).find((line) => /^#\s+\S/u.test(line));
+  return heading?.replace(/^#\s+/u, '').trim()
+    || `方案${['一', '二', '三', '四', '五'][ordinal - 1] ?? ordinal}`;
 }
 
 function markdownExcerpt(markdown: string): string {

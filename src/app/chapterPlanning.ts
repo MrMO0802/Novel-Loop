@@ -95,6 +95,7 @@ export interface GeneratePlanCandidatesResult {
 
 export interface ValidatedPlanCandidate {
   id: string;
+  title: string;
   artifact: string;
   markdown: string;
   sizeBytes: number;
@@ -728,19 +729,21 @@ function toValidatedPlanCandidates(
     if (candidate.id !== expectedIds[index] || candidate.markdown.trim().length === 0) {
       throw invalidPlanCandidatesOutput(chapterNumber);
     }
-    const sizeBytes = utf8Bytes(candidate.markdown);
+    const markdown = formatPlanCandidateMarkdown(candidate.title, candidate.markdown);
+    const sizeBytes = utf8Bytes(markdown);
     aggregateBytes += sizeBytes;
     if (sizeBytes > MAX_PLAN_CANDIDATE_BYTES || aggregateBytes > MAX_PLAN_CANDIDATES_BYTES) {
       throw invalidPlanCandidatesOutput(chapterNumber);
     }
     return {
       id: candidate.id,
+      title: candidate.title,
       artifact: relativeChapterArtifact(
         chapterNumber,
         'plan_candidates',
         `${candidate.id}.md`
       ),
-      markdown: candidate.markdown,
+      markdown,
       sizeBytes
     };
   });
@@ -788,7 +791,13 @@ async function readValidatedPlanCandidateDirectory(
       ) {
         throw invalidPlanCandidatesOutput(chapterNumber);
       }
-      validated.push({ id, artifact, markdown, sizeBytes });
+      validated.push({
+        id,
+        title: planCandidateTitle(markdown) ?? id,
+        artifact,
+        markdown,
+        sizeBytes
+      });
     }
   } catch (error) {
     if (error instanceof AppError && error.code === 'CHAPTER_PLAN_CANDIDATES_INVALID_OUTPUT') {
@@ -797,6 +806,32 @@ async function readValidatedPlanCandidateDirectory(
     throw invalidPlanCandidatesOutput(chapterNumber);
   }
   return validated;
+}
+
+export function formatPlanCandidateMarkdown(
+  title: string,
+  markdown: string
+): string {
+  const safeTitle = title.replace(/\s+/gu, ' ').trim().slice(0, 240);
+  const lines = markdown.trim().split(/\r?\n/u);
+  const firstContent = lines.findIndex((line) => line.trim().length > 0);
+  if (firstContent >= 0 && /^#\s+\S/u.test(lines[firstContent]!)) {
+    lines.splice(firstContent, 1);
+  }
+  const body = lines
+    .map((line) => /^#\s+\S/u.test(line) ? `#${line}` : line)
+    .join('\n')
+    .trim();
+  return body.length > 0
+    ? `# ${safeTitle}\n\n${body}\n`
+    : `# ${safeTitle}\n`;
+}
+
+function planCandidateTitle(markdown: string): string | undefined {
+  return markdown.split(/\r?\n/u)
+    .find((line) => /^#\s+\S/u.test(line))
+    ?.replace(/^#\s+/u, '')
+    .trim();
 }
 
 function validatedExpectedCandidateIds(count: number, chapterNumber: number): string[] {

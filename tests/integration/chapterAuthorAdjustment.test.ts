@@ -341,6 +341,33 @@ describe('bounded Codex chapter author adjustments', () => {
     expect(await canonicalSnapshot()).toEqual(before);
   });
 
+  test('rejects author-facing leakage in a narrative debt type', async () => {
+    const before = await canonicalSnapshot();
+    const source = ChapterMissionSchema.parse(JSON.parse(before.mission));
+    const output = completeMissionOutput(source, {
+      debtsToIntroduce: [{
+        ...source.debtsToIntroduce[0]!,
+        type: 'selected_plan.md'
+      }]
+    });
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(output),
+      json: output
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await expect(adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(before.mission),
+      authorInstruction: '调整本章需要引入的悬念。',
+      promptRoot
+    })).rejects.toMatchObject({ code: 'CHAPTER_ADJUSTMENT_INVALID_OUTPUT' });
+
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+    expect(await canonicalSnapshot()).toEqual(before);
+  });
+
   test.each([
     ['unknown', (source: ChapterMission) => [{
       ...source.requiredObjectives[0]!,
@@ -558,7 +585,7 @@ describe('bounded Codex chapter author adjustments', () => {
     );
     await store.writeText(
       sourcePath,
-      `# 交通事故\n\n从重复事故开始。\n\n<!-- ${relevant.id} -->\n`
+      `# 交通事故\n\n从重复事故开始，并与${relevant.name}核对事故记录。\n`
     );
     const sourceContent = await store.readText(sourcePath);
     let providerPrompt = '';

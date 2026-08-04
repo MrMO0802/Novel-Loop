@@ -432,6 +432,7 @@ function missionAuthorFacingStrings(mission: ChapterMission): string[] {
   return [
     mission.chapterFunction,
     ...mission.requiredObjectives.map(({ text }) => text),
+    ...mission.debtsToIntroduce.map(({ type }) => type),
     ...mission.debtsToIntroduce.map(({ promise }) => promise),
     ...mission.characterDeltas.flatMap(({ from, to, evidenceRequired }) => (
       [from, to, evidenceRequired]
@@ -771,9 +772,16 @@ function relevantCharacterIds(
   planText: string,
   storyState: StoryState
 ): string[] {
+  const normalizedPlanText = planText.toLocaleLowerCase();
   const planReferencedIds = storyState.characters
-    .map(({ id }) => id)
-    .filter((characterId) => planText.includes(characterId));
+    .filter(({ id, name }) => (
+      normalizedPlanText.includes(id.toLocaleLowerCase())
+      || (
+        name.trim().length > 0
+        && normalizedPlanText.includes(name.trim().toLocaleLowerCase())
+      )
+    ))
+    .map(({ id }) => id);
   return uniqueStrings([
     ...mission.participatingCharacterIds,
     ...planReferencedIds,

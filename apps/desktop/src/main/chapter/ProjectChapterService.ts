@@ -118,6 +118,7 @@ export class ProjectChapterService implements ChapterApplicationService {
   private readonly activeByProject = new Map<string, string>();
   private readonly startingByProject = new Map<string, StartingTask>();
   private readonly authoringByProject = new Set<string>();
+  private readonly recoveryByProject = new Map<string, Promise<void>>();
   private readonly terminalTaskIds: string[] = [];
 
   constructor(private readonly dependencies: ProjectChapterServiceDependencies) {
@@ -615,6 +616,11 @@ export class ProjectChapterService implements ChapterApplicationService {
       trusted: Extract<TrustedChapterPlanReview, { available: true }>
     ) => Promise<ChapterAuthoringResult>
   ): Promise<ChapterAuthoringResult> {
+    const recovery = this.recoveryByProject.get(projectKey);
+    if (recovery !== undefined) {
+      await recovery;
+      return this.withAuthoringOperation(projectKey, operation);
+    }
     if (
       this.activeTask(projectKey) !== null
       || this.startingByProject.has(projectKey)
@@ -634,7 +640,7 @@ export class ProjectChapterService implements ChapterApplicationService {
           messageKey: 'project_unavailable'
         });
       }
-      await this.recoverAdjustmentPublications(projectKey, projectRoot);
+      await this.recoverAdjustmentPublications(projectKey, projectRoot, true);
       const trusted = TrustedChapterPlanReviewSchema.parse(
         await this.dependencies.gateway.readPlan(projectRoot)
       );
@@ -718,6 +724,11 @@ export class ProjectChapterService implements ChapterApplicationService {
     request: ChapterAdjustMissionRequest | ChapterAdjustPlanRequest,
     kind: Extract<ChapterTaskKind, 'mission_adjustment' | 'plan_adjustment'>
   ): Promise<ChapterTask> {
+    const recovery = this.recoveryByProject.get(request.projectKey);
+    if (recovery !== undefined) {
+      await recovery;
+      return this.startAdjustment(request, kind);
+    }
     const requestFingerprint = adjustmentRequestFingerprint(kind, request);
     if (this.authoringByProject.has(request.projectKey)) {
       return this.createFailedTask(request.projectKey, kind, 1, 'generation_busy');
@@ -980,7 +991,8 @@ export class ProjectChapterService implements ChapterApplicationService {
         latestCommittedChapter: pending.latestCommittedChapter,
         purpose: pending.purpose,
         sourceHash: result.sourceHash,
-        revisionId: result.revisionId
+        revisionId: result.revisionId,
+        durablePublication: true
       };
       await this.dependencies.gateway.bindAdjustmentPublication({
         projectRoot: pending.projectRoot,
@@ -1106,6 +1118,44 @@ export class ProjectChapterService implements ChapterApplicationService {
 
   private async recoverAdjustmentPublications(
     projectKey: string,
+    projectRoot: string,
+    ownedByAuthoringOperation = false
+  ): Promise<void> {
+    const existing = this.recoveryByProject.get(projectKey);
+    if (existing !== undefined) {
+      await existing;
+      return;
+    }
+    const active = this.activeTask(projectKey);
+    const starting = this.startingByProject.get(projectKey);
+    if (
+      active?.task.kind === 'mission_adjustment'
+      || active?.task.kind === 'plan_adjustment'
+      || starting?.kind === 'mission_adjustment'
+      || starting?.kind === 'plan_adjustment'
+      || (
+        !ownedByAuthoringOperation
+        && this.authoringByProject.has(projectKey)
+      )
+    ) {
+      return;
+    }
+    const recovery = this.performAdjustmentPublicationRecovery(
+      projectKey,
+      projectRoot
+    );
+    this.recoveryByProject.set(projectKey, recovery);
+    try {
+      await recovery;
+    } finally {
+      if (this.recoveryByProject.get(projectKey) === recovery) {
+        this.recoveryByProject.delete(projectKey);
+      }
+    }
+  }
+
+  private async performAdjustmentPublicationRecovery(
+    projectKey: string,
     projectRoot: string
   ): Promise<void> {
     let recoverable: Awaited<ReturnType<
@@ -1140,7 +1190,9 @@ export class ProjectChapterService implements ChapterApplicationService {
         latestCommittedChapter: entry.publication.latestCommittedChapter,
         purpose: entry.publication.purpose,
         sourceHash: entry.sourceHash,
-        revisionId: entry.revisionId
+        revisionId: entry.revisionId,
+        createdAtMs: Date.parse(entry.publication.boundAt),
+        durablePublication: true
       };
       let reserved = false;
       try {
@@ -1148,6 +1200,15 @@ export class ProjectChapterService implements ChapterApplicationService {
           entry.publication.revisionToken,
           binding
         );
+        if (reservation === 'expired') {
+          await this.dependencies.gateway.discardAdjustmentRevision({
+            projectRoot,
+            chapterNumber: entry.chapterNumber,
+            revisionId: entry.revisionId,
+            expectedSourceHash: entry.sourceHash
+          });
+          continue;
+        }
         if (reservation === 'reserved') {
           reserved = true;
           this.tokenStore.publishReservedRevision(

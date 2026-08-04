@@ -240,6 +240,7 @@ export interface TrustedRecoverableAdjustmentPublication {
     projectKey: string;
     latestCommittedChapter: number;
     purpose: 'mission' | 'plan';
+    boundAt: string;
   };
 }
 
@@ -254,7 +255,8 @@ const TrustedRecoverableAdjustmentPublicationSchema = z.object({
     revisionToken: z.string().regex(/^chapter_revision_[a-f0-9]{48}$/u),
     projectKey: z.string().regex(/^project_[A-Za-z0-9_-]+$/u).max(96),
     latestCommittedChapter: z.number().int().nonnegative(),
-    purpose: z.enum(['mission', 'plan'])
+    purpose: z.enum(['mission', 'plan']),
+    boundAt: z.string().datetime({ offset: true })
   }).strict().nullable()
 }).strict();
 
@@ -424,7 +426,8 @@ export class EngineChapterGateway implements ChapterEngineGateway {
               projectKey: record.publication.projectKey,
               latestCommittedChapter:
                 record.publication.latestCommittedChapter,
-              purpose: record.publication.purpose
+              purpose: record.publication.purpose,
+              boundAt: record.publication.boundAt
             }
       })
     ));

@@ -178,11 +178,13 @@ class DeferredChapterGateway implements ChapterEngineGateway {
       projectKey: string;
       latestCommittedChapter: number;
       purpose: 'mission' | 'plan';
+      boundAt: string;
     };
   }> = [];
   bindAdjustmentPublicationError: unknown;
   promoteAdjustmentPublicationError: unknown;
   discardAdjustmentError: unknown;
+  publicationListBarrier: Promise<void> | null = null;
   recoveryReads = 0;
   autoComplete = false;
   inspectError: unknown;
@@ -292,6 +294,7 @@ class DeferredChapterGateway implements ChapterEngineGateway {
 
   async listAdjustmentPublications() {
     this.recoveryReads += 1;
+    await this.publicationListBarrier;
     return this.recoverableAdjustmentPublications;
   }
 
@@ -1331,7 +1334,8 @@ describe('ProjectChapterService', () => {
           revisionToken,
           projectKey,
           latestCommittedChapter: 0,
-          purpose: 'mission'
+          purpose: 'mission',
+          boundAt: new Date(1_000).toISOString()
         }
       }];
       const service = new ProjectChapterService({
@@ -1351,6 +1355,123 @@ describe('ProjectChapterService', () => {
       );
     }
   );
+
+  test('does not recover an unbound publishing record owned by a live adjustment', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const recoveryReadsBeforeTask = gateway.recoveryReads;
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+    gateway.recoverableAdjustmentPublications = [{
+      state: 'publishing',
+      revisionId: 'author_revision_ch001_mission_v1',
+      sourceHash: 'b'.repeat(64),
+      chapterNumber: 1,
+      publication: null
+    }];
+
+    await expect(service.readPlan(projectKey)).resolves.toMatchObject({
+      available: true
+    });
+    expect(gateway.recoveryReads).toBe(recoveryReadsBeforeTask);
+    expect(gateway.discardedAdjustments).toHaveLength(0);
+
+    await service.cancel(task.taskId);
+    gateway.failAdjustment(0, withCode(
+      'CHAPTER_ADJUSTMENT_CANCELLED',
+      'cancelled'
+    ));
+    await eventually(async () => {
+      expect((await service.get(task.taskId)).status).toBe('cancelled');
+    });
+  });
+
+  test('serializes an adjustment start behind an in-flight recovery scan', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    let releasePublicationList!: () => void;
+    gateway.publicationListBarrier = new Promise<void>((resolve) => {
+      releasePublicationList = resolve;
+    });
+    const pendingRead = service.readPlan(projectKey);
+    await eventually(() => expect(gateway.recoveryReads).toBe(2));
+
+    const pendingAdjustment = service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const startedBeforeRecoveryCompleted = gateway.adjustments.length;
+    if (startedBeforeRecoveryCompleted > 0) {
+      gateway.recoverableAdjustmentPublications = [{
+        state: 'publishing',
+        revisionId: 'author_revision_ch001_mission_v1',
+        sourceHash: 'b'.repeat(64),
+        chapterNumber: 1,
+        publication: null
+      }];
+    }
+    releasePublicationList();
+    await pendingRead;
+    const task = await pendingAdjustment;
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    expect(startedBeforeRecoveryCompleted).toBe(0);
+    expect(gateway.discardedAdjustments).toHaveLength(0);
+
+    await service.cancel(task.taskId);
+    gateway.failAdjustment(0, withCode(
+      'CHAPTER_ADJUSTMENT_CANCELLED',
+      'cancelled'
+    ));
+    await eventually(async () => {
+      expect((await service.get(task.taskId)).status).toBe('cancelled');
+    });
+  });
+
+  test('discards an expired durable adjustment instead of resurrecting its token', async () => {
+    const revisionToken = `chapter_revision_${'e'.repeat(48)}`;
+    const tokenContext = createTokenStore();
+    tokenContext.advance(30 * 60 * 1_000);
+    const gateway = new DeferredChapterGateway();
+    gateway.planReviews.set(projectRoot, planReview);
+    gateway.recoverableAdjustmentPublications = [{
+      state: 'ready',
+      revisionId: 'author_revision_ch001_mission_v1',
+      sourceHash: 'b'.repeat(64),
+      chapterNumber: 1,
+      publication: {
+        revisionToken,
+        projectKey,
+        latestCommittedChapter: 0,
+        purpose: 'mission',
+        boundAt: new Date(1_000).toISOString()
+      }
+    }];
+    const service = new ProjectChapterService({
+      gateway,
+      projects: new MemoryProjectResolver(),
+      tokenStore: tokenContext.store
+    });
+
+    await expect(service.readPlan(projectKey)).resolves.toMatchObject({
+      available: true
+    });
+    expect(gateway.discardedAdjustments).toHaveLength(1);
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(gateway.adoptions).toHaveLength(0);
+  });
 
   test('keeps an unbound publishing record non-ready when recovery cleanup fails', async () => {
     const gateway = new DeferredChapterGateway();
@@ -2024,6 +2145,38 @@ describe('ChapterReviewTokenStore', () => {
     })).toMatchObject({
       outcome: 'resolved',
       value: revisionTokenInput(0)
+    });
+  });
+
+  test('does not evict a durable recovered adjustment token at capacity', () => {
+    const { store } = createTokenStore();
+    const durableToken = `chapter_revision_${'d'.repeat(48)}`;
+    const durableInput = {
+      ...revisionTokenInput(0),
+      revisionId: 'author_revision_ch001_plan_v1',
+      createdAtMs: 1_000,
+      durablePublication: true
+    };
+    expect(store.reserveRecoveredRevisionPublication(
+      durableToken,
+      durableInput
+    )).toBe('reserved');
+    store.publishReservedRevision(durableToken, durableInput);
+    store.commitRevisionPublication(durableToken);
+    Array.from({ length: 499 }, (_, index) => (
+      store.createRevision(revisionTokenInput(index + 1))
+    ));
+
+    store.createRevision(revisionTokenInput(500));
+
+    expect(store.reserveRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: durableToken,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: { revisionId: 'author_revision_ch001_plan_v1' }
     });
   });
 

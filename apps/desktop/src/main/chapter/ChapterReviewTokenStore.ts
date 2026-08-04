@@ -37,6 +37,7 @@ export interface StoredRevisionToken {
   sourceHash: string;
   revisionId: string;
   createdAtMs: number;
+  durablePublication: boolean;
 }
 
 interface TokenStoreDependencies {
@@ -79,6 +80,8 @@ interface CreateRevisionInput {
   purpose: ChapterRevisionPurpose;
   sourceHash: string;
   revisionId: string;
+  createdAtMs?: number;
+  durablePublication?: boolean;
 }
 
 interface RevisionPublicationReservation {
@@ -253,8 +256,12 @@ export class ChapterReviewTokenStore {
   reserveRecoveredRevisionPublication(
     revisionToken: string,
     input: CreateRevisionInput
-  ): 'existing' | 'reserved' {
+  ): 'existing' | 'reserved' | 'expired' {
     this.pruneExpired();
+    const createdAtMs = input.createdAtMs ?? this.now();
+    if (this.now() - createdAtMs >= TOKEN_TTL_MS) {
+      return 'expired';
+    }
     const existing = this.revisions.get(revisionToken);
     if (existing !== undefined) {
       if (!sameRevisionBinding(existing, input)) {
@@ -315,7 +322,8 @@ export class ChapterReviewTokenStore {
     }
     this.revisions.set(revisionToken, {
       ...input,
-      createdAtMs: this.now()
+      createdAtMs: input.createdAtMs ?? this.now(),
+      durablePublication: input.durablePublication ?? false
     });
     reservation.published = true;
     if (evictedBinding !== undefined) {
@@ -431,6 +439,7 @@ export class ChapterReviewTokenStore {
       if (
         !this.reservedRevisions.has(token)
         && !publicationEvictions.has(token)
+        && !this.revisions.get(token)?.durablePublication
       ) return token;
     }
     return null;

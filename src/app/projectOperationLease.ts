@@ -291,7 +291,11 @@ async function recoverStaleLock(
 ): Promise<boolean> {
   try {
     const lockStat = await stat(lockPath);
-    if (Date.now() - lockStat.mtimeMs <= PROJECT_OPERATION_LOCK_STALE_MS) {
+    const ownerAlive = await isLockOwnerAlive(lockPath);
+    if (
+      ownerAlive !== false
+      && Date.now() - lockStat.mtimeMs <= PROJECT_OPERATION_LOCK_STALE_MS
+    ) {
       return false;
     }
     const stalePath = `${lockPath}.stale-${token}`;
@@ -301,6 +305,30 @@ async function recoverStaleLock(
   } catch (error) {
     if (hasCode(error, 'ENOENT')) return true;
     return false;
+  }
+}
+
+async function isLockOwnerAlive(lockPath: string): Promise<boolean | null> {
+  try {
+    const parsed: unknown = JSON.parse(
+      await readFile(path.join(lockPath, 'owner.json'), 'utf8')
+    );
+    if (
+      typeof parsed !== 'object'
+      || parsed === null
+      || !('pid' in parsed)
+      || typeof parsed.pid !== 'number'
+      || !Number.isInteger(parsed.pid)
+      || parsed.pid <= 0
+    ) return null;
+    try {
+      process.kill(parsed.pid, 0);
+      return true;
+    } catch (error) {
+      return hasCode(error, 'ESRCH') ? false : true;
+    }
+  } catch {
+    return null;
   }
 }
 

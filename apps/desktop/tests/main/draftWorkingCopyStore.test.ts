@@ -1,4 +1,5 @@
 import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -82,6 +83,76 @@ describe('DraftWorkingCopyStore', () => {
       markdown: 'x'.repeat(2 * 1024 * 1024 + 1),
       savedAt: '2026-08-04T01:00:00.000Z'
     })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_INVALID' });
+  });
+
+  test('reopens escape-heavy markdown that remains within the Markdown byte limit', async () => {
+    const root = await makeRoot();
+    const store = new DraftWorkingCopyStore(root);
+    const markdown = '\u0000'.repeat(2 * 1024 * 1024);
+
+    await store.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown,
+      savedAt: '2026-08-04T01:00:00.000Z'
+    });
+
+    await expect(new DraftWorkingCopyStore(root).read(projectKey, 1, sourceHash))
+      .resolves.toMatchObject({ recoveryAvailable: true, stale: false, markdown });
+  });
+
+  test('quarantines non-UTF-8 stored JSON instead of exposing replacement-character prose', async () => {
+    const root = await makeRoot();
+    const store = new DraftWorkingCopyStore(root);
+    const directory = path.join(root, 'working-copies', projectKey, 'chapter_001');
+    const target = path.join(directory, 'draft.json');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    const serialized = JSON.stringify({
+      schemaVersion: '1.0',
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: 'INVALID_BYTE_MARKER',
+      savedAt: '2026-08-04T01:00:00.000Z'
+    });
+    const [prefix, suffix] = serialized.split('INVALID_BYTE_MARKER');
+    if (prefix === undefined || suffix === undefined) throw new Error('Expected marker split.');
+    const bytes = Buffer.concat([
+      Buffer.from(prefix, 'utf8'),
+      Buffer.from([0xff]),
+      Buffer.from(suffix, 'utf8')
+    ]);
+    await writeFile(target, bytes, { mode: 0o600 });
+
+    await expect(store.read(projectKey, 1, sourceHash)).resolves.toEqual({
+      recoveryAvailable: false,
+      stale: false,
+      markdown: null,
+      savedAt: null
+    });
+    expect(await readFile(`${target}.quarantine`)).toEqual(bytes);
+  });
+
+  test('closes an owned child directory handle when mode hardening throws', async () => {
+    const root = await makeRoot();
+    let openedFd: number | null = null;
+    const store = new DraftWorkingCopyStore(root, {
+      setDirectoryMode: async (handle: FileHandle) => {
+        openedFd = handle.fd;
+        throw new Error('forced directory mode failure');
+      }
+    });
+
+    await expect(store.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: '# 第一章\n\n不会保存。\n',
+      savedAt: '2026-08-04T01:00:00.000Z'
+    })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+    if (openedFd === null) throw new Error('Expected the injected child handle.');
+    await expect(lstat(`/proc/self/fd/${openedFd}`)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   test('keeps the prior working copy when atomic replacement fails', async () => {

@@ -178,6 +178,31 @@ describe('ChapterDraftEditor', () => {
     expect(api.saveDraftWorkingCopy).not.toHaveBeenCalled();
     expect(screen.getByRole('textbox', { name: '章节正文' })).toHaveValue(draft.markdown);
   });
+
+  test('shows an explicit recovery-required action when adoption returns a durable failure result', async () => {
+    const api = installApi();
+    const onAdopted = vi.fn();
+    api.adoptDraftRevision.mockResolvedValueOnce({
+      outcome: 'recovery_required',
+      nextAction: 'reload_chapter'
+    });
+    render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{
+        recoveryAvailable: false,
+        stale: false,
+        markdown: null,
+        savedAt: null,
+        revisionToken: `chapter_revision_${'c'.repeat(48)}`
+      }} onAdopted={onAdopted} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
+
+    expect(await screen.findByText('采用过程需要恢复后才能继续编辑。')).toBeVisible();
+    expect(onAdopted).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '重新载入本章' }));
+    expect(onAdopted).toHaveBeenCalledTimes(1);
+  });
 });
 
 function deferred<T>() {

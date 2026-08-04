@@ -118,6 +118,121 @@ export const AuthorRevisionRecordSchema = z.object({
   }
 });
 
+export const AuthorRevisionAdoptionJournalStateSchema = z.enum([
+  'prepared',
+  'committed',
+  'recovered_rolled_back'
+]);
+
+export const AuthorRevisionAdoptionRecoveryReasonSchema = z.enum([
+  'in_process_failure',
+  'read_time_recovery'
+]);
+
+export const AuthorRevisionAdoptionMutationSchema = z.object({
+  recordPath: ProjectRelativePathSchema,
+  beforeRecord: AuthorRevisionRecordSchema,
+  intendedRecord: AuthorRevisionRecordSchema
+}).strict().superRefine((mutation, context) => {
+  const before = mutation.beforeRecord;
+  const intended = mutation.intendedRecord;
+  const immutableFields = [
+    'schemaVersion',
+    'revisionId',
+    'projectId',
+    'chapterNumber',
+    'artifactKind',
+    'mode',
+    'sourceCandidateId',
+    'sourceHash',
+    'workingCopyPath',
+    'workingCopyHash',
+    'authorInstruction',
+    'createdAt',
+    'storyStateMutated'
+  ] as const;
+  for (const field of immutableFields) {
+    if (before[field] !== intended[field]) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['intendedRecord', field],
+        message: 'An adoption transaction cannot change immutable revision data.'
+      });
+    }
+  }
+});
+
+export const AuthorRevisionAdoptionJournalSchema = z.object({
+  schemaVersion: z.literal('1.0'),
+  journalId: IdentifierSchema.regex(
+    /^author_adoption_ch\d{3}_(?:mission|plan|draft)_v[1-9]\d*$/u
+  ),
+  projectId: IdentifierSchema,
+  chapterNumber: z.number().int().positive(),
+  artifactKind: AuthorRevisionArtifactKindSchema,
+  targetRevisionId: IdentifierSchema.regex(
+    /^author_revision_ch\d{3}_(?:mission|plan|draft)_v[1-9]\d*$/u
+  ),
+  invalidationReportPath: ProjectRelativePathSchema.nullable(),
+  state: AuthorRevisionAdoptionJournalStateSchema,
+  mutations: z.array(AuthorRevisionAdoptionMutationSchema).min(1).max(256),
+  createdAt: TimestampSchema,
+  updatedAt: TimestampSchema,
+  recoveryReason: AuthorRevisionAdoptionRecoveryReasonSchema.nullable(),
+  storyStateMutated: z.literal(false)
+}).strict().superRefine((journal, context) => {
+  const recordPaths = new Set<string>();
+  let targetMutationCount = 0;
+  for (const [index, mutation] of journal.mutations.entries()) {
+    if (recordPaths.has(mutation.recordPath)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['mutations', index, 'recordPath'],
+        message: 'Adoption transaction record paths must be unique.'
+      });
+    }
+    recordPaths.add(mutation.recordPath);
+    for (const record of [mutation.beforeRecord, mutation.intendedRecord]) {
+      if (
+        record.projectId !== journal.projectId
+        || record.chapterNumber !== journal.chapterNumber
+        || record.artifactKind !== journal.artifactKind
+      ) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['mutations', index],
+          message: 'Adoption transaction records must match the journal scope.'
+        });
+      }
+    }
+    if (mutation.beforeRecord.revisionId === journal.targetRevisionId) {
+      targetMutationCount += 1;
+      if (mutation.intendedRecord.state !== 'adopted') {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['mutations', index, 'intendedRecord', 'state'],
+          message: 'The target revision must become adopted.'
+        });
+      }
+    }
+  }
+  if (targetMutationCount !== 1) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['mutations'],
+      message: 'The adoption transaction must include exactly one target revision.'
+    });
+  }
+  const recovered = journal.state === 'recovered_rolled_back';
+  if (recovered !== (journal.recoveryReason !== null)) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['recoveryReason'],
+      message: 'Only a recovered transaction records a recovery reason.'
+    });
+  }
+});
+
 export const ChapterDirectionSelectionSchema = z.object({
   schemaVersion: z.literal('1.0'),
   selectionId: IdentifierSchema,
@@ -177,6 +292,18 @@ export type AuthorRevisionState = z.infer<typeof AuthorRevisionStateSchema>;
 export type AuthorRevisionPublication = z.infer<typeof AuthorRevisionPublicationSchema>;
 export type AuthorInvalidatedNode = z.infer<typeof AuthorInvalidatedNodeSchema>;
 export type AuthorRevisionRecord = z.infer<typeof AuthorRevisionRecordSchema>;
+export type AuthorRevisionAdoptionJournalState = z.infer<
+  typeof AuthorRevisionAdoptionJournalStateSchema
+>;
+export type AuthorRevisionAdoptionRecoveryReason = z.infer<
+  typeof AuthorRevisionAdoptionRecoveryReasonSchema
+>;
+export type AuthorRevisionAdoptionMutation = z.infer<
+  typeof AuthorRevisionAdoptionMutationSchema
+>;
+export type AuthorRevisionAdoptionJournal = z.infer<
+  typeof AuthorRevisionAdoptionJournalSchema
+>;
 export type ChapterDirectionSelection = z.infer<typeof ChapterDirectionSelectionSchema>;
 export type AuthorArtifactReference = z.infer<typeof AuthorArtifactReferenceSchema>;
 export type AuthorArchivedArtifactReference = z.infer<typeof AuthorArchivedArtifactReferenceSchema>;

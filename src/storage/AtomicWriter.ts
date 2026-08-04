@@ -170,11 +170,13 @@ export class AtomicWriter {
       );
       try {
         await tempHandle.writeFile(content, { encoding: 'utf8' });
+        await tempHandle.sync();
       } finally {
         await tempHandle.close();
       }
       await this.pathGuard?.(targetPath);
       await rename(anchoredTempPath, anchoredTargetPath);
+      await directoryHandle.sync();
     } catch (error) {
       await rm(anchoredTempPath, { force: true });
       throw error;

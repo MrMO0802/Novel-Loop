@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 
 import {
+  AuthorRevisionAdoptionJournalSchema,
   AuthorEditInvalidationReportSchema,
   AuthorInvalidatedNodeSchema,
   AuthorRevisionArtifactKindSchema,
@@ -169,6 +170,63 @@ describe('chapter author revision schemas', () => {
     expect(() => AuthorEditInvalidationReportSchema.parse({
       ...report,
       archivedArtifacts: [{ ...report.archivedArtifacts[0], hash: 'E'.repeat(64) }]
+    })).toThrow();
+  });
+
+  test('defines a strict durable adoption journal with complete before and intended records', () => {
+    const previous = AuthorRevisionRecordSchema.parse({
+      ...validRevision,
+      revisionId: 'author_revision_ch001_plan_v1',
+      state: 'adopted',
+      adoptedAt: '2026-08-04T01:30:00.000Z'
+    });
+    const target = AuthorRevisionRecordSchema.parse({
+      ...validRevision,
+      revisionId: 'author_revision_ch001_plan_v2',
+      workingCopyPath: 'chapters/chapter_001/author_revisions/plan_revision_v2.md'
+    });
+    const journal = {
+      schemaVersion: '1.0',
+      journalId: 'author_adoption_ch001_plan_v1',
+      projectId: 'demo-novel',
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      targetRevisionId: target.revisionId,
+      invalidationReportPath: 'chapters/chapter_001/author_revisions/edit_invalidation_report_v2.json',
+      state: 'prepared',
+      mutations: [{
+        recordPath: 'chapters/chapter_001/author_revisions/plan_revision_v1.json',
+        beforeRecord: previous,
+        intendedRecord: { ...previous, state: 'superseded' }
+      }, {
+        recordPath: 'chapters/chapter_001/author_revisions/plan_revision_v2.json',
+        beforeRecord: target,
+        intendedRecord: {
+          ...target,
+          state: 'adopted',
+          adoptedAt: '2026-08-04T02:00:00.000Z',
+          invalidationReportPath: 'chapters/chapter_001/author_revisions/edit_invalidation_report_v2.json'
+        }
+      }],
+      createdAt: '2026-08-04T02:00:00.000Z',
+      updatedAt: '2026-08-04T02:00:00.000Z',
+      recoveryReason: null,
+      storyStateMutated: false
+    };
+
+    expect(AuthorRevisionAdoptionJournalSchema.parse(journal)).toEqual(journal);
+    expect(() => AuthorRevisionAdoptionJournalSchema.parse({
+      ...journal,
+      mutations: journal.mutations.slice(0, 1)
+    })).toThrow();
+    expect(() => AuthorRevisionAdoptionJournalSchema.parse({
+      ...journal,
+      state: 'recovered_rolled_back',
+      recoveryReason: null
+    })).toThrow();
+    expect(() => AuthorRevisionAdoptionJournalSchema.parse({
+      ...journal,
+      storyStateMutated: true
     })).toThrow();
   });
 });

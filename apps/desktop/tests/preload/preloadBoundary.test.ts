@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, test, vi } from 'vitest';
 
 import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import { IPC_CHANNELS } from '../../src/shared/ipcChannels';
+import { registerChapterHandlers } from '../../src/main/ipc/registerChapterHandlers';
+import type { ChapterApplicationService } from '../../src/main/chapter/ProjectChapterService';
 
 const electron = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
@@ -177,6 +179,65 @@ describe('typed preload boundary', () => {
         confirmInvalidation: true
       }]
     ]);
+  });
+
+  test('preserves a recovery-required adoption result across invoke and preload serialization', async () => {
+    const unused = async (): Promise<never> => {
+      throw new Error('Unexpected test service call.');
+    };
+    const service: ChapterApplicationService = {
+      inspect: unused,
+      startPlanning: unused,
+      startDrafting: unused,
+      adjustMission: unused,
+      adjustPlan: unused,
+      get: unused,
+      cancel: unused,
+      readPlan: unused,
+      readDraft: unused,
+      readDraftWorkingCopy: unused,
+      saveDraftWorkingCopy: unused,
+      discardDraftWorkingCopy: unused,
+      adoptDraftRevision: async () => {
+        throw Object.assign(new Error('private path: /home/author/draft.json'), {
+          code: 'DRAFT_ADOPTION_RECOVERY_REQUIRED'
+        });
+      },
+      selectDirection: unused,
+      saveMissionWorkingCopy: unused,
+      savePlanWorkingCopy: unused,
+      adoptRevision: unused
+    };
+    let adoptionHandler: ((
+      event: { senderFrame: { url: string } },
+      request: unknown
+    ) => Promise<unknown>) | null = null;
+    const trustedRendererUrl = 'http://127.0.0.1:5173';
+    registerChapterHandlers({
+      handle(channel, handler) {
+        if (channel === IPC_CHANNELS.chapterAdoptDraftRevision) {
+          adoptionHandler = handler;
+        }
+      }
+    }, service, trustedRendererUrl);
+    electron.invoke.mockImplementation(async (channel: string, request: unknown) => {
+      if (channel !== IPC_CHANNELS.chapterAdoptDraftRevision || adoptionHandler === null) {
+        throw new Error('Unexpected IPC call.');
+      }
+      return structuredClone(await adoptionHandler({
+        senderFrame: { url: `${trustedRendererUrl}/chapter-workspace` }
+      }, request));
+    });
+    const api = await exposeApi();
+
+    await expect(api.chapter.adoptDraftRevision({
+      projectKey: 'project_radio',
+      revisionToken: `chapter_revision_${'4'.repeat(48)}`,
+      confirmAdoption: true
+    })).resolves.toEqual({
+      outcome: 'recovery_required',
+      nextAction: 'reload_chapter'
+    });
   });
 
   test('exposes no generic or privileged API capability', async () => {

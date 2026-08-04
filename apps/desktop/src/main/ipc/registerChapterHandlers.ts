@@ -148,7 +148,7 @@ export function registerChapterHandlers(
   registrar.handle(IPC_CHANNELS.chapterAdoptDraftRevision, async (event, request) => {
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterAdoptDraftRevisionRequestSchema.parse(request);
-    return safeDraftIpc(async () => ChapterDraftAdoptionResultSchema.parse(
+    return safeDraftAdoptionIpc(async () => ChapterDraftAdoptionResultSchema.parse(
       await service.adoptDraftRevision(parsedRequest)
     ));
   });
@@ -194,20 +194,27 @@ export function registerChapterHandlers(
   });
 }
 
-async function safeDraftIpc<T>(operation: () => Promise<T>): Promise<T> {
+async function safeDraftAdoptionIpc(
+  operation: () => Promise<ReturnType<typeof ChapterDraftAdoptionResultSchema.parse>>
+): Promise<ReturnType<typeof ChapterDraftAdoptionResultSchema.parse>> {
   try {
     return await operation();
   } catch (error) {
     if (errorCode(error) === 'DRAFT_ADOPTION_RECOVERY_REQUIRED') {
-      throw Object.assign(
-        new Error('The draft adoption needs review before another edit is adopted.'),
-        { code: 'CHAPTER_DRAFT_RECOVERY_REQUIRED' }
-      );
+      return ChapterDraftAdoptionResultSchema.parse({
+        outcome: 'recovery_required',
+        nextAction: 'reload_chapter'
+      });
     }
-    throw Object.assign(
-      new Error('The local chapter draft operation could not be completed.'),
-      { code: 'CHAPTER_DRAFT_OPERATION_FAILED' }
-    );
+    throw new Error('The local chapter draft operation could not be completed.');
+  }
+}
+
+async function safeDraftIpc<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw new Error('The local chapter draft operation could not be completed.');
   }
 }
 

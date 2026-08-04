@@ -6,6 +6,7 @@ import {
   ChapterAdjustPlanRequestSchema,
   ChapterAdoptRevisionRequestSchema,
   ChapterAuthoringResultSchema,
+  ChapterDraftAdoptionResultSchema,
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
   ChapterOptionTokenSchema,
@@ -136,6 +137,22 @@ const validTask = {
 } as const;
 
 describe('chapter workspace contract', () => {
+  test('defines a strict serializable adoption recovery result without internal details', () => {
+    expect(ChapterDraftAdoptionResultSchema.parse({ outcome: 'adopted' }))
+      .toEqual({ outcome: 'adopted' });
+    expect(ChapterDraftAdoptionResultSchema.parse({
+      outcome: 'recovery_required',
+      nextAction: 'reload_chapter'
+    })).toEqual({
+      outcome: 'recovery_required',
+      nextAction: 'reload_chapter'
+    });
+    expect(ChapterDraftAdoptionResultSchema.safeParse({
+      outcome: 'recovery_required',
+      nextAction: 'reload_chapter',
+      path: '/home/author/private.json'
+    }).success).toBe(false);
+  });
   test('requires exactly 192-bit lowercase hexadecimal opaque tokens', () => {
     const cases = [
       [ChapterReviewTokenSchema, 'chapter_review'],

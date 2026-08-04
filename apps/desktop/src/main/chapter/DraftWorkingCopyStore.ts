@@ -8,11 +8,12 @@ import {
 } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
+import { TextDecoder } from 'node:util';
 
 import { z } from 'zod';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
-const MAX_RECORD_BYTES = MAX_MARKDOWN_BYTES + 16 * 1024;
+const MAX_RECORD_BYTES = MAX_MARKDOWN_BYTES * 6 + 64 * 1024;
 const DEFAULT_DESCRIPTOR_ROOT = '/proc/self/fd';
 const Sha256Schema = z.string().regex(/^[a-f0-9]{64}$/u);
 const ProjectKeySchema = z.string().regex(/^project_[A-Za-z0-9_-]+$/u).max(96);
@@ -49,6 +50,7 @@ export interface DraftWorkingCopyReadResult {
 export interface DraftWorkingCopyStoreOptions {
   replace?: (temporaryPath: string, targetPath: string) => Promise<void>;
   descriptorRoot?: string;
+  setDirectoryMode?: (directory: FileHandle) => Promise<void>;
 }
 
 interface AnchoredDirectory {
@@ -59,6 +61,7 @@ interface AnchoredDirectory {
 export class DraftWorkingCopyStore {
   private readonly replace: (temporaryPath: string, targetPath: string) => Promise<void>;
   private readonly descriptorRoot: string;
+  private readonly setDirectoryMode: (directory: FileHandle) => Promise<void>;
   private readonly userDataRoot: string;
   private readonly operations = new Map<string, Promise<void>>();
 
@@ -69,10 +72,13 @@ export class DraftWorkingCopyStore {
     this.userDataRoot = path.resolve(userDataRoot);
     this.replace = options.replace ?? rename;
     this.descriptorRoot = options.descriptorRoot ?? DEFAULT_DESCRIPTOR_ROOT;
+    this.setDirectoryMode = options.setDirectoryMode
+      ?? (async (directory) => directory.chmod(0o700));
   }
 
   async save(record: DraftWorkingCopySaveInput): Promise<void> {
     const parsed = parseRecord({ schemaVersion: '1.0', ...record });
+    const serialized = serializeRecord(parsed);
     const operationKey = this.operationKey(parsed.projectKey, parsed.chapterNumber);
     await this.enqueue(operationKey, async () => {
       const directory = await this.openDirectory(
@@ -98,7 +104,7 @@ export class DraftWorkingCopyStore {
         temporaryCreated = true;
         try {
           await temporaryHandle.chmod(0o600);
-          await temporaryHandle.writeFile(JSON.stringify(parsed), 'utf8');
+          await temporaryHandle.writeFile(serialized, 'utf8');
           await temporaryHandle.sync();
         } finally {
           await temporaryHandle.close();
@@ -138,7 +144,11 @@ export class DraftWorkingCopyStore {
         text = await readBoundedText(target);
       } catch (error: unknown) {
         if (isMissing(error)) return unavailable();
-        if (isUnsafeLink(error) || errorCode(error) === 'DRAFT_WORKING_COPY_OVERSIZED') {
+        if (
+          isUnsafeLink(error)
+          || errorCode(error) === 'DRAFT_WORKING_COPY_OVERSIZED'
+          || errorCode(error) === 'DRAFT_WORKING_COPY_INVALID_ENCODING'
+        ) {
           await this.quarantine(target);
           return unavailable();
         }
@@ -292,14 +302,14 @@ export class DraftWorkingCopyStore {
             if (!isAlreadyExists(mkdirError)) throw mkdirError;
           });
           child = await open(childPath, flags);
-          await child.chmod(0o700);
+          handles.push(child);
+          await this.setDirectoryMode(child);
         }
+        if (!handles.includes(child)) handles.push(child);
         const metadata = await child.stat();
         if (!metadata.isDirectory()) {
-          await child.close();
           throw draftStoreError();
         }
-        handles.push(child);
         current = child;
       }
       return { handle: current, handles };
@@ -357,6 +367,16 @@ function parseRecord(value: unknown): DraftWorkingCopyRecord {
       : new Error('Draft working copy is invalid.');
     throw Object.assign(tagged, { code: 'DRAFT_WORKING_COPY_INVALID' });
   }
+}
+
+function serializeRecord(record: DraftWorkingCopyRecord): string {
+  const serialized = JSON.stringify(record);
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_RECORD_BYTES) {
+    throw Object.assign(new Error('Draft working copy exceeds the serialized size limit.'), {
+      code: 'DRAFT_WORKING_COPY_INVALID'
+    });
+  }
+  return serialized;
 }
 
 function positiveChapter(value: number): number {
@@ -433,7 +453,15 @@ async function readBoundedText(target: string): Promise<string> {
         code: 'DRAFT_WORKING_COPY_OVERSIZED'
       });
     }
-    return buffer.subarray(0, offset).toString('utf8');
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(
+        buffer.subarray(0, offset)
+      );
+    } catch {
+      throw Object.assign(new Error('Draft working copy is not valid UTF-8.'), {
+        code: 'DRAFT_WORKING_COPY_INVALID_ENCODING'
+      });
+    }
   } finally {
     await handle.close();
   }

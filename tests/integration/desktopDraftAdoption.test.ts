@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { spawn } from 'node:child_process';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -17,6 +18,7 @@ import {
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 import {
+  AuthorRevisionAdoptionJournalSchema,
   AuthorEditInvalidationReportSchema,
   AuthorRevisionRecordSchema
 } from '../../src/schemas/index.js';
@@ -299,5 +301,62 @@ describe('desktop draft adoption', () => {
       invalidatedNodes: ['future_diagnostics'],
       storyStateMutated: false
     });
+  }, 30_000);
+
+  test('recovers a prepared adoption journal after a subprocess dies after superseding the active revision', async () => {
+    const store = new FileStore();
+    const generatedBefore = await readFile(paths.chapterArtifact(1, 'draft_v1.md'));
+    const stateBefore = await readFile(paths.storyState());
+    const queueBefore = await readFile(paths.chapterQueue());
+    const initial = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!initial.available) throw new Error('Expected a generated draft.');
+    await adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${initial.markdown}\n\n第一版。\n`,
+      expectedSourceHash: initial.sourceHash
+    });
+    const active = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!active.available) throw new Error('Expected an adopted draft.');
+    const payloadPath = path.join(projectsRoot, 'crash-adoption-payload.json');
+    await writeFile(payloadPath, JSON.stringify({
+      markdown: `${active.markdown}\n\n第二版。\n`,
+      expectedSourceHash: active.sourceHash
+    }), 'utf8');
+
+    const child = spawn(process.execPath, [
+      path.resolve('tests/fixtures/crash-draft-adoption.mjs'),
+      paths.projectRoot,
+      payloadPath
+    ], { stdio: ['ignore', 'pipe', 'pipe'] });
+    const exit = await new Promise<{ code: number | null; signal: NodeJS.Signals | null }>(
+      (resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', (code, signal) => resolve({ code, signal }));
+      }
+    );
+    expect(exit).toEqual({ code: null, signal: 'SIGKILL' });
+
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        available: true,
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('第一版。')
+      });
+    const revisionDir = paths.chapterArtifact(1, 'author_revisions');
+    const journalNames = (await store.list(revisionDir))
+      .filter((name) => /^draft_adoption_journal_v\d+\.json$/u.test(name));
+    expect(journalNames).toHaveLength(2);
+    await expect(store.readJson(
+      path.join(revisionDir, journalNames[1]!),
+      AuthorRevisionAdoptionJournalSchema
+    )).resolves.toMatchObject({
+      state: 'recovered_rolled_back',
+      recoveryReason: 'read_time_recovery',
+      invalidationReportPath: 'chapters/chapter_001/author_revisions/edit_invalidation_report_v2.json',
+      storyStateMutated: false
+    });
+    expect(await readFile(paths.chapterArtifact(1, 'draft_v1.md'))).toEqual(generatedBefore);
+    expect(await readFile(paths.storyState())).toEqual(stateBefore);
+    expect(await readFile(paths.chapterQueue())).toEqual(queueBefore);
   }, 30_000);
 });

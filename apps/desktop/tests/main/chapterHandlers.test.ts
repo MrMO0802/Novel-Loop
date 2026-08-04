@@ -331,7 +331,7 @@ describe('chapter workspace IPC handlers', () => {
     expect((failure as Error).message).not.toContain('EACCES');
   });
 
-  test('exposes rollback recovery as a distinct safe draft failure', async () => {
+  test('returns rollback recovery as a distinct serializable draft result', async () => {
     const service = createService();
     service.adoptDraftRevision = vi.fn(async () => {
       throw Object.assign(
@@ -341,18 +341,21 @@ describe('chapter workspace IPC handlers', () => {
     });
     const { handlerFor } = register(service);
 
-    const failure = await handlerFor(IPC_CHANNELS.chapterAdoptDraftRevision)(
+    const result = await handlerFor(IPC_CHANNELS.chapterAdoptDraftRevision)(
       trustedEvent,
       {
         projectKey: task.projectKey,
         revisionToken: `chapter_revision_${'4'.repeat(48)}`,
         confirmAdoption: true
       }
-    ).catch((error: unknown) => error);
+    );
 
-    expect(failure).toMatchObject({ code: 'CHAPTER_DRAFT_RECOVERY_REQUIRED' });
-    expect(failure).toBeInstanceOf(Error);
-    expect((failure as Error).message).not.toContain('/home/author');
+    expect(structuredClone(result)).toEqual({
+      outcome: 'recovery_required',
+      nextAction: 'reload_chapter'
+    });
+    expect(JSON.stringify(result)).not.toContain('/home/author');
+    expect(JSON.stringify(result)).not.toContain('DRAFT_ADOPTION_RECOVERY_REQUIRED');
   });
 
   test('registers each fixed chapter channel exactly once', () => {

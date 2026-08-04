@@ -3,6 +3,8 @@ import path from 'node:path';
 
 import { withProjectChapterOperationLease } from './projectOperationLease.js';
 import {
+  AuthorRevisionAdoptionJournalSchema,
+  AuthorRevisionAdoptionMutationSchema,
   AuthorRevisionRecordSchema,
   ChapterMissionSchema,
   ChapterPlanRankingSchema,
@@ -14,6 +16,8 @@ import {
 import type {
   AuthorArchivedArtifactReference,
   AuthorInvalidatedNode,
+  AuthorRevisionAdoptionJournal,
+  AuthorRevisionAdoptionMutation,
   AuthorRevisionArtifactKind,
   AuthorRevisionMode,
   AuthorRevisionPublication,
@@ -27,6 +31,7 @@ const MAX_REVISION_MARKDOWN_BYTES = 2 * 1024 * 1024;
 const MAX_AUTHOR_INSTRUCTION_CHARACTERS = 4_000;
 
 const REVISION_FILE_PATTERN = /^(mission|plan|draft)_revision_v([1-9]\d*)\.json$/u;
+const ADOPTION_JOURNAL_FILE_PATTERN = /^(mission|plan|draft)_adoption_journal_v([1-9]\d*)\.json$/u;
 
 const ARCHIVED_JSON_SCHEMAS = {
   'mission.json': ChapterMissionSchema,
@@ -205,6 +210,11 @@ interface ProjectContext {
   latestCommittedChapter: number;
 }
 
+interface PreparedAdoptionJournal {
+  record: AuthorRevisionAdoptionJournal;
+  absolutePath: string;
+}
+
 export async function createAuthorRevision(
   input: CreateAuthorRevisionInput,
   fileStore?: FileStore
@@ -332,36 +342,60 @@ export async function adoptAuthorRevision(
     await readVerifiedWorkingCopy(projectRoot, store, target.record);
 
     if (target.record.state === 'adopted') return target.record;
+    const adoptedAt = new Date().toISOString();
     const adopted = AuthorRevisionRecordSchema.parse({
       ...sourceRecord,
       state: 'adopted',
-      adoptedAt: new Date().toISOString(),
+      adoptedAt,
       invalidationReportPath: input.invalidationReportPath
         ?? target.record.invalidationReportPath
     });
-    const rollbackCandidates: RevisionEntry[] = [];
-    try {
-      for (const entry of revisions) {
-        if (
-          entry.record.revisionId !== target.record.revisionId
-          && entry.record.artifactKind === target.record.artifactKind
-          && entry.record.state === 'adopted'
-        ) {
-          rollbackCandidates.push(entry);
-          await store.writeJson(entry.absoluteRecordPath, {
-            ...entry.record,
-            state: 'superseded'
-          }, AuthorRevisionRecordSchema);
-        }
+    const mutations: AuthorRevisionAdoptionMutation[] = [];
+    for (const entry of revisions) {
+      if (
+        entry.record.revisionId !== target.record.revisionId
+        && entry.record.artifactKind === target.record.artifactKind
+        && entry.record.state === 'adopted'
+      ) {
+        mutations.push(AuthorRevisionAdoptionMutationSchema.parse({
+          recordPath: entry.relativeRecordPath,
+          beforeRecord: entry.record,
+          intendedRecord: { ...entry.record, state: 'superseded' }
+        }));
       }
-      rollbackCandidates.push(target);
-      await store.writeJson(target.absoluteRecordPath, adopted, AuthorRevisionRecordSchema);
+    }
+    mutations.push(AuthorRevisionAdoptionMutationSchema.parse({
+      recordPath: target.relativeRecordPath,
+      beforeRecord: target.record,
+      intendedRecord: adopted
+    }));
+    const journal = await createPreparedAdoptionJournal({
+      context,
+      chapterNumber: input.chapterNumber,
+      target,
+      mutations,
+      invalidationReportPath: adopted.invalidationReportPath,
+      createdAt: adoptedAt
+    });
+    try {
+      for (const mutation of mutations) {
+        await store.writeJson(
+          resolveProjectPath(projectRoot, mutation.recordPath),
+          mutation.intendedRecord,
+          AuthorRevisionRecordSchema
+        );
+      }
+      await store.writeJson(journal.absolutePath, {
+        ...journal.record,
+        state: 'committed',
+        updatedAt: new Date().toISOString()
+      }, AuthorRevisionAdoptionJournalSchema);
     } catch (error) {
       let rollbackFailed = false;
-      for (const entry of rollbackCandidates.reverse()) {
+      for (const mutation of [...mutations].reverse()) {
         await store.writeJson(
-          entry.absoluteRecordPath,
-          entry.record,
+          resolveProjectPath(projectRoot, mutation.recordPath),
+          mutation.beforeRecord,
           AuthorRevisionRecordSchema
         ).catch(() => {
           rollbackFailed = true;
@@ -374,6 +408,12 @@ export async function adoptAuthorRevision(
           2
         );
       }
+      await store.writeJson(journal.absolutePath, {
+        ...journal.record,
+        state: 'recovered_rolled_back',
+        updatedAt: new Date().toISOString(),
+        recoveryReason: 'in_process_failure'
+      }, AuthorRevisionAdoptionJournalSchema).catch(() => undefined);
       throw error;
     }
     return adopted;
@@ -566,8 +606,16 @@ export async function listAuthorRevisionPublications(
     const match = /^chapter_(\d{3})$/u.exec(chapterName);
     if (match === null) continue;
     const chapterNumber = Number(match[1]);
-    const context = await readProjectContext(projectRoot, chapterNumber, store);
-    for (const entry of await readRevisionEntries(context, chapterNumber)) {
+    const entries = await withProjectChapterOperationLease({
+      projectRoot,
+      chapterNumber,
+      operation: 'chapter_author_revision_publication_list',
+      allowStoryStateWrite: false
+    }, async () => {
+      const context = await readProjectContext(projectRoot, chapterNumber, store);
+      return readRevisionEntries(context, chapterNumber);
+    });
+    for (const entry of entries) {
       if (
         entry.record.mode === 'codex_adjustment'
         && (
@@ -700,19 +748,26 @@ export async function readLatestAdoptedDraft(
   const projectRoot = path.resolve(input.projectRoot);
   const store = fileStore ?? FileStore.forProject(projectRoot);
   await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
-  const context = await readProjectContext(projectRoot, input.chapterNumber, store);
-  const drafts = (await readRevisionEntries(context, input.chapterNumber))
-    .filter((entry) => entry.record.artifactKind === 'draft' && entry.record.state === 'adopted')
-    .filter((entry) => entry.record.adoptedAt !== null)
-    .sort((left, right) => right.record.adoptedAt!.localeCompare(left.record.adoptedAt!));
-  const latest = drafts[0];
-  if (latest === undefined) return null;
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter_author_revision_read_latest',
+    allowStoryStateWrite: false
+  }, async () => {
+    const context = await readProjectContext(projectRoot, input.chapterNumber, store);
+    const drafts = (await readRevisionEntries(context, input.chapterNumber))
+      .filter((entry) => entry.record.artifactKind === 'draft' && entry.record.state === 'adopted')
+      .filter((entry) => entry.record.adoptedAt !== null)
+      .sort((left, right) => right.record.adoptedAt!.localeCompare(left.record.adoptedAt!));
+    const latest = drafts[0];
+    if (latest === undefined) return null;
 
-  return {
-    record: latest.record,
-    relativeMarkdownPath: latest.record.workingCopyPath,
-    content: await readVerifiedWorkingCopy(projectRoot, store, latest.record)
-  };
+    return {
+      record: latest.record,
+      relativeMarkdownPath: latest.record.workingCopyPath,
+      content: await readVerifiedWorkingCopy(projectRoot, store, latest.record)
+    };
+  });
 }
 
 async function readProjectContext(
@@ -746,6 +801,149 @@ async function nextRevisionVersion(
     .reduce((highest, entry) => Math.max(highest, revisionVersion(entry.fileName)), 0) + 1;
 }
 
+async function createPreparedAdoptionJournal(input: {
+  context: ProjectContext;
+  chapterNumber: number;
+  target: RevisionEntry;
+  mutations: AuthorRevisionAdoptionMutation[];
+  invalidationReportPath: string | null;
+  createdAt: string;
+}): Promise<PreparedAdoptionJournal> {
+  const revisionDir = input.context.paths.chapterArtifact(
+    input.chapterNumber,
+    'author_revisions'
+  );
+  const label = revisionArtifactLabel(input.target.record.artifactKind);
+  const version = await nextAdoptionJournalVersion(
+    input.context.store,
+    revisionDir,
+    label
+  );
+  const absolutePath = path.join(
+    revisionDir,
+    `${label}_adoption_journal_v${version}.json`
+  );
+  const record = AuthorRevisionAdoptionJournalSchema.parse({
+    schemaVersion: '1.0',
+    journalId: `author_adoption_ch${String(input.chapterNumber).padStart(3, '0')}_${label}_v${version}`,
+    projectId: input.context.paths.projectId,
+    chapterNumber: input.chapterNumber,
+    artifactKind: input.target.record.artifactKind,
+    targetRevisionId: input.target.record.revisionId,
+    invalidationReportPath: input.invalidationReportPath,
+    state: 'prepared',
+    mutations: input.mutations,
+    createdAt: input.createdAt,
+    updatedAt: input.createdAt,
+    recoveryReason: null,
+    storyStateMutated: false
+  });
+  await input.context.store.writeJson(
+    absolutePath,
+    record,
+    AuthorRevisionAdoptionJournalSchema
+  );
+  return { record, absolutePath };
+}
+
+async function nextAdoptionJournalVersion(
+  store: FileStore,
+  revisionDir: string,
+  label: 'mission' | 'plan' | 'draft'
+): Promise<number> {
+  if (!(await store.exists(revisionDir))) return 1;
+  return (await store.list(revisionDir)).reduce((highest, fileName) => {
+    const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
+    return match?.[1] === label
+      ? Math.max(highest, Number(match[2]))
+      : highest;
+  }, 0) + 1;
+}
+
+async function recoverPreparedAdoptionJournals(
+  context: ProjectContext,
+  chapterNumber: number,
+  revisionDir: string
+): Promise<void> {
+  const journals: Array<{
+    absolutePath: string;
+    fileName: string;
+    record: AuthorRevisionAdoptionJournal;
+    version: number;
+  }> = [];
+  for (const fileName of await context.store.list(revisionDir)) {
+    const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
+    if (match === null) continue;
+    const absolutePath = path.join(revisionDir, fileName);
+    const record = await context.store.readJson(
+      absolutePath,
+      AuthorRevisionAdoptionJournalSchema
+    );
+    validateAdoptionJournalBinding(context, chapterNumber, fileName, record);
+    journals.push({
+      absolutePath,
+      fileName,
+      record,
+      version: Number(match[2])
+    });
+  }
+
+  for (const journal of journals.sort((left, right) => right.version - left.version)) {
+    if (journal.record.state !== 'prepared') continue;
+    try {
+      for (const mutation of [...journal.record.mutations].reverse()) {
+        await context.store.writeJson(
+          resolveProjectPath(context.projectRoot, mutation.recordPath),
+          mutation.beforeRecord,
+          AuthorRevisionRecordSchema
+        );
+      }
+      await context.store.writeJson(journal.absolutePath, {
+        ...journal.record,
+        state: 'recovered_rolled_back',
+        updatedAt: new Date().toISOString(),
+        recoveryReason: 'read_time_recovery'
+      }, AuthorRevisionAdoptionJournalSchema);
+    } catch {
+      throw new AppError(
+        'AUTHOR_REVISION_RECOVERY_FAILED',
+        `Prepared author revision adoption could not be recovered: ${journal.fileName}`,
+        2
+      );
+    }
+  }
+}
+
+function validateAdoptionJournalBinding(
+  context: ProjectContext,
+  chapterNumber: number,
+  fileName: string,
+  journal: AuthorRevisionAdoptionJournal
+): void {
+  const match = ADOPTION_JOURNAL_FILE_PATTERN.exec(fileName);
+  const label = match?.[1];
+  const version = match?.[2];
+  const expectedLabel = revisionArtifactLabel(journal.artifactKind);
+  const expectedId = `author_adoption_ch${String(chapterNumber).padStart(3, '0')}_${expectedLabel}_v${version ?? ''}`;
+  const recordsBound = journal.mutations.every((mutation) => {
+    const expectedRecordPath = mutation.beforeRecord.workingCopyPath.replace(/\.md$/u, '.json');
+    return mutation.recordPath === expectedRecordPath;
+  });
+  if (
+    label !== expectedLabel
+    || journal.journalId !== expectedId
+    || journal.projectId !== context.paths.projectId
+    || journal.chapterNumber !== chapterNumber
+    || !recordsBound
+  ) {
+    throw new AppError(
+      'AUTHOR_REVISION_ADOPTION_JOURNAL_INVALID',
+      `Invalid author revision adoption journal: ${fileName}`,
+      2
+    );
+  }
+}
+
 async function findRevision(
   context: ProjectContext,
   chapterNumber: number,
@@ -765,6 +963,7 @@ async function readRevisionEntries(
 ): Promise<RevisionEntry[]> {
   const revisionDir = context.paths.chapterArtifact(chapterNumber, 'author_revisions');
   if (!(await context.store.exists(revisionDir))) return [];
+  await recoverPreparedAdoptionJournals(context, chapterNumber, revisionDir);
   const entries: RevisionEntry[] = [];
   for (const fileName of await context.store.list(revisionDir)) {
     const match = REVISION_FILE_PATTERN.exec(fileName);

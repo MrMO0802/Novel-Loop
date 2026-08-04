@@ -521,9 +521,15 @@ export const ChapterDiscardDraftWorkingCopyResultSchema = z.object({
   discarded: z.literal(true)
 }).strict();
 
-export const ChapterDraftAdoptionResultSchema = z.object({
-  outcome: z.literal('adopted')
-}).strict();
+export const ChapterDraftAdoptionResultSchema = z.discriminatedUnion('outcome', [
+  z.object({
+    outcome: z.literal('adopted')
+  }).strict(),
+  z.object({
+    outcome: z.literal('recovery_required'),
+    nextAction: z.literal('reload_chapter')
+  }).strict()
+]);
 
 export type ChapterTaskKind = z.infer<typeof ChapterTaskKindSchema>;
 export type ChapterProjectRequest = z.infer<

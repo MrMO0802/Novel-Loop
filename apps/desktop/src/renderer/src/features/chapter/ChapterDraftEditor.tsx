@@ -46,6 +46,7 @@ export function ChapterDraftEditor({
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [actionState, setActionState] = useState<ActionState>('idle');
   const [actionError, setActionError] = useState<string | null>(null);
+  const [adoptionRecoveryRequired, setAdoptionRecoveryRequired] = useState(false);
 
   useEffect(() => {
     if (
@@ -189,11 +190,16 @@ export function ChapterDraftEditor({
         setActionError('请先保存当前编辑，再采用此修订。');
         return;
       }
-      await window.novelLoop.chapter.adoptDraftRevision({
+      const result = await window.novelLoop.chapter.adoptDraftRevision({
         projectKey,
         revisionToken: token,
         confirmAdoption: true
       });
+      if (result.outcome === 'recovery_required') {
+        setAdoptionRecoveryRequired(true);
+        setDialog(null);
+        return;
+      }
       adoptionCompleted = true;
       updateRevisionToken(null);
       setSaveState('saved');
@@ -205,6 +211,15 @@ export function ChapterDraftEditor({
         : '此修订暂时无法采用，请重新检查当前草稿。');
     } finally {
       setActionState('idle');
+    }
+  }
+
+  async function reloadAfterAdoptionRecovery(): Promise<void> {
+    setActionError(null);
+    try {
+      await onAdopted();
+    } catch {
+      setActionError('本章暂时无法重新载入，请返回项目概览后再进入。');
     }
   }
 
@@ -242,7 +257,9 @@ export function ChapterDraftEditor({
     : saveState === 'saving'
       ? '正在保存'
       : '尚未保存';
-  const controlsDisabled = recoveryPending || actionState !== 'idle';
+  const controlsDisabled = recoveryPending
+    || adoptionRecoveryRequired
+    || actionState !== 'idle';
   const editingDisabled = controlsDisabled || dialog !== null;
 
   return (
@@ -272,6 +289,17 @@ export function ChapterDraftEditor({
               放弃恢复
             </button>
           </div>
+        </div>
+      )}
+      {adoptionRecoveryRequired && (
+        <div className="nl-draft-editor__recovery" role="alert">
+          <p>采用过程需要恢复后才能继续编辑。</p>
+          <button
+            type="button"
+            onClick={() => { void reloadAfterAdoptionRecovery(); }}
+          >
+            重新载入本章
+          </button>
         </div>
       )}
       {actionError !== null && <p className="nl-inline-alert nl-inline-alert--error" role="alert">{actionError}</p>}

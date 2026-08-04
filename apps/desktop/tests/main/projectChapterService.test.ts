@@ -144,6 +144,7 @@ interface DeferredAdjustment {
     chapterNumber: number;
     authorInstruction: string;
     expectedSourceHash: string;
+    missionIntent?: 'general' | 'participant_repair';
     shouldStop(): boolean;
     onCommitPoint(): void;
     onStage(stage: 'requesting_adjustment' | 'validating_adjustment' | 'ready_for_review'): void;
@@ -163,6 +164,7 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   readonly planRevisions: unknown[] = [];
   readonly adoptions: unknown[] = [];
   readonly adjustments: DeferredAdjustment[] = [];
+  readonly discardedAdjustments: unknown[] = [];
   autoComplete = false;
   inspectError: unknown;
   planReviewError: unknown;
@@ -243,6 +245,10 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   async adoptRevision(input: unknown): Promise<void> {
     if (this.authoringError !== undefined) throw this.authoringError;
     this.adoptions.push(input);
+  }
+
+  async discardAdjustmentRevision(input: unknown): Promise<void> {
+    this.discardedAdjustments.push(input);
   }
 
   emit(index: number, event: ChapterEngineProgressEvent): void {
@@ -327,6 +333,21 @@ class DeferredChapterGateway implements ChapterEngineGateway {
             title: '事故现场先行',
             markdown: '# 事故现场先行\n\n先展示重复事故。\n'
           }
+    });
+  }
+
+  succeedAdjustmentWithCandidate(
+    index: number,
+    candidate: AdjustmentResult['candidate']
+  ): void {
+    const adjustment = this.adjustments[index];
+    if (adjustment === undefined) throw new Error(`Expected adjustment ${index}.`);
+    adjustment.resolve({
+      revisionId: adjustment.kind === 'mission'
+        ? 'author_revision_ch001_mission_v1'
+        : 'author_revision_ch001_plan_v1',
+      sourceHash: adjustment.input.expectedSourceHash,
+      candidate
     });
   }
 
@@ -871,6 +892,26 @@ describe('ProjectChapterService', () => {
     expect(gateway.adoptions).toHaveLength(0);
   });
 
+  test('marks the exact participant repair instruction as trusted narrow intent', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+
+    await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。'
+    });
+
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+    expect(gateway.adjustments[0]!.input.missionIntent)
+      .toBe('participant_repair');
+    gateway.failAdjustment(0, withCode(
+      'CHAPTER_ADJUSTMENT_CANCELLED',
+      'test cleanup'
+    ));
+  });
+
   test('cancels an adjustment through the shared task lifecycle without creating a token', async () => {
     const { gateway, service } = createService();
     gateway.planReviews.set(projectRoot, planReview);
@@ -1011,6 +1052,95 @@ describe('ProjectChapterService', () => {
       });
       expect(failed.error?.message).not.toContain('/private/project');
     });
+  });
+
+  test('rejects a leaking gateway candidate and discards its ready revision', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    gateway.succeedAdjustmentWithCandidate(0, {
+      artifactKind: 'mission',
+      title: '调整后的本章任务',
+      markdown: '## 本章目的\n\nselected_plan.md\n'
+    });
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'failed',
+        error: { kind: 'invalid_output' }
+      });
+    });
+    expect(gateway.discardedAdjustments).toEqual([{
+      projectRoot,
+      chapterNumber: 1,
+      revisionId: 'author_revision_ch001_mission_v1',
+      expectedSourceHash: 'b'.repeat(64)
+    }]);
+    expect((await service.get(task.taskId)).resultRevisionToken).toBeUndefined();
+  });
+
+  test('reserves publication capacity before starting the gateway adjustment', async () => {
+    const tokenStore = createTokenStore().store;
+    const reserve = vi.fn(() => {
+      throw withCode(
+        'CHAPTER_REVISION_TOKEN_CAPACITY',
+        'all publication slots are reserved'
+      );
+    });
+    Object.assign(tokenStore, { reserveRevisionPublication: reserve });
+    const { gateway, service } = createService({ tokenStore });
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+
+    expect(task).toMatchObject({
+      status: 'failed',
+      error: { kind: 'generation_busy' }
+    });
+    expect(reserve).toHaveBeenCalledOnce();
+    expect(gateway.adjustments).toHaveLength(0);
+    expect(gateway.discardedAdjustments).toHaveLength(0);
+  });
+
+  test('discards a ready revision when reserved-token publication fails', async () => {
+    const tokenStore = createTokenStore().store;
+    Object.assign(tokenStore, {
+      publishReservedRevision: vi.fn(() => {
+        throw new Error('publication failed');
+      })
+    });
+    const { gateway, service } = createService({ tokenStore });
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    gateway.succeedAdjustment(0);
+
+    await eventually(async () => {
+      await expect(service.get(task.taskId)).resolves.toMatchObject({
+        status: 'failed',
+        error: { kind: 'unexpected' }
+      });
+    });
+    expect(gateway.discardedAdjustments).toHaveLength(1);
+    expect((await service.get(task.taskId)).resultRevisionToken).toBeUndefined();
   });
 
   test('resolves mission item tokens while new participants remain name and role only', async () => {
@@ -1609,11 +1739,47 @@ describe('ChapterReviewTokenStore', () => {
       currentLatestCommittedChapter: 0
     }).outcome).toBe('resolved');
   });
+
+  test('pre-reserves and publishes one opaque revision token', () => {
+    const { store } = createTokenStore();
+    const reservationToken = store.reserveRevisionPublication();
+
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: reservationToken,
+      currentLatestCommittedChapter: 0
+    }).outcome).toBe('stale');
+    expect(store.publishReservedRevision(
+      reservationToken,
+      revisionTokenInput(1)
+    )).toBe(reservationToken);
+    expect(store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken: reservationToken,
+      currentLatestCommittedChapter: 0
+    })).toMatchObject({
+      outcome: 'resolved',
+      value: { revisionId: 'author_revision_2' }
+    });
+  });
+
+  test('fails publication reservation on invalid entropy without creating a binding', () => {
+    const store = new ChapterReviewTokenStore({
+      randomBytes: () => new Uint8Array(1)
+    });
+
+    expect(() => store.reserveRevisionPublication()).toThrow(
+      'Chapter token entropy source returned the wrong size.'
+    );
+  });
 });
 
 function createService(overrides: {
   gateway?: DeferredChapterGateway;
   resolver?: MemoryProjectResolver;
+  tokenStore?: ChapterReviewTokenStore;
 } = {}) {
   const gateway = overrides.gateway ?? new DeferredChapterGateway();
   const resolver = overrides.resolver ?? new MemoryProjectResolver();
@@ -1621,7 +1787,7 @@ function createService(overrides: {
   const service = new ProjectChapterService({
     gateway,
     projects: resolver,
-    tokenStore: createTokenStore().store,
+    tokenStore: overrides.tokenStore ?? createTokenStore().store,
     clock: () => new Date(Date.UTC(2026, 6, 30, 1, 0, tick++)),
     randomBytes: (size) => new Uint8Array(size).fill(tick % 255)
   });

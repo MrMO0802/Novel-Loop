@@ -281,6 +281,10 @@ describe('chapter plan review', () => {
     expect(screen.getByRole('heading', {
       name: '调整方向：从交通事故切入'
     })).toHaveFocus();
+    expect(screen.getByRole('button', { name: '返回项目概览' }))
+      .toBeDisabled();
+    expect(screen.getByRole('button', { name: '确认方向并生成草稿' }))
+      .toBeDisabled();
     expect(screen.getByText(
       'AI 只会调整这个方向并生成待采用版本，不会更换当前方向或修改正式故事状态。'
     )).toBeVisible();
@@ -303,6 +307,10 @@ describe('chapter plan review', () => {
     expect(screen.getByRole('radio', {
       name: '遗物中的异常报告'
     })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('button', { name: '返回项目概览' }))
+      .toBeDisabled();
+    expect(screen.getByRole('button', { name: '确认方向并生成草稿' }))
+      .toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: '保留当前版' }));
     expect(screen.queryByRole('region', { name: '对比修改' }))

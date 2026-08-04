@@ -217,6 +217,214 @@ describe('bounded Codex chapter author adjustments', () => {
     expect(await store.readText(paths.storyState())).toBe(before.storyState);
   });
 
+  test('participant repair ignores malicious changes outside participant fields', async () => {
+    const sourceText = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'mission.json')
+    );
+    const source = ChapterMissionSchema.parse(JSON.parse(sourceText));
+    const output = completeMissionOutput(source, {
+      chapterFunction: '恶意改写本章目的。',
+      requiredObjectives: [{
+        ...source.requiredObjectives[0]!,
+        text: '恶意替换目标。',
+        type: 'world',
+        priority: 'could'
+      }],
+      participatingCharacterIds: [
+        ...source.participatingCharacterIds,
+        'char_model_new'
+      ],
+      charactersToIntroduce: [{
+        characterId: 'char_model_new',
+        name: '周岚',
+        role: '事故目击者'
+      }],
+      readerInformationDelta: {
+        newKnowledge: ['恶意新增知识。'],
+        newSuspicions: ['恶意新增猜测。'],
+        questionsToMaintain: [],
+        questionsToAnswer: ['恶意回答问题。']
+      },
+      targetEmotionalCurve: ['狂喜'],
+      targetWordCount: 99
+    });
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(output),
+      json: output
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    const result = await adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceText),
+      authorInstruction: '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。',
+      promptRoot
+    });
+    const stored = await store.readJson(
+      paths.projectArtifact(result.relativeMarkdownPath),
+      ChapterMissionSchema
+    );
+    const {
+      participatingCharacterIds: _sourceParticipants,
+      charactersToIntroduce: _sourceIntroductions,
+      ...sourceOwnedFields
+    } = source;
+    const {
+      participatingCharacterIds,
+      charactersToIntroduce,
+      ...storedSourceOwnedFields
+    } = stored;
+
+    expect(storedSourceOwnedFields).toEqual(sourceOwnedFields);
+    expect(participatingCharacterIds).toContain('char_model_new');
+    expect(charactersToIntroduce).toEqual(output.charactersToIntroduce);
+    expect(result.candidate.markdown).not.toContain('恶意');
+  });
+
+  test.each([
+    ['unknown', (source: ChapterMission) => [{
+      ...source.requiredObjectives[0]!,
+      id: 'obj_model_unknown'
+    }]],
+    ['duplicate', (source: ChapterMission) => [
+      source.requiredObjectives[0]!,
+      { ...source.requiredObjectives[0]! }
+    ]]
+  ])('rejects %s model-owned objective identities', async (
+    _label,
+    objectives
+  ) => {
+    const sourceText = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'mission.json')
+    );
+    const source = ChapterMissionSchema.parse(JSON.parse(sourceText));
+    const output = completeMissionOutput(source, {
+      requiredObjectives: objectives(source)
+    });
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(output),
+      json: output
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await expect(adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceText),
+      authorInstruction: '收紧目标表达。',
+      promptRoot
+    })).rejects.toMatchObject({ code: 'CHAPTER_ADJUSTMENT_INVALID_OUTPUT' });
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
+  test.each([
+    'selected_plan.md',
+    'file:///tmp/novel-loop/private.json',
+    '/tmp/novel-loop/private.json',
+    'C:\\Users\\author\\private-plan.md',
+    'workspace/private/cache.dat',
+    'Use plan%5F002 as the source.'
+  ])('rejects author-facing leakage before plan revision persistence: %s', async (
+    leakage
+  ) => {
+    const sourceContent = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'plan_candidates', 'plan_002.md')
+    );
+    const output = {
+      title: '交通事故',
+      markdown: `# 交通事故\n\n${leakage}\n`,
+      changeSummary: ['收紧开场。'],
+      preservedConstraints: ['不新增人物。']
+    };
+    const complete = vi.fn().mockResolvedValue({
+      text: JSON.stringify(output),
+      json: output
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await expect(adjustChapterPlan({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceContent),
+      authorInstruction: '只收紧开场。',
+      sourcePlan: {
+        candidateId: 'plan_002',
+        content: sourceContent,
+        active: false
+      },
+      promptRoot
+    })).rejects.toMatchObject({ code: 'CHAPTER_ADJUSTMENT_INVALID_OUTPUT' });
+    await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
+  test('returns committed adjustment content without rereading the working copy', async () => {
+    const fake = await writeFakeCodex(projectsRoot, 'valid');
+    const before = await canonicalSnapshot();
+    const originalReadText = store.readText.bind(store);
+    vi.spyOn(store, 'readText').mockImplementation(async (filePath) => {
+      if (
+        filePath.includes('author_revisions')
+        && filePath.endsWith('.md')
+      ) {
+        throw new Error('post-commit working-copy read');
+      }
+      return originalReadText(filePath);
+    });
+
+    const result = await adjustDesktopChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(before.mission),
+      authorInstruction: '保持本章任务。',
+      promptRoot,
+      providerOptions: { codexBin: fake.codexBin }
+    }, store);
+
+    expect(result.content).toBe(before.mission);
+  });
+
+  test('supplies mission adjustment with bounded valid Story State JSON', async () => {
+    const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
+    await store.writeJson(paths.storyState(), {
+      ...storyState,
+      readerState: {
+        ...storyState.readerState,
+        readerQuestions: Array.from({ length: 100 }, (_, index) => (
+          `问题 ${index + 1}：${'问'.repeat(500)}`
+        )),
+        readerExpectations: Array.from({ length: 100 }, (_, index) => (
+          `期待 ${index + 1}：${'待'.repeat(500)}`
+        ))
+      }
+    }, StoryStateSchema);
+    const sourceText = await store.readText(
+      paths.chapterArtifact(chapterNumber, 'mission.json')
+    );
+    const source = ChapterMissionSchema.parse(JSON.parse(sourceText));
+    const output = completeMissionOutput(source);
+    let providerPrompt = '';
+    const complete = vi.fn().mockImplementation(async (request: { user: string }) => {
+      providerPrompt = request.user;
+      return { text: JSON.stringify(output), json: output };
+    });
+    vi.spyOn(ProviderFactory, 'create').mockReturnValue({ complete });
+
+    await adjustChapterMission({
+      projectRoot: paths.projectRoot,
+      chapterNumber,
+      expectedSourceHash: sha256(sourceText),
+      authorInstruction: '保持本章任务。',
+      promptRoot
+    });
+
+    const summary = /<story_state_summary>\n([\s\S]*?)\n<\/story_state_summary>/u
+      .exec(providerPrompt)?.[1];
+    expect(summary).toBeDefined();
+    expect(summary!.length).toBeLessThanOrEqual(8_000);
+    expect(() => JSON.parse(summary!)).not.toThrow();
+  });
+
   test('projects a newly referenced open debt before storing the revision', async () => {
     const storyState = await store.readJson(paths.storyState(), StoryStateSchema);
     await store.writeJson(paths.storyState(), {

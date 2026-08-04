@@ -47,8 +47,8 @@ type AppRoute =
   | { kind: 'planning-review'; project: ProjectSummary }
   | { kind: 'chapter-planning-generation'; project: ProjectSummary }
   | {
-    editMission?: boolean;
     kind: 'chapter-plan-review';
+    participantRepairEntry?: number;
     project: ProjectSummary;
   }
   | { kind: 'chapter-draft-generation'; project: ProjectSummary }
@@ -73,6 +73,7 @@ interface StatusPresentation {
 
 export function App() {
   const requestId = useRef(0);
+  const participantRepairEntry = useRef(0);
   const readinessHeadingRef = useRef<HTMLHeadingElement>(null);
   const [view, setView] = useState<ReadinessView>({ kind: 'loading' });
   const [route, setRoute] = useState<AppRoute>({ kind: 'readiness' });
@@ -250,7 +251,9 @@ export function App() {
   if (route.kind === 'chapter-plan-review') {
     return (
       <ChapterPlanReview
-        {...(route.editMission ? { initialEditor: 'mission' as const } : {})}
+        {...(route.participantRepairEntry === undefined
+          ? {}
+          : { participantRepairEntry: route.participantRepairEntry })}
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
         onGenerateDraft={() => setRoute({
           kind: 'chapter-draft-generation',
@@ -269,11 +272,14 @@ export function App() {
           kind: 'chapter-workspace',
           project: route.project
         })}
-        onRepairParticipants={() => setRoute({
-          editMission: true,
-          kind: 'chapter-plan-review',
-          project: route.project
-        })}
+        onRepairParticipants={() => {
+          participantRepairEntry.current += 1;
+          setRoute({
+            kind: 'chapter-plan-review',
+            participantRepairEntry: participantRepairEntry.current,
+            project: route.project
+          });
+        }}
         onReviewPlan={() => setRoute({
           kind: 'chapter-plan-review',
           project: route.project

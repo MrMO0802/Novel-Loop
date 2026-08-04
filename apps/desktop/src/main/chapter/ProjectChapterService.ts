@@ -7,6 +7,7 @@ import {
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
   ChapterPlanReviewResultSchema,
+  PARTICIPANT_REPAIR_INSTRUCTION,
   ChapterTaskSchema,
   type ChapterAdoptRevisionRequest,
   type ChapterAdjustMissionRequest,
@@ -27,6 +28,7 @@ import type {
   ChapterEngineGateway,
   ChapterEngineProgressEvent,
   TrustedChapterPlanReview,
+  TrustedAdjustmentResult,
   TrustedMissionRevisionInput
 } from './EngineChapterGateway';
 import {
@@ -98,7 +100,9 @@ interface PendingAdjustment {
   latestCommittedChapter: number;
   expectedSourceHash: string;
   authorInstruction: string;
+  missionIntent?: 'general' | 'participant_repair';
   purpose: 'mission' | 'plan';
+  publicationToken: string;
   sourcePlan?: {
     candidateId: string;
     content: string;
@@ -812,7 +816,7 @@ export class ProjectChapterService implements ChapterApplicationService {
       currentLatestCommittedChapter: trusted.latestCommittedChapter,
       currentReviewHash: trusted.reviewHash
     };
-    let pending: PendingAdjustment;
+    let pending: Omit<PendingAdjustment, 'publicationToken'>;
     if (kind === 'mission_adjustment') {
       const resolved = this.tokenStore.resolveReview(base);
       if (resolved.outcome === 'stale') {
@@ -829,6 +833,9 @@ export class ProjectChapterService implements ChapterApplicationService {
         latestCommittedChapter: resolved.value.latestCommittedChapter,
         expectedSourceHash: resolved.value.missionHash,
         authorInstruction: request.authorInstruction,
+        missionIntent: request.authorInstruction === PARTICIPANT_REPAIR_INSTRUCTION
+          ? 'participant_repair'
+          : 'general',
         purpose: 'mission'
       };
     } else {
@@ -874,16 +881,38 @@ export class ProjectChapterService implements ChapterApplicationService {
       };
     }
 
-    const internal = this.createTask(
-      request.projectKey,
-      kind,
-      pending.chapterNumber,
-      requestFingerprint
-    );
+    let publicationToken: string;
+    try {
+      publicationToken = this.tokenStore.reserveRevisionPublication();
+    } catch (error) {
+      return this.createFailedTask(
+        request.projectKey,
+        kind,
+        pending.chapterNumber,
+        toChapterRunErrorKind(error, kind)
+      );
+    }
+    const preparedPending: PendingAdjustment = {
+      ...pending,
+      publicationToken
+    };
+
+    let internal: InternalChapterTask;
+    try {
+      internal = this.createTask(
+        request.projectKey,
+        kind,
+        preparedPending.chapterNumber,
+        requestFingerprint
+      );
+    } catch (error) {
+      this.tokenStore.discardRevisionPublication(publicationToken);
+      throw error;
+    }
     this.tasks.set(internal.task.taskId, internal);
     this.activeByProject.set(request.projectKey, internal.task.taskId);
     const task = this.copyTask(internal);
-    void this.runAdjustment(internal, pending).catch(() => undefined);
+    void this.runAdjustment(internal, preparedPending).catch(() => undefined);
     return task;
   }
 
@@ -891,6 +920,8 @@ export class ProjectChapterService implements ChapterApplicationService {
     internal: InternalChapterTask,
     pending: PendingAdjustment
   ): Promise<void> {
+    let durableResult: TrustedAdjustmentResult | undefined;
+    let publicationBound = false;
     try {
       this.updateTask(internal, {
         status: 'running',
@@ -914,16 +945,33 @@ export class ProjectChapterService implements ChapterApplicationService {
         >) => this.reportAdjustmentStage(internal, stage)
       };
       const result = pending.purpose === 'mission'
-        ? await this.dependencies.gateway.adjustMission(common)
+        ? await this.dependencies.gateway.adjustMission({
+            ...common,
+            missionIntent: pending.missionIntent ?? 'general'
+          })
         : await this.dependencies.gateway.adjustPlan({
             ...common,
             sourcePlan: pending.sourcePlan!
           });
-      if (internal.stopRequested && !internal.adjustmentCommitStarted) {
+      durableResult = result;
+      if (internal.stopRequested) {
+        await this.discardAdjustmentResult(pending, result);
+        durableResult = undefined;
         this.finishCancelled(internal);
         return;
       }
-      const resultRevisionToken = this.tokenStore.createRevision({
+      const succeededTask = this.buildAdjustmentSucceededTask(
+        internal,
+        pending.publicationToken,
+        result.candidate
+      );
+      if (internal.stopRequested) {
+        await this.discardAdjustmentResult(pending, result);
+        durableResult = undefined;
+        this.finishCancelled(internal);
+        return;
+      }
+      this.tokenStore.publishReservedRevision(pending.publicationToken, {
         projectKey: internal.task.projectKey,
         projectRoot: pending.projectRoot,
         chapterNumber: pending.chapterNumber,
@@ -932,18 +980,30 @@ export class ProjectChapterService implements ChapterApplicationService {
         sourceHash: result.sourceHash,
         revisionId: result.revisionId
       });
-      this.finishAdjustmentSucceeded(
-        internal,
-        resultRevisionToken,
-        result.candidate
-      );
+      publicationBound = true;
+      internal.task = succeededTask;
+      internal.terminal = true;
     } catch (error) {
-      if (isCancellation(error)) {
+      let terminalError = error;
+      if (durableResult !== undefined && !publicationBound) {
+        try {
+          await this.discardAdjustmentResult(pending, durableResult);
+        } catch (cleanupError) {
+          terminalError = cleanupError;
+        }
+      }
+      if (isCancellation(terminalError)) {
         this.finishCancelled(internal);
       } else {
-        this.finishFailed(internal, toChapterRunErrorKind(error, internal.task.kind));
+        this.finishFailed(
+          internal,
+          toChapterRunErrorKind(terminalError, internal.task.kind)
+        );
       }
     } finally {
+      if (!publicationBound) {
+        this.tokenStore.discardRevisionPublication(pending.publicationToken);
+      }
       if (this.activeByProject.get(internal.task.projectKey) === internal.task.taskId) {
         this.activeByProject.delete(internal.task.projectKey);
       }
@@ -979,12 +1039,11 @@ export class ProjectChapterService implements ChapterApplicationService {
     this.updateTask(internal, { canCancel: false });
   }
 
-  private finishAdjustmentSucceeded(
+  private buildAdjustmentSucceededTask(
     internal: InternalChapterTask,
     resultRevisionToken: string,
     resultCandidate: NonNullable<ChapterTask['resultCandidate']>
-  ): void {
-    if (internal.terminal) return;
+  ): ChapterTask {
     const adjustmentStages: ChapterTaskStage[] = [
       'requesting_adjustment',
       'validating_adjustment',
@@ -994,7 +1053,8 @@ export class ProjectChapterService implements ChapterApplicationService {
       addCompletedStage,
       internal.task.completedStages
     );
-    this.updateTask(internal, {
+    return ChapterTaskSchema.parse({
+      ...internal.task,
       status: 'succeeded',
       stage: 'ready_for_review',
       completedStages,
@@ -1003,9 +1063,21 @@ export class ProjectChapterService implements ChapterApplicationService {
       canRetry: false,
       error: null,
       resultRevisionToken,
-      resultCandidate
+      resultCandidate,
+      updatedAt: this.clock().toISOString()
     });
-    internal.terminal = true;
+  }
+
+  private async discardAdjustmentResult(
+    pending: PendingAdjustment,
+    result: TrustedAdjustmentResult
+  ): Promise<void> {
+    await this.dependencies.gateway.discardAdjustmentRevision({
+      projectRoot: pending.projectRoot,
+      chapterNumber: pending.chapterNumber,
+      revisionId: result.revisionId,
+      expectedSourceHash: result.sourceHash
+    });
   }
 
   private async begin(
@@ -1438,6 +1510,9 @@ function toChapterRunErrorKind(
     return 'project_unavailable';
   }
   if (code.includes('LOCKED') || code.includes('BUSY')) {
+    return 'generation_busy';
+  }
+  if (code === 'CHAPTER_REVISION_TOKEN_CAPACITY') {
     return 'generation_busy';
   }
   return 'unexpected';

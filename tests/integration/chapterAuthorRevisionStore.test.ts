@@ -8,6 +8,7 @@ import {
   adoptAuthorRevision,
   archiveInvalidatedChapterArtifacts,
   createAuthorRevision,
+  discardReadyAuthorRevision,
   readLatestAdoptedDraft
 } from '../../src/app/chapterAuthorRevision.js';
 import { initProjectFromBriefText } from '../../src/app/initProject.js';
@@ -86,6 +87,32 @@ describe('chapter author revision storage', () => {
     }, store)).rejects.toThrow('record write failed');
 
     await expect(authorRevisionFiles()).resolves.toEqual([]);
+  });
+
+  test('discards both files for a matching ready adjustment revision', async () => {
+    const sourcePath = paths.chapterArtifact(1, 'selected_plan.md');
+    const source = await store.readText(sourcePath);
+    const created = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      mode: 'codex_adjustment',
+      sourceArtifactPath: sourcePath,
+      sourceCandidateId: 'plan_001',
+      expectedSourceHash: hashText(source),
+      content: '# Candidate\n',
+      authorInstruction: 'Adjust safely.'
+    });
+
+    await discardReadyAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: created.record.sourceHash
+    });
+
+    await expect(store.exists(paths.projectArtifact(created.relativeRecordPath))).resolves.toBe(false);
+    await expect(store.exists(paths.projectArtifact(created.relativeMarkdownPath))).resolves.toBe(false);
   });
 
   test('creates sequential selected-plan revisions without changing Story State or generated sources', async () => {

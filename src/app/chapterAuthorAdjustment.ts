@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { z } from 'zod';
 
+import { containsAuthorFacingInternalValue } from '../authorFacingText.js';
 import {
   createAuthorRevision,
   type CreateAuthorRevisionResult
@@ -36,6 +37,13 @@ const MAX_STORY_STATE_SUMMARY_CHARACTERS = 8_000;
 const MAX_MISSION_PLAN_CONTEXT_CHARACTERS = 20_000;
 const SAFE_PLAN_CANDIDATE_ID = /^plan_[0-9]{3}$/u;
 
+export const PARTICIPANT_REPAIR_INSTRUCTION =
+  '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。';
+
+export type ChapterMissionAdjustmentIntent =
+  | 'general'
+  | 'participant_repair';
+
 export type ChapterAuthorAdjustmentStage =
   | 'requesting_adjustment'
   | 'validating_adjustment'
@@ -61,6 +69,7 @@ export interface ChapterAuthorAdjustmentInput {
   chapterNumber: number;
   expectedSourceHash: string;
   authorInstruction: string;
+  missionIntent?: ChapterMissionAdjustmentIntent;
   shouldCancel?: () => boolean;
   onCommitPoint?: () => void;
   onStage?: (stage: ChapterAuthorAdjustmentStage) => void;
@@ -77,6 +86,7 @@ export interface ChapterAuthorAdjustmentCandidate {
 
 export interface ChapterAuthorAdjustmentResult extends CreateAuthorRevisionResult {
   candidate: ChapterAuthorAdjustmentCandidate;
+  content: string;
 }
 
 const ChapterAuthorAdjustmentCandidateSchema = z.object({
@@ -136,7 +146,11 @@ export async function adjustChapterMission(
     });
     input.onStage?.('validating_adjustment');
 
-    const mission = parseMissionAdjustment(response.json, context);
+    const mission = parseMissionAdjustment(
+      response.json,
+      context,
+      missionAdjustmentIntent(input)
+    );
     let candidate: ChapterAuthorAdjustmentCandidate;
     try {
       candidate = projectMissionCandidate(mission, context);
@@ -145,6 +159,7 @@ export async function adjustChapterMission(
     }
     throwIfCancelled(input);
     await assertSourceStillCurrent(context.store, sourcePath, input.expectedSourceHash);
+    const content = `${JSON.stringify(mission, null, 2)}\n`;
     const created = await createAuthorRevision({
       projectRoot: context.projectRoot,
       chapterNumber: input.chapterNumber,
@@ -153,7 +168,7 @@ export async function adjustChapterMission(
       sourceArtifactPath: sourcePath,
       sourceCandidateId: null,
       expectedSourceHash: input.expectedSourceHash,
-      content: `${JSON.stringify(mission, null, 2)}\n`,
+      content,
       authorInstruction: input.authorInstruction,
       assertCanCommit: () => throwIfCancelled(input),
       ...(input.onCommitPoint === undefined
@@ -161,7 +176,7 @@ export async function adjustChapterMission(
         : { onCommitPoint: input.onCommitPoint })
     }, context.store);
     input.onStage?.('ready_for_review');
-    return { ...created, candidate };
+    return { ...created, candidate, content };
   });
 }
 
@@ -223,6 +238,7 @@ export async function adjustChapterPlan(
     }
     throwIfCancelled(input);
     await assertSourceStillCurrent(context.store, sourcePath, input.expectedSourceHash);
+    const content = adjusted.markdown;
     const created = await createAuthorRevision({
       projectRoot: context.projectRoot,
       chapterNumber: input.chapterNumber,
@@ -231,7 +247,7 @@ export async function adjustChapterPlan(
       sourceArtifactPath: sourcePath,
       sourceCandidateId: sourcePlan.candidateId,
       expectedSourceHash: input.expectedSourceHash,
-      content: adjusted.markdown,
+      content,
       authorInstruction: input.authorInstruction,
       assertCanCommit: () => throwIfCancelled(input),
       ...(input.onCommitPoint === undefined
@@ -239,7 +255,7 @@ export async function adjustChapterPlan(
         : { onCommitPoint: input.onCommitPoint })
     }, context.store);
     input.onStage?.('ready_for_review');
-    return { ...created, candidate };
+    return { ...created, candidate, content };
   });
 }
 
@@ -338,16 +354,25 @@ function createProvider(
 
 function parseMissionAdjustment(
   value: unknown,
-  context: AdjustmentContext
+  context: AdjustmentContext,
+  intent: ChapterMissionAdjustmentIntent
 ): ChapterMission {
   try {
-    const mission = normalizeMissionAdjustment(value, {
+    const normalized = normalizeMissionAdjustment(value, {
       projectId: context.paths.projectId,
       chapterNumber: context.mission.chapterNumber
     });
+    const mission = intent === 'participant_repair'
+      ? ChapterMissionSchema.parse({
+          ...context.mission,
+          participatingCharacterIds: normalized.participatingCharacterIds,
+          charactersToIntroduce: normalized.charactersToIntroduce
+        })
+      : normalized;
     if (
       mission.id !== context.mission.id
       || mission.chapterNumber !== context.mission.chapterNumber
+      || !missionObjectiveReferencesAreValid(mission, context.mission)
       || !missionCharacterReferencesAreValid(mission, context.storyState)
       || !missionDebtReferencesAreValid(mission, context.storyState)
     ) {
@@ -357,6 +382,37 @@ function parseMissionAdjustment(
   } catch {
     throw invalidOutputError();
   }
+}
+
+function missionAdjustmentIntent(
+  input: ChapterAuthorAdjustmentInput
+): ChapterMissionAdjustmentIntent {
+  const fixedInstruction = input.authorInstruction
+    === PARTICIPANT_REPAIR_INSTRUCTION;
+  if (
+    input.missionIntent === 'participant_repair'
+    && !fixedInstruction
+  ) {
+    throw new AppError(
+      'AUTHOR_ADJUSTMENT_INTENT_INVALID',
+      'Participant repair intent requires the fixed participant instruction.',
+      2
+    );
+  }
+  return fixedInstruction ? 'participant_repair' : 'general';
+}
+
+function missionObjectiveReferencesAreValid(
+  mission: ChapterMission,
+  source: ChapterMission
+): boolean {
+  const sourceIds = new Set(
+    source.requiredObjectives.map(({ id }) => id)
+  );
+  if (sourceIds.size !== source.requiredObjectives.length) return false;
+  const outputIds = mission.requiredObjectives.map(({ id }) => id);
+  return new Set(outputIds).size === outputIds.length
+    && outputIds.every((id) => sourceIds.has(id));
 }
 
 function projectMissionCandidate(
@@ -520,13 +576,7 @@ function clipText(value: string, maxCharacters: number): string {
 }
 
 function isAuthorFacingText(value: string): boolean {
-  return !(
-    /(?:^|[\s([{"'`=:])\/(?!\/)[^\s<>{}\[\]]+/u.test(value)
-    || /\b(?:author_revision|candidate|chapter|character|char|debt|event|mission|objective|obj|plan|revision|run|scene|task)_[A-Za-z0-9][A-Za-z0-9_-]*\b/iu.test(value)
-    || /\b[a-f0-9]{64}\b/iu.test(value)
-    || /\b[A-Za-z0-9_.-]+\.schema(?:\.json)?\b/iu.test(value)
-    || /\b(?:auth|authorization|candidateId|profile|provider|runId|sourceHash|taskId)\s*[:=]/iu.test(value)
-  );
+  return !containsAuthorFacingInternalValue(value);
 }
 
 function validateInput(input: ChapterAuthorAdjustmentInput): void {
@@ -607,27 +657,78 @@ function throwIfCancelled(input: ChapterAuthorAdjustmentInput): void {
 }
 
 function summarizeStoryState(storyState: StoryState): string {
-  const summary = JSON.stringify({
+  const summary = {
     latestCommittedChapter: storyState.latestCommittedChapter,
-    characters: storyState.characters.slice(0, 32).map((character) => ({
-      id: character.id,
-      name: character.name,
-      role: character.role,
-      currentGoal: character.currentGoal,
-      emotionalState: character.emotionalState
+    characters: storyState.characters.slice(0, 5).map((character) => ({
+      id: clipText(character.id, 100),
+      name: clipText(character.name, 80),
+      role: clipText(character.role, 80),
+      currentGoal: clipText(character.currentGoal ?? '', 200),
+      emotionalState: clipText(character.emotionalState ?? '', 120)
     })),
     openNarrativeDebts: storyState.narrativeDebts
       .filter(({ status }) => status !== 'resolved')
-      .slice(0, 50)
-      .map(({ id, promise, status }) => ({ id, promise, status })),
-    readerQuestions: storyState.readerState.readerQuestions.slice(0, 50),
-    readerExpectations: storyState.readerState.readerExpectations.slice(0, 50),
+      .slice(0, 6)
+      .map(({ id, promise, status }) => ({
+        id: clipText(id, 100),
+        promise: clipText(promise, 200),
+        status
+      })),
+    readerQuestions: boundedStrings(
+      storyState.readerState.readerQuestions,
+      4,
+      160
+    ),
+    readerExpectations: boundedStrings(
+      storyState.readerState.readerExpectations,
+      4,
+      160
+    ),
     activeWorldRules: storyState.worldRules
       .filter(({ status }) => status === 'active')
-      .slice(0, 50)
-      .map(({ id, rule, strictness }) => ({ id, rule, strictness }))
+      .slice(0, 4)
+      .map(({ id, rule, strictness }) => ({
+        id: clipText(id, 100),
+        rule: clipText(rule, 200),
+        strictness
+      }))
+  };
+  const serialized = JSON.stringify(summary, null, 2);
+  if (serialized.length <= MAX_STORY_STATE_SUMMARY_CHARACTERS) {
+    return serialized;
+  }
+  return JSON.stringify({
+    latestCommittedChapter: storyState.latestCommittedChapter,
+    characters: storyState.characters.slice(0, 2).map((character) => ({
+      id: clipText(character.id, 60),
+      name: clipText(character.name, 60),
+      role: clipText(character.role, 60),
+      currentGoal: clipText(character.currentGoal ?? '', 80),
+      emotionalState: clipText(character.emotionalState ?? '', 80)
+    })),
+    openNarrativeDebts: storyState.narrativeDebts
+      .filter(({ status }) => status !== 'resolved')
+      .slice(0, 2)
+      .map(({ id, promise, status }) => ({
+        id: clipText(id, 60),
+        promise: clipText(promise, 80),
+        status
+      })),
+    readerQuestions: boundedStrings(storyState.readerState.readerQuestions, 2, 80),
+    readerExpectations: boundedStrings(
+      storyState.readerState.readerExpectations,
+      2,
+      80
+    ),
+    activeWorldRules: storyState.worldRules
+      .filter(({ status }) => status === 'active')
+      .slice(0, 2)
+      .map(({ id, rule, strictness }) => ({
+        id: clipText(id, 60),
+        rule: clipText(rule, 80),
+        strictness
+      }))
   }, null, 2);
-  return summary.slice(0, MAX_STORY_STATE_SUMMARY_CHARACTERS);
 }
 
 function invalidOutputError(): AppError {

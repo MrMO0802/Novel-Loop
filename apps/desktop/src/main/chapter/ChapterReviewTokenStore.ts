@@ -102,6 +102,7 @@ export class ChapterReviewTokenStore {
   private readonly randomBytes: (size: number) => Uint8Array;
   private readonly reviews = new Map<string, StoredReviewToken>();
   private readonly revisions = new Map<string, StoredRevisionToken>();
+  private readonly revisionPublications = new Set<string>();
   private readonly reservedRevisions = new Set<string>();
 
   constructor(dependencies: TokenStoreDependencies = {}) {
@@ -207,23 +208,49 @@ export class ChapterReviewTokenStore {
   }
 
   createRevision(input: CreateRevisionInput): string {
+    const revisionToken = this.reserveRevisionPublication();
+    try {
+      return this.publishReservedRevision(revisionToken, input);
+    } catch (error) {
+      this.discardRevisionPublication(revisionToken);
+      throw error;
+    }
+  }
+
+  reserveRevisionPublication(): string {
     this.pruneExpired();
-    const evictionToken = this.revisions.size < MAX_REVISION_BINDINGS
+    const capacityUsed = this.revisions.size + this.revisionPublications.size;
+    const evictionToken = capacityUsed < MAX_REVISION_BINDINGS
       ? null
       : this.oldestUnreservedRevisionToken();
-    if (this.revisions.size >= MAX_REVISION_BINDINGS && evictionToken === null) {
-      throw new Error('Chapter revision token capacity is fully reserved.');
+    if (capacityUsed >= MAX_REVISION_BINDINGS && evictionToken === null) {
+      throw Object.assign(
+        new Error('Chapter revision token capacity is fully reserved.'),
+        { code: 'CHAPTER_REVISION_TOKEN_CAPACITY' }
+      );
     }
-    const revisionToken = this.createUniqueToken(
-      'chapter_revision',
-      this.revisions
-    );
     if (evictionToken !== null) this.revisions.delete(evictionToken);
+    const revisionToken = this.createUniqueRevisionToken();
+    this.revisionPublications.add(revisionToken);
+    return revisionToken;
+  }
+
+  publishReservedRevision(
+    revisionToken: string,
+    input: CreateRevisionInput
+  ): string {
+    if (!this.revisionPublications.delete(revisionToken)) {
+      throw new Error('Chapter revision publication was not reserved.');
+    }
     this.revisions.set(revisionToken, {
       ...input,
       createdAtMs: this.now()
     });
     return revisionToken;
+  }
+
+  discardRevisionPublication(revisionToken: string): void {
+    this.revisionPublications.delete(revisionToken);
   }
 
   reserveRevision(
@@ -269,6 +296,17 @@ export class ChapterReviewTokenStore {
       if (!existing.has(token)) return token;
     }
     throw new Error('Unable to allocate a unique chapter option token.');
+  }
+
+  private createUniqueRevisionToken(): string {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const token = this.createToken('chapter_revision');
+      if (
+        !this.revisions.has(token)
+        && !this.revisionPublications.has(token)
+      ) return token;
+    }
+    throw new Error('Unable to allocate a unique chapter token.');
   }
 
   private createUniqueToken<T>(prefix: string, store: ReadonlyMap<string, T>): string {

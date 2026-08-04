@@ -4,9 +4,23 @@
   "description": "Local-first CLI skeleton for the Novel Loop Engine.",
   "type": "module",
   "exports": {
+    "./author-facing": {
+      "types": "./dist/authorFacingText.d.ts",
+      "import": "./dist/authorFacingText.js"
+    },
     "./desktop": {
       "types": "./dist/desktop/index.d.ts",
       "import": "./dist/desktop/index.js"
+    }
+  },
+  "typesVersions": {
+    "*": {
+      "author-facing": [
+        "dist/authorFacingText.d.ts"
+      ],
+      "desktop": [
+        "dist/desktop/index.d.ts"
+      ]
     }
   },
   "bin": {

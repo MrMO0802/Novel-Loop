@@ -110,6 +110,13 @@ export interface ReadAuthorRevisionInput {
   expectedSourceHash: string;
 }
 
+export interface DiscardReadyAuthorRevisionInput {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+}
+
 export interface ReadAuthorRevisionResult extends CreateAuthorRevisionResult {
   content: string;
 }
@@ -350,6 +357,45 @@ export async function readAuthorRevision(
       relativeMarkdownPath: target.record.workingCopyPath,
       content: await readVerifiedWorkingCopy(projectRoot, store, target.record)
     };
+  });
+}
+
+export async function discardReadyAuthorRevision(
+  input: DiscardReadyAuthorRevisionInput,
+  fileStore?: FileStore
+): Promise<void> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  await withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter_author_revision_discard',
+    allowStoryStateWrite: false
+  }, async () => {
+    const context = await readProjectContext(projectRoot, input.chapterNumber, store);
+    const target = await findRevision(context, input.chapterNumber, input.revisionId);
+    if (
+      target.record.state !== 'ready'
+      || target.record.mode !== 'codex_adjustment'
+      || target.record.sourceHash !== input.expectedSourceHash
+    ) {
+      throw new AppError(
+        'AUTHOR_REVISION_NOT_DISCARDABLE',
+        `Author revision is not a matching ready adjustment: ${input.revisionId}`,
+        2
+      );
+    }
+    const workingCopyPath = resolveProjectPath(projectRoot, target.record.workingCopyPath);
+    await assertSafePath(projectRoot, workingCopyPath);
+
+    // Removing the ready marker first prevents a failed cleanup from leaving a
+    // discoverable ready revision without a desktop publication token.
+    await store.removePath(target.absoluteRecordPath);
+    if (await store.exists(workingCopyPath)) {
+      await store.removePath(workingCopyPath);
+    }
   });
 }
 

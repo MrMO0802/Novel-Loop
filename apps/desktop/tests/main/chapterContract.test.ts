@@ -282,6 +282,7 @@ describe('chapter workspace contract', () => {
         'validating_adjustment',
         'ready_for_review'
       ],
+      sceneProgress: null,
       canCancel: false,
       resultRevisionToken,
       resultCandidate: {
@@ -335,6 +336,57 @@ describe('chapter workspace contract', () => {
     expect(ChapterTaskSchema.safeParse({
       ...validTask,
       completedStages: ['requesting_adjustment']
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      kind: 'planning',
+      stage: 'scene_cards',
+      completedStages: ['preparing']
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      stage: 'mission',
+      completedStages: ['preparing']
+    }).success).toBe(false);
+  });
+
+  test('enforces terminal task status, result, and error consistency', () => {
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      status: 'succeeded',
+      stage: 'finalizing',
+      canCancel: false
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      status: 'failed',
+      canCancel: false,
+      error: null
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      error: { kind: 'timeout', message: '暂时无法完成。' }
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      status: 'cancelled',
+      canCancel: false,
+      canRetry: false
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      kind: 'mission_adjustment',
+      status: 'succeeded',
+      stage: 'ready_for_review',
+      completedStages: ['requesting_adjustment', 'ready_for_review'],
+      sceneProgress: null,
+      canCancel: false,
+      resultRevisionToken: `chapter_revision_${'7'.repeat(48)}`,
+      resultCandidate: {
+        artifactKind: 'mission',
+        title: '调整后的本章任务',
+        markdown: '## 本章目的\n\n保留当前目的。\n'
+      }
     }).success).toBe(false);
   });
 

@@ -52,6 +52,7 @@ export {
   adoptDesktopChapterPlanRevision,
   createDesktopMissionRevision,
   createDesktopChapterPlanRevision,
+  discardDesktopChapterAdjustmentRevision,
   selectDesktopChapterDirection,
   type AdoptDesktopChapterPlanRevisionInput,
   type AdjustDesktopChapterMissionInput,

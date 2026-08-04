@@ -30,9 +30,6 @@ importers:
       '@phosphor-icons/react':
         specifier: ^2.1.10
         version: 2.1.10(react-dom@19.2.8(react@19.2.8))(react@19.2.8)
-      entities:
-        specifier: ^6.0.1
-        version: 6.0.1
       novel-loop-engine:
         specifier: workspace:*
         version: link:../..

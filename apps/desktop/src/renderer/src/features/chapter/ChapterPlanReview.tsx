@@ -19,6 +19,7 @@ import type {
   ChapterAuthoringResult,
   ChapterPlanReviewResult
 } from '../../../../shared/chapterContract';
+import { PARTICIPANT_REPAIR_INSTRUCTION } from '../../../../shared/chapterContract';
 import type { ProjectSummary } from '../../../../shared/projectContract';
 import { formatMessage, t } from '../../i18n/messages.zh-CN';
 import {
@@ -53,11 +54,9 @@ type AdjustmentState =
   }
   | null;
 
-const PARTICIPANT_REPAIR_INSTRUCTION =
-  '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。';
-
 interface ChapterPlanReviewProps {
   initialEditor?: 'mission';
+  participantRepairEntry?: number;
   onBack: () => void;
   onGenerateDraft: () => void;
   project: ProjectSummary;
@@ -65,16 +64,19 @@ interface ChapterPlanReviewProps {
 
 export function ChapterPlanReview({
   initialEditor,
+  participantRepairEntry,
   onBack,
   onGenerateDraft,
   project
 }: ChapterPlanReviewProps) {
+  const repairEntry = participantRepairEntry
+    ?? (initialEditor === 'mission' ? 0 : undefined);
   const headingRef = useRef<HTMLHeadingElement>(null);
-  const suppressInitialHeadingFocus = useRef(initialEditor === 'mission');
+  const suppressInitialHeadingFocus = useRef(repairEntry !== undefined);
   const confirmationHeadingRef = useRef<HTMLHeadingElement>(null);
   const confirmationTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmationWasOpen = useRef(false);
-  const initialEditorOpened = useRef(false);
+  const handledRepairEntry = useRef<number | undefined>(undefined);
   const adjustmentTriggerRef = useRef<HTMLElement | null>(null);
   const requestToken = useRef(0);
   const [review, setReview] = useState<ChapterPlanReviewResult | null>(null);
@@ -104,27 +106,32 @@ export function ChapterPlanReview({
       if (currentRequest !== requestToken.current) return;
       setReview(result.available ? result : null);
       setFailed(!result.available);
-      if (
-        result.available
-        && initialEditor === 'mission'
-        && !initialEditorOpened.current
-      ) {
-        initialEditorOpened.current = true;
-        setEditor({ kind: 'mission' });
-      }
     } catch {
       if (currentRequest === requestToken.current) {
         setReview(null);
         setFailed(true);
       }
     }
-  }, [initialEditor, project.projectKey]);
+  }, [participantRepairEntry, project.projectKey]);
 
   useEffect(() => {
     if (!suppressInitialHeadingFocus.current) {
       headingRef.current?.focus();
     }
   }, []);
+
+  useEffect(() => {
+    if (
+      repairEntry === undefined
+      || handledRepairEntry.current === repairEntry
+    ) return;
+    handledRepairEntry.current = repairEntry;
+    headingRef.current?.blur();
+    setAuthoringIssue(null);
+    setAdjustment(null);
+    setConfirmingDraft(false);
+    setEditor({ kind: 'mission' });
+  }, [repairEntry]);
 
   useEffect(() => {
     void loadReview();
@@ -188,7 +195,12 @@ export function ChapterPlanReview({
           <BookOpenText aria-hidden size={24} weight="fill" />
           <span>{t('app.brand')}</span>
         </div>
-        <button className="nl-tertiary-action" onClick={onBack} type="button">
+        <button
+          className="nl-tertiary-action"
+          disabled={adjustment !== null}
+          onClick={onBack}
+          type="button"
+        >
           <ArrowLeft aria-hidden size={17} />
           {t('chapter.common.back')}
         </button>
@@ -349,7 +361,9 @@ export function ChapterPlanReview({
                 key={`${available.reviewToken}:${adjustment.artifactKind}:${
                   adjustment.artifactKind === 'plan'
                     ? adjustment.direction.optionToken
-                    : adjustment.requestMode ?? 'manual'
+                    : `${adjustment.requestMode ?? 'manual'}:${
+                        adjustment.autoStart === true ? 'auto' : 'manual'
+                      }`
                 }`}
                 {...(adjustment.artifactKind === 'mission'
                   ? {
@@ -385,6 +399,7 @@ export function ChapterPlanReview({
                   <button
                     aria-describedby="chapter-draft-note"
                     className="nl-primary-action"
+                    disabled={adjustment !== null}
                     onClick={() => setConfirmingDraft(true)}
                     ref={confirmationTriggerRef}
                     type="button"
@@ -422,6 +437,7 @@ export function ChapterPlanReview({
                     <button
                       aria-describedby="chapter-draft-confirmation-note"
                       className="nl-primary-action"
+                      disabled={adjustment !== null}
                       onClick={onGenerateDraft}
                       type="button"
                     >

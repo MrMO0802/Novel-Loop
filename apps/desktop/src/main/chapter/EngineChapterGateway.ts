@@ -187,6 +187,7 @@ export interface TrustedMissionAdjustmentInput {
   chapterNumber: number;
   expectedSourceHash: string;
   authorInstruction: string;
+  missionIntent?: 'general' | 'participant_repair';
   shouldStop(): boolean;
   onCommitPoint(): void;
   onStage(stage: ChapterAdjustmentStage): void;
@@ -209,6 +210,13 @@ export interface TrustedAdjustmentResult extends TrustedRevisionResult {
   };
 }
 
+export interface TrustedDiscardAdjustmentInput {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+}
+
 export interface ChapterEngineGateway {
   inspect(projectRoot: string): Promise<ChapterInspection>;
   plan(input: RunChapterInput): Promise<void>;
@@ -217,6 +225,7 @@ export interface ChapterEngineGateway {
     input: TrustedMissionAdjustmentInput
   ): Promise<TrustedAdjustmentResult>;
   adjustPlan(input: TrustedPlanAdjustmentInput): Promise<TrustedAdjustmentResult>;
+  discardAdjustmentRevision(input: TrustedDiscardAdjustmentInput): Promise<void>;
   readPlan(projectRoot: string): Promise<TrustedChapterPlanReview>;
   readDraft(projectRoot: string): Promise<ChapterDraftReviewResult>;
   selectDirection(input: {
@@ -277,6 +286,7 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       chapterNumber: input.chapterNumber,
       expectedSourceHash: input.expectedSourceHash,
       authorInstruction: input.authorInstruction,
+      missionIntent: input.missionIntent ?? 'general',
       shouldCancel: input.shouldStop,
       onCommitPoint: input.onCommitPoint,
       onStage: input.onStage
@@ -313,6 +323,15 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       sourceHash: created.record.sourceHash,
       candidate: created.candidate
     };
+  }
+
+  async discardAdjustmentRevision(
+    input: TrustedDiscardAdjustmentInput
+  ): Promise<void> {
+    const { discardDesktopChapterAdjustmentRevision } = await import(
+      'novel-loop-engine/desktop'
+    );
+    await discardDesktopChapterAdjustmentRevision(input);
   }
 
   async readPlan(projectRoot: string): Promise<TrustedChapterPlanReview> {

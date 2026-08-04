@@ -163,7 +163,7 @@ describe('chapter participant repair', () => {
       project
     };
     const { rerender } = render(
-      <ChapterPlanReview initialEditor="mission" {...props} />
+      <ChapterPlanReview participantRepairEntry={1} {...props} />
     );
 
     expect(screen.getByRole('heading', {
@@ -182,6 +182,31 @@ describe('chapter participant repair', () => {
     expect(screen.getByRole('heading', {
       name: '审阅第 1 章方向'
     })).not.toHaveFocus();
+  });
+
+  test('moves a deferred same-mount repair transition directly to the mission editor', async () => {
+    const api = installApi(noParticipantsPlan);
+    const repairRead = deferred<ChapterPlanReviewResult>();
+    api.chapter.readPlan.mockReturnValueOnce(repairRead.promise);
+    const props = {
+      onBack: vi.fn(),
+      onGenerateDraft: vi.fn(),
+      project
+    };
+    const { rerender } = render(<ChapterPlanReview {...props} />);
+    const parentHeading = screen.getByRole('heading', {
+      name: '审阅第 1 章方向'
+    });
+    expect(parentHeading).toHaveFocus();
+
+    rerender(<ChapterPlanReview participantRepairEntry={1} {...props} />);
+    await waitFor(() => expect(parentHeading).not.toHaveFocus());
+    await act(async () => repairRead.resolve(noParticipantsPlan));
+
+    expect(await screen.findByRole('heading', {
+      name: '编辑本章任务'
+    })).toHaveFocus();
+    expect(parentHeading).not.toHaveFocus();
   });
 
   test('offers participant repair when an authoring outcome reports the missing roster', async () => {

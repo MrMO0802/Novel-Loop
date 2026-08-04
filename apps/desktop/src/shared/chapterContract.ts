@@ -1,4 +1,4 @@
-import { decodeHTML } from 'entities';
+import { containsAuthorFacingInternalValue } from 'novel-loop-engine/author-facing';
 import { z } from 'zod';
 
 const MAX_MARKDOWN_BYTES = 2 * 1024 * 1024;
@@ -7,8 +7,6 @@ const MAX_ALTERNATIVES = 10;
 const MAX_MISSION_ITEMS = 100;
 const MAX_PARTICIPANTS = 32;
 const MAX_SCENES = 100;
-const MAX_LEAKAGE_NORMALIZATION_PASSES = 16;
-const MAX_LEAKAGE_NORMALIZED_CHARACTERS = MAX_MARKDOWN_BYTES;
 
 export const ChapterReviewTokenSchema = opaqueToken('chapter_review');
 export const ChapterOptionTokenSchema = opaqueToken('chapter_option');
@@ -60,6 +58,9 @@ const ChapterAuthorInstructionSchema = z.string()
   .trim()
   .min(1)
   .max(4_000);
+
+export const PARTICIPANT_REPAIR_INSTRUCTION =
+  '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。';
 
 export const ChapterAdjustMissionRequestSchema = z.object({
   projectKey: ChapterProjectKeySchema,
@@ -240,11 +241,16 @@ export const ChapterTaskSchema = z.object({
     'validating_adjustment',
     'ready_for_review'
   ]);
-  const generationStages = new Set<ChapterTaskStage>([
+  const planningStages = new Set<ChapterTaskStage>([
     'preparing',
     'mission',
     'plan_candidates',
     'ranking',
+    'finalizing',
+    'completed'
+  ]);
+  const draftingStages = new Set<ChapterTaskStage>([
+    'preparing',
     'scene_cards',
     'scene_drafts',
     'draft_assembly',
@@ -253,7 +259,9 @@ export const ChapterTaskSchema = z.object({
   ]);
   const compatibleStages = adjustment
     ? adjustmentStages
-    : generationStages;
+    : task.kind === 'planning'
+      ? planningStages
+      : draftingStages;
   if (!compatibleStages.has(task.stage)) {
     context.addIssue({ code: 'custom', path: ['stage'] });
   }
@@ -264,6 +272,31 @@ export const ChapterTaskSchema = z.object({
   });
   const hasResult = task.resultRevisionToken !== undefined
     || task.resultCandidate !== undefined;
+  const terminal = task.status === 'succeeded'
+    || task.status === 'failed'
+    || task.status === 'cancelled';
+  if (terminal && task.canCancel) {
+    context.addIssue({ code: 'custom', path: ['canCancel'] });
+  }
+  if (task.status === 'stop_requested' && task.canCancel) {
+    context.addIssue({ code: 'custom', path: ['canCancel'] });
+  }
+  if (task.status === 'failed') {
+    if (task.error === null) {
+      context.addIssue({ code: 'custom', path: ['error'] });
+    }
+  } else if (task.error !== null) {
+    context.addIssue({ code: 'custom', path: ['error'] });
+  }
+  if (task.status === 'succeeded' && task.canRetry) {
+    context.addIssue({ code: 'custom', path: ['canRetry'] });
+  }
+  if (task.status === 'cancelled' && !task.canRetry) {
+    context.addIssue({ code: 'custom', path: ['canRetry'] });
+  }
+  if (task.kind !== 'drafting' && task.sceneProgress !== null) {
+    context.addIssue({ code: 'custom', path: ['sceneProgress'] });
+  }
   if (adjustment && task.status === 'succeeded') {
     if (task.stage !== 'ready_for_review') {
       context.addIssue({ code: 'custom', path: ['stage'] });
@@ -273,6 +306,11 @@ export const ChapterTaskSchema = z.object({
     }
     if (task.resultCandidate === undefined) {
       context.addIssue({ code: 'custom', path: ['resultCandidate'] });
+    }
+    for (const stage of adjustmentStages) {
+      if (!task.completedStages.includes(stage)) {
+        context.addIssue({ code: 'custom', path: ['completedStages'] });
+      }
     }
   }
   if (adjustment && task.status !== 'succeeded' && hasResult) {
@@ -288,6 +326,14 @@ export const ChapterTaskSchema = z.object({
   }
   if (!adjustment && hasResult) {
     context.addIssue({ code: 'custom', path: ['resultRevisionToken'] });
+  }
+  if (!adjustment && task.status === 'succeeded') {
+    if (
+      task.stage !== 'completed'
+      || !task.completedStages.includes('completed')
+    ) {
+      context.addIssue({ code: 'custom', path: ['completedStages'] });
+    }
   }
 });
 
@@ -623,59 +669,5 @@ function enforcePlanReview(
 }
 
 function containsInternalValue(text: string): boolean {
-  const normalization = normalizeLeakageText(text);
-  if (!normalization.complete) return true;
-  const normalized = normalization.text;
-  const withoutWebUrls = normalized.replace(
-    /\bhttps?:\/\/[^\s<>{}\[\]"']+/giu,
-    ' '
-  );
-  return (
-    /\bfile:\/\//iu.test(normalized)
-    || /(?:^|[\s([{"'`=:])\/(?!\/)[^\s<>{}\[\]]+/u.test(withoutWebUrls)
-    || /(?:^|[\s([{"'`=:])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])[^\s<>{}\[\]]*/u
-      .test(withoutWebUrls)
-    || /(?:^|[\s([{"'`=:])(?:\.{1,2}[\\/])?(?:[A-Za-z0-9_.-]+[\\/])+(?:[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12})(?=$|[\s`)'\]}>.,;:!?])/u
-      .test(withoutWebUrls)
-    || /\b(?:author_revision|candidate|chapter|character|char|debt|event|mission|objective|obj|plan|revision|run|scene|task)_[A-Za-z0-9][A-Za-z0-9_-]*\b/iu
-      .test(normalized)
-    || /\b[a-f0-9]{64}\b/iu.test(normalized)
-    || /\b[A-Za-z0-9_.-]+\.schema(?:\.json)?\b/iu.test(normalized)
-    || /\b(?:arc_map\.json|chapter_queue\.json|draft\.md|global_outline\.md|mission\.json|ranking\.json|scene_cards\.json|selected_plan\.md|story_state\.json|volume_[0-9]+_outline\.md)\b/iu
-      .test(normalized)
-    || /\b(?:auth|authorization|candidateId|profile|provider|runId|sourceHash|taskId)\s*[:=]/iu
-      .test(normalized)
-  );
-}
-
-function normalizeLeakageText(text: string): {
-  text: string;
-  complete: boolean;
-} {
-  let normalized = text.normalize('NFKC');
-  if (normalized.length > MAX_LEAKAGE_NORMALIZED_CHARACTERS) {
-    return { text: '', complete: false };
-  }
-  for (let pass = 0; pass < MAX_LEAKAGE_NORMALIZATION_PASSES; pass += 1) {
-    const previous = normalized;
-    normalized = decodeHTML(normalized);
-    try {
-      normalized = decodeURIComponent(normalized);
-    } catch {
-      normalized = normalized.replace(
-        /%(25|2e|2f|3a|5c|5f)/giu,
-        (_encoded, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))
-      );
-    }
-    normalized = normalized
-      .replace(/\\([/._:#?%])/gu, '$1')
-      .normalize('NFKC');
-    if (normalized.length > MAX_LEAKAGE_NORMALIZED_CHARACTERS) {
-      return { text: '', complete: false };
-    }
-    if (normalized === previous) {
-      return { text: normalized, complete: true };
-    }
-  }
-  return { text: normalized, complete: false };
+  return containsAuthorFacingInternalValue(text);
 }

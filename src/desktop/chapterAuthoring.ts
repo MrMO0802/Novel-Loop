@@ -5,6 +5,7 @@ import {
   adoptAuthorRevision,
   archiveAuthorChapterArtifacts,
   createAuthorRevision,
+  discardReadyAuthorRevision,
   readAuthorRevision,
   type ArchiveInvalidatedChapterArtifactsResult,
   type CreateAuthorRevisionResult
@@ -203,13 +204,7 @@ export async function adjustDesktopChapterMission(
   fileStore?: FileStore
 ): Promise<DesktopChapterAdjustmentResult> {
   const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
-  const created = await adjustChapterMission(input, store);
-  return {
-    ...created,
-    content: await store.readText(
-      path.join(path.resolve(input.projectRoot), created.relativeMarkdownPath)
-    )
-  };
+  return adjustChapterMission(input, store);
 }
 
 export async function adjustDesktopChapterPlan(
@@ -217,13 +212,17 @@ export async function adjustDesktopChapterPlan(
   fileStore?: FileStore
 ): Promise<DesktopChapterAdjustmentResult> {
   const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
-  const created = await adjustChapterPlan(input, store);
-  return {
-    ...created,
-    content: await store.readText(
-      path.join(path.resolve(input.projectRoot), created.relativeMarkdownPath)
-    )
-  };
+  return adjustChapterPlan(input, store);
+}
+
+export async function discardDesktopChapterAdjustmentRevision(input: {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+}, fileStore?: FileStore): Promise<void> {
+  const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
+  await discardReadyAuthorRevision(input, store);
 }
 
 export async function createDesktopMissionRevision(input: {

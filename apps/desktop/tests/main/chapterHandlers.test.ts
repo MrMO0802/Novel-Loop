@@ -53,6 +53,12 @@ const planAdjustmentTask: ChapterTask = {
   ...missionAdjustmentTask,
   kind: 'plan_adjustment'
 };
+const draftingTask: ChapterTask = {
+  ...task,
+  kind: 'drafting',
+  stage: 'preparing',
+  completedStages: []
+};
 const inspection: ChapterInspection = {
   available: true,
   chapterNumber: 1,
@@ -128,10 +134,7 @@ function createService(): ChapterApplicationService {
   return {
     inspect: vi.fn(async () => inspection),
     startPlanning: vi.fn(async () => task),
-    startDrafting: vi.fn(async (): Promise<ChapterTask> => ({
-      ...task,
-      kind: 'drafting'
-    })),
+    startDrafting: vi.fn(async (): Promise<ChapterTask> => draftingTask),
     adjustMission: vi.fn(async () => missionAdjustmentTask),
     adjustPlan: vi.fn(async () => planAdjustmentTask),
     get: vi.fn(async () => task),
@@ -196,8 +199,8 @@ const cases = [
     request: { projectKey: task.projectKey },
     invalidRequest: { projectKey: task.projectKey, chapterNumber: 1 },
     serviceMethod: 'startDrafting',
-    response: { ...task, kind: 'drafting' },
-    invalidResponse: { ...task, kind: 'drafting', chapterNumberInput: 1 }
+    response: draftingTask,
+    invalidResponse: { ...draftingTask, chapterNumberInput: 1 }
   },
   {
     channel: 'chapterAdjustMission',

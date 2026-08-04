@@ -1,4 +1,7 @@
-import { describe, expect, test } from 'vitest';
+import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, test, vi } from 'vitest';
 
 import { ChapterReviewTokenStore } from '../../src/main/chapter/ChapterReviewTokenStore';
 
@@ -13,6 +16,7 @@ import type {
   RunChapterInput,
   TrustedChapterPlanReview
 } from '../../src/main/chapter/EngineChapterGateway';
+import { EngineChapterGateway } from '../../src/main/chapter/EngineChapterGateway';
 import {
   ProjectChapterService,
   type ChapterProjectRootResolver
@@ -22,6 +26,15 @@ const projectKey = 'project_radio';
 const secondProjectKey = 'project_building';
 const projectRoot = '/library/radio';
 const secondProjectRoot = '/library/building';
+
+const engineDesktopMocks = vi.hoisted(() => ({
+  readDesktopChapterPlan: vi.fn()
+}));
+
+vi.mock('novel-loop-engine/desktop', async (importOriginal) => ({
+  ...await importOriginal<typeof import('novel-loop-engine/desktop')>(),
+  readDesktopChapterPlan: engineDesktopMocks.readDesktopChapterPlan
+}));
 
 const planReview: Extract<TrustedChapterPlanReview, { available: true }> = {
   available: true,
@@ -54,6 +67,7 @@ const planReview: Extract<TrustedChapterPlanReview, { available: true }> = {
       characterId: 'char_secret',
       name: 'Lin Cheng',
       role: 'protagonist',
+      origin: 'committed',
       selected: true
     }],
     readerInformationDelta: {
@@ -806,6 +820,71 @@ describe('ProjectChapterService', () => {
     expect(gateway.adoptions).toHaveLength(1);
   });
 
+  test('keeps a revision token retryable after busy adoption and consumes it on success', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const active = review.directions.find(({ active }) => active)!;
+    const saved = await service.savePlanWorkingCopy({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken,
+      markdown: '# Retryable revision\n\nThe radio speaks twice.\n'
+    });
+    if (saved.outcome !== 'saved') throw new Error('Expected a saved revision.');
+
+    gateway.authoringError = withCode('PROJECT_OPERATION_BUSY', 'lease busy');
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'blocked', messageKey: 'generation_busy' });
+
+    gateway.authoringError = undefined;
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'adopted' });
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    expect(gateway.adoptions).toHaveLength(1);
+  });
+
+  test('keeps a stale-source revision token retryable after a non-mutating failure', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const active = review.directions.find(({ active }) => active)!;
+    const saved = await service.savePlanWorkingCopy({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: active.optionToken,
+      markdown: '# Stale source revision\n\nThe radio speaks twice.\n'
+    });
+    if (saved.outcome !== 'saved') throw new Error('Expected a saved revision.');
+
+    gateway.authoringError = withCode(
+      'DESKTOP_CHAPTER_EDIT_STALE',
+      'source changed'
+    );
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+
+    gateway.authoringError = undefined;
+    await expect(service.adoptRevision({
+      projectKey,
+      revisionToken: saved.revisionToken,
+      confirmInvalidation: true
+    })).resolves.toEqual({ outcome: 'adopted' });
+  });
+
   test('blocks authoring during active and starting generation operations', async () => {
     const { gateway, resolver, service } = createService();
     gateway.planReviews.set(projectRoot, planReview);
@@ -886,6 +965,44 @@ describe('ProjectChapterService', () => {
     });
     expect(result).toEqual({ outcome, messageKey });
     expect(JSON.stringify(result)).not.toMatch(/home|private|engine/i);
+  });
+});
+
+describe('EngineChapterGateway plan candidate containment', () => {
+  test('rejects a traversal candidate ID before reading candidate Markdown', async () => {
+    const fixture = await createGatewayArtifactFixture('../../../outside/secret');
+    await mkdir(path.join(fixture.projectRoot, 'outside'), { recursive: true });
+    await writeFile(
+      path.join(fixture.projectRoot, 'outside', 'secret.md'),
+      '# Outside\n\nThis must never be read.\n',
+      'utf8'
+    );
+
+    try {
+      await expect(new EngineChapterGateway().readPlan(fixture.projectRoot))
+        .rejects.toMatchObject({ code: 'DESKTOP_CHAPTER_INVALID_OUTPUT' });
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects a plan_candidates root reached through an ancestor symlink', async () => {
+    const fixture = await createGatewayArtifactFixture('plan_001', false);
+    const outsideCandidates = path.join(fixture.tempRoot, 'outside-candidates');
+    await mkdir(outsideCandidates, { recursive: true });
+    await writeFile(
+      path.join(outsideCandidates, 'plan_001.md'),
+      '# Outside\n\nThis must never be read.\n',
+      'utf8'
+    );
+    await symlink(outsideCandidates, fixture.candidatesRoot, 'dir');
+
+    try {
+      await expect(new EngineChapterGateway().readPlan(fixture.projectRoot))
+        .rejects.toMatchObject({ code: 'DESKTOP_CHAPTER_INVALID_OUTPUT' });
+    } finally {
+      await rm(fixture.tempRoot, { recursive: true, force: true });
+    }
   });
 });
 
@@ -1037,6 +1154,33 @@ describe('ChapterReviewTokenStore', () => {
       currentLatestCommittedChapter: 0
     })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
   });
+
+  test('rejects revision tokens after chapter advance or thirty-minute expiry', () => {
+    const context = createTokenStore();
+    const revisionToken = context.store.createRevision({
+      projectKey,
+      projectRoot,
+      chapterNumber: 1,
+      latestCommittedChapter: 0,
+      purpose: 'plan',
+      sourceHash: 'c'.repeat(64),
+      revisionId: 'author_revision_ch001_plan_v1'
+    });
+
+    expect(context.store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken,
+      currentLatestCommittedChapter: 1
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+    context.advance(30 * 60 * 1_000);
+    expect(context.store.consumeRevision({
+      projectKey,
+      projectRoot,
+      revisionToken,
+      currentLatestCommittedChapter: 0
+    })).toEqual({ outcome: 'stale', messageKey: 'stale_edit' });
+  });
 });
 
 function createService(overrides: {
@@ -1054,6 +1198,71 @@ function createService(overrides: {
     randomBytes: (size) => new Uint8Array(size).fill(tick % 255)
   });
   return { gateway, resolver, service };
+}
+
+async function createGatewayArtifactFixture(
+  candidateId: string,
+  createCandidatesRoot = true
+): Promise<{
+  tempRoot: string;
+  projectRoot: string;
+  candidatesRoot: string;
+}> {
+  const tempRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-gateway-security-'));
+  const projectRoot = path.join(tempRoot, 'gateway-project');
+  const chapterRoot = path.join(projectRoot, 'chapters', 'chapter_001');
+  const candidatesRoot = path.join(chapterRoot, 'plan_candidates');
+  await Promise.all([
+    mkdir(path.join(projectRoot, 'state'), { recursive: true }),
+    mkdir(path.join(projectRoot, 'planning'), { recursive: true }),
+    mkdir(chapterRoot, { recursive: true }),
+    ...(createCandidatesRoot
+      ? [mkdir(candidatesRoot, { recursive: true })]
+      : [])
+  ]);
+  await Promise.all([
+    writeFile(path.join(projectRoot, 'state', 'story_state.json'), JSON.stringify({
+      projectId: 'gateway-project',
+      latestCommittedChapter: 0,
+      characters: [{ id: 'char_main', name: 'Lin', role: 'lead' }],
+      narrativeDebts: []
+    }), 'utf8'),
+    writeFile(path.join(projectRoot, 'planning', 'chapter_queue.json'), '{}', 'utf8'),
+    writeFile(path.join(chapterRoot, 'mission.json'), JSON.stringify({
+      chapterNumber: 1,
+      chapterFunction: 'Open the signal.',
+      requiredObjectives: [],
+      debtsToPayOrAdvance: [],
+      debtsToIntroduce: [],
+      characterDeltas: [],
+      participatingCharacterIds: ['char_main'],
+      charactersToIntroduce: [],
+      readerInformationDelta: {
+        newKnowledge: [],
+        newSuspicions: [],
+        questionsToMaintain: [],
+        questionsToAnswer: []
+      },
+      forbiddenMoves: [],
+      targetEmotionalCurve: []
+    }), 'utf8'),
+    writeFile(path.join(chapterRoot, 'ranking.json'), JSON.stringify({
+      chapterNumber: 1,
+      selectedCandidateId: candidateId,
+      candidates: [{ candidateId, strengths: [], risks: [] }]
+    }), 'utf8'),
+    writeFile(
+      path.join(chapterRoot, 'selected_plan.md'),
+      '# Selected\n\nThe selected plan.\n',
+      'utf8'
+    )
+  ]);
+  engineDesktopMocks.readDesktopChapterPlan.mockResolvedValue({
+    available: true,
+    chapterNumber: 1,
+    title: 'Gateway Project'
+  });
+  return { tempRoot, projectRoot, candidatesRoot };
 }
 
 async function readAvailablePlan(service: ProjectChapterService) {

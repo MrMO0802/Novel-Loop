@@ -12,6 +12,7 @@ export type ChapterReviewOptionPurpose =
   | 'participant';
 
 export type ChapterRevisionPurpose = 'mission' | 'plan';
+export type ChapterParticipantOrigin = 'committed' | 'introduced';
 
 export interface StoredReviewToken {
   projectKey: string;
@@ -24,6 +25,7 @@ export interface StoredReviewToken {
   purpose: 'chapter_authoring';
   missionHash: string;
   optionPurposes: ReadonlyMap<string, ChapterReviewOptionPurpose>;
+  participantOrigins: ReadonlyMap<string, ChapterParticipantOrigin>;
 }
 
 export interface StoredRevisionToken {
@@ -52,6 +54,7 @@ interface CreateReviewInput {
   options: ReadonlyArray<{
     purpose: ChapterReviewOptionPurpose;
     trustedId: string;
+    participantOrigin?: ChapterParticipantOrigin;
   }>;
 }
 
@@ -99,6 +102,7 @@ export class ChapterReviewTokenStore {
   private readonly randomBytes: (size: number) => Uint8Array;
   private readonly reviews = new Map<string, StoredReviewToken>();
   private readonly revisions = new Map<string, StoredRevisionToken>();
+  private readonly reservedRevisions = new Set<string>();
 
   constructor(dependencies: TokenStoreDependencies = {}) {
     this.now = dependencies.now ?? Date.now;
@@ -117,6 +121,12 @@ export class ChapterReviewTokenStore {
     const reviewToken = this.createUniqueToken('chapter_review', this.reviews);
     const optionTokens = new Set<string>();
     const options = input.options.map((option) => {
+      if (
+        (option.purpose === 'participant')
+          !== (option.participantOrigin !== undefined)
+      ) {
+        throw new Error('Chapter participant token origin is invalid.');
+      }
       const optionToken = this.createUniqueOptionToken(optionTokens);
       optionTokens.add(optionToken);
       return { optionToken, ...option };
@@ -136,6 +146,11 @@ export class ChapterReviewTokenStore {
       missionHash: input.missionHash,
       optionPurposes: new Map(options.map(({ optionToken, purpose }) => (
         [optionToken, purpose]
+      ))),
+      participantOrigins: new Map(options.flatMap((option) => (
+        option.participantOrigin === undefined
+          ? []
+          : [[option.optionToken, option.participantOrigin] as const]
       )))
     });
     this.enforceCapacity(this.reviews, MAX_REVIEW_BINDINGS);
@@ -166,6 +181,7 @@ export class ChapterReviewTokenStore {
     reviewHash: string;
     missionHash: string;
     trustedId: string;
+    participantOrigin: ChapterParticipantOrigin | null;
   }> {
     const resolved = this.resolveReview(input);
     if (resolved.outcome === 'stale') return resolved;
@@ -183,7 +199,9 @@ export class ChapterReviewTokenStore {
         latestCommittedChapter: resolved.value.latestCommittedChapter,
         reviewHash: resolved.value.reviewHash,
         missionHash: resolved.value.missionHash,
-        trustedId
+        trustedId,
+        participantOrigin:
+          resolved.value.participantOrigins.get(input.optionToken) ?? null
       }
     };
   }
@@ -198,17 +216,22 @@ export class ChapterReviewTokenStore {
       ...input,
       createdAtMs: this.now()
     });
-    this.enforceCapacity(this.revisions, MAX_REVISION_BINDINGS);
+    this.enforceCapacity(
+      this.revisions,
+      MAX_REVISION_BINDINGS,
+      (token) => this.reservedRevisions.delete(token)
+    );
     return revisionToken;
   }
 
-  consumeRevision(
+  reserveRevision(
     input: ConsumeRevisionInput
   ): TokenResolution<StoredRevisionToken> {
     this.pruneExpired();
     const revision = this.revisions.get(input.revisionToken);
     if (
       revision === undefined
+      || this.reservedRevisions.has(input.revisionToken)
       || revision.projectKey !== input.projectKey
       || revision.projectRoot !== input.projectRoot
       || revision.latestCommittedChapter
@@ -216,8 +239,26 @@ export class ChapterReviewTokenStore {
     ) {
       return staleTokenResult();
     }
-    this.revisions.delete(input.revisionToken);
+    this.reservedRevisions.add(input.revisionToken);
     return { outcome: 'resolved', value: revision };
+  }
+
+  commitRevision(revisionToken: string): void {
+    if (!this.reservedRevisions.delete(revisionToken)) return;
+    this.revisions.delete(revisionToken);
+  }
+
+  releaseRevision(revisionToken: string): void {
+    this.reservedRevisions.delete(revisionToken);
+  }
+
+  consumeRevision(
+    input: ConsumeRevisionInput
+  ): TokenResolution<StoredRevisionToken> {
+    const reserved = this.reserveRevision(input);
+    if (reserved.outcome === 'stale') return reserved;
+    this.commitRevision(input.revisionToken);
+    return reserved;
   }
 
   private createUniqueOptionToken(existing: ReadonlySet<string>): string {
@@ -254,15 +295,21 @@ export class ChapterReviewTokenStore {
     for (const [token, revision] of this.revisions) {
       if (now - revision.createdAtMs >= TOKEN_TTL_MS) {
         this.revisions.delete(token);
+        this.reservedRevisions.delete(token);
       }
     }
   }
 
-  private enforceCapacity<T>(store: Map<string, T>, capacity: number): void {
+  private enforceCapacity<T>(
+    store: Map<string, T>,
+    capacity: number,
+    onDelete?: (token: string) => void
+  ): void {
     while (store.size > capacity) {
       const oldestToken = store.keys().next().value as string | undefined;
       if (oldestToken === undefined) return;
       store.delete(oldestToken);
+      onDelete?.(oldestToken);
     }
   }
 }

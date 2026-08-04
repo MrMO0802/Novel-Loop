@@ -136,6 +136,7 @@ export interface DesktopMissionAuthorEdit {
   debtsToIntroduce: ChapterMission['debtsToIntroduce'];
   characterDeltas: ChapterMission['characterDeltas'];
   participatingCharacterIds: string[];
+  retainedIntroducedCharacterIds?: string[];
   newCharacters: Array<{ name: string; role: string }>;
   readerInformationDelta: ChapterMission['readerInformationDelta'];
   forbiddenMoves: string[];
@@ -819,7 +820,19 @@ function createEditedMission(
     if (sourceIntroductions.size !== snapshot.mission.charactersToIntroduce.length) {
       throw invalidMissionEdit('The source mission has duplicate provisional character IDs.');
     }
+    const explicitlyRetainedIntroductionIds =
+      edit.retainedIntroducedCharacterIds ?? [];
+    if (
+      new Set(explicitlyRetainedIntroductionIds).size
+        !== explicitlyRetainedIntroductionIds.length
+      || explicitlyRetainedIntroductionIds.some((characterId) => (
+        !sourceIntroductions.has(characterId)
+      ))
+    ) {
+      throw invalidMissionEdit('A retained introduced character is unknown or duplicated.');
+    }
     const retainedIntroductionIds = new Set([
+      ...explicitlyRetainedIntroductionIds,
       ...edit.participatingCharacterIds,
       ...edit.characterDeltas.map(({ characterId }) => characterId)
     ].filter((characterId) => sourceIntroductions.has(characterId)));

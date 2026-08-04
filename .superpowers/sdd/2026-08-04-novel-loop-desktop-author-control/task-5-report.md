@@ -136,3 +136,75 @@ artifacts. Its trusted schemas and review-hash reconstruction must remain in
 sync with the engine artifact contract until that read model is exported by the
 engine. Existing untracked Playwright and screenshot artifacts remain outside
 the commit.
+
+## Fix Round 1
+
+### Status And Commit
+
+Complete on top of `d173d90`. Scoped fix commit subject:
+`fix(desktop): harden opaque chapter authoring boundary`.
+
+### RED
+
+- Public token schemas accepted 24-hex payloads.
+- A traversal candidate ID and a symlinked `plan_candidates` ancestor allowed
+  the gateway to read Markdown outside the expected candidate root.
+- Excerpts and other renderer free text accepted generic POSIX/Windows paths,
+  unknown relative artifact paths, additional engine IDs, percent/HTML entity
+  encodings, `file:` links, and encoded IDs inside HTTPS links.
+- Busy and stale-source adoption failures deleted the revision token before the
+  gateway failed, preventing retry.
+- An unchanged source `charactersToIntroduce` entry was incorrectly added to
+  `participatingCharacterIds` after mission adoption.
+
+### GREEN
+
+```bash
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/main/chapterContract.test.ts \
+  tests/main/chapterHandlers.test.ts \
+  tests/main/projectChapterService.test.ts \
+  tests/main/chapterStateProtection.test.ts
+```
+
+Result: 4 files passed, 148 tests passed, exit 0.
+
+```bash
+corepack pnpm --dir apps/desktop check
+```
+
+Result: node, web, and end-to-end TypeScript checks passed, exit 0. The root
+engine `corepack pnpm build` also passed after the trusted mission edit facade
+was extended; generated `dist` files remain ignored and uncommitted.
+
+### Security Fixes
+
+- Candidate IDs are validated as `plan_` plus exactly three digits before path
+  construction. Candidate-root ancestry rejects symlinks/non-directories, and
+  canonical containment is checked before and after regular-file reads.
+- Every renderer-facing prose field, including both excerpts and task errors,
+  uses one normalized leakage guard. It covers encoded paths/IDs while keeping
+  ordinary `yes/no`, `1/2`, and HTTPS prose usable.
+- Public review/option/revision schemas require exactly 48 lowercase hex
+  characters after the prefix; production generation remains 24 random bytes.
+- Adoption reserves a revision token, commits deletion only after gateway
+  success, and releases it on failure. Busy and stale-source failures remain
+  retryable; success remains single-use. Revision chapter staleness and
+  30-minute expiry have direct tests.
+- Main-only participant bindings carry committed/introduced origin. The trusted
+  engine edit retains existing introductions without changing their name/role
+  or adding their IDs to `participatingCharacterIds`.
+
+### Story State And Boundaries
+
+The Story State suite now passes 12 cases. The new real service/engine
+round-trip asserts byte-identical Story State and exact preservation of both
+participant arrays. Fixed IPC channels, named preload wrappers, and public
+renderer shapes were not widened.
+
+### Concerns
+
+No blocking concerns. The existing synchronization concern remains: the
+gateway reconstructs trusted review bindings from engine artifacts until the
+engine exports a single trusted read model. Existing untracked Playwright and
+screenshot artifacts remain outside this fix commit.

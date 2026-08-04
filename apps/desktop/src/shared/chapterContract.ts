@@ -165,7 +165,7 @@ export const ChapterErrorKindSchema = z.enum([
 
 const ChapterErrorSchema = z.object({
   kind: ChapterErrorKindSchema,
-  message: z.string().trim().min(1).max(320)
+  message: boundedText(320)
 }).strict();
 
 export const ChapterSceneProgressSchema = z.object({
@@ -272,7 +272,7 @@ const ChapterPlanDocumentSchema = z.object({
 
 const ChapterPlanAlternativeSchema = z.object({
   title: boundedText(240),
-  excerpt: z.string().max(8_000),
+  excerpt: boundedExcerpt(8_000),
   strengths: boundedTextArray(MAX_MISSION_ITEMS, 2_000),
   risks: boundedTextArray(MAX_MISSION_ITEMS, 2_000)
 }).strict();
@@ -281,7 +281,7 @@ export const ChapterPlanDirectionSchema = z.object({
   optionToken: ChapterOptionTokenSchema,
   title: boundedText(240),
   markdown: markdownSchema(),
-  excerpt: z.string().max(8_000),
+  excerpt: boundedExcerpt(8_000),
   strengths: boundedTextArray(MAX_MISSION_ITEMS, 2_000),
   risks: boundedTextArray(MAX_MISSION_ITEMS, 2_000),
   aiRecommended: z.boolean(),
@@ -420,16 +420,16 @@ function boundedTextArray(maxItems: number, maxLength: number) {
 }
 
 function authorTextArray(maxItems: number, maxLength: number) {
-  return z.array(
-    z.string()
-      .trim()
-      .min(1)
-      .max(maxLength)
-      .refine(
-        (text) => !/\b(?:char|debt|mission|obj)_[A-Za-z0-9_-]+\b|story_state|runId|taskId/u.test(text),
-        { message: 'Author-facing text contains an internal identifier.' }
-      )
-  ).max(maxItems);
+  return boundedTextArray(maxItems, maxLength);
+}
+
+function boundedExcerpt(maxLength: number) {
+  return z.string()
+    .trim()
+    .max(maxLength)
+    .refine((text) => !containsInternalValue(text), {
+      message: 'Author-facing excerpt contains an internal value.'
+    });
 }
 
 function markdownSchema() {
@@ -448,7 +448,7 @@ function markdownSchema() {
 
 function opaqueToken(prefix: string) {
   return z.string().regex(
-    new RegExp(`^${prefix}_(?:[a-f0-9]{24}|[a-f0-9]{48})$`, 'u')
+    new RegExp(`^${prefix}_[a-f0-9]{48}$`, 'u')
   );
 }
 
@@ -520,6 +520,69 @@ function enforcePlanReview(
 }
 
 function containsInternalValue(text: string): boolean {
-  return /(?:\/home\/|\\Users\\|\b(?:chapters|state|planning|runs|artifacts|codex)\/[A-Za-z0-9_./-]+\b|\b(?:plan|obj|debt|char|mission|run)_[A-Za-z0-9_-]+\b|\b[a-f0-9]{64}\b|\b[A-Za-z0-9_.-]+\.schema(?:\.json)?\b)/iu
-    .test(text);
+  const normalized = normalizeLeakageText(text);
+  const withoutWebUrls = normalized.replace(
+    /\bhttps?:\/\/[^\s<>{}\[\]"']+/giu,
+    ' '
+  );
+  return (
+    /\bfile:\/\//iu.test(normalized)
+    ||
+    /(?:^|[\s([{"'=])\/(?!\/)[^\s<>{}\[\]]+/u.test(withoutWebUrls)
+    || /(?:^|[\s([{"'=])(?:[A-Za-z]:[\\/]|\\\\[^\\/\s]+[\\/])[^\s<>{}\[\]]*/u
+      .test(withoutWebUrls)
+    || /(?:^|[\s([{"'=])(?:\.{1,2}[\\/])?(?:[A-Za-z0-9_.-]+[\\/])+(?:[A-Za-z0-9_.-]+\.[A-Za-z0-9]{1,12})(?=$|[\s)\]}>.,;:!?])/u
+      .test(withoutWebUrls)
+    || /(?:^|[\s([{"'=])(?:[A-Za-z0-9_.-]+[\\/]){2,}[A-Za-z0-9_.-]+(?=$|[\s)\]}>.,;:!?])/u
+      .test(withoutWebUrls)
+    || /\b(?:author_revision|candidate|chapter|character|char|debt|event|mission|objective|obj|plan|revision|run|scene|task)_[A-Za-z0-9][A-Za-z0-9_-]*\b/iu
+      .test(normalized)
+    || /\b[a-f0-9]{64}\b/iu.test(normalized)
+    || /\b[A-Za-z0-9_.-]+\.schema(?:\.json)?\b/iu.test(normalized)
+    || /\b(?:auth|authorization|candidateId|profile|provider|runId|sourceHash|taskId)\s*[:=]/iu
+      .test(normalized)
+  );
+}
+
+function normalizeLeakageText(text: string): string {
+  let normalized = text.normalize('NFKC');
+  for (let pass = 0; pass < 3; pass += 1) {
+    const previous = normalized;
+    normalized = normalized
+      .replace(/&#(?:x([0-9a-f]{1,6})|([0-9]{1,7}));?/giu, (
+        entity,
+        hexadecimal: string | undefined,
+        decimal: string | undefined
+      ) => decodeNumericEntity(entity, hexadecimal, decimal))
+      .replace(/&(amp|bsol|colon|period|sol);/giu, (entity, name: string) => ({
+        amp: '&',
+        bsol: '\\',
+        colon: ':',
+        period: '.',
+        sol: '/'
+      })[name.toLowerCase()] ?? entity);
+    try {
+      normalized = decodeURIComponent(normalized);
+    } catch {
+      normalized = normalized.replace(
+        /%(25|2e|2f|3a|5c|5f)/giu,
+        (_encoded, hex: string) => String.fromCharCode(Number.parseInt(hex, 16))
+      );
+    }
+    normalized = normalized.replace(/\\([/._:#?%])/gu, '$1');
+    if (normalized === previous) break;
+  }
+  return normalized;
+}
+
+function decodeNumericEntity(
+  entity: string,
+  hexadecimal: string | undefined,
+  decimal: string | undefined
+): string {
+  const codePoint = Number.parseInt(hexadecimal ?? decimal ?? '', hexadecimal === undefined ? 10 : 16);
+  if (!Number.isInteger(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
+    return entity;
+  }
+  return String.fromCodePoint(codePoint);
 }

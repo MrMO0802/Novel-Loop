@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, readdir } from 'node:fs/promises';
+import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
@@ -17,6 +17,7 @@ import {
 } from '../../shared/chapterContract';
 
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024;
+const SAFE_PLAN_CANDIDATE_ID = /^plan_[0-9]{3}$/u;
 
 type PlanningProgressEvent = Parameters<
   NonNullable<DesktopChapterPlanningInput['onProgress']>
@@ -105,6 +106,7 @@ export const TrustedChapterPlanReviewSchema = z.discriminatedUnion(
           characterId: z.string().min(1).max(240),
           name: z.string().min(1).max(120),
           role: z.string().min(1).max(120),
+          origin: z.enum(['committed', 'introduced']),
           selected: z.boolean()
         }).strict()).max(32),
         readerInformationDelta: TrustedReaderInformationSchema,
@@ -389,20 +391,27 @@ async function readTrustedPlanArtifacts(
     || storyState.latestCommittedChapter + 1 !== chapterNumber
     || mission.chapterNumber !== chapterNumber
     || ranking.chapterNumber !== chapterNumber
+    || !SAFE_PLAN_CANDIDATE_ID.test(ranking.selectedCandidateId)
+    || ranking.candidates.some(({ candidateId }) => (
+      !SAFE_PLAN_CANDIDATE_ID.test(candidateId)
+    ))
   ) {
     throw invalidTrustedReview();
   }
 
+  const candidateRoot = await resolveSafeCandidateRoot(
+    projectRoot,
+    path.join(chapterDir, 'plan_candidates')
+  );
   const candidateMarkdown = new Map<string, string>();
   for (const candidate of ranking.candidates) {
     const candidatePath = path.join(
-      chapterDir,
-      'plan_candidates',
+      candidateRoot,
       `${candidate.candidateId}.md`
     );
     candidateMarkdown.set(
       candidate.candidateId,
-      await readRegularText(candidatePath)
+      await readContainedCandidateText(candidateRoot, candidatePath)
     );
   }
   const activeCandidate = candidateMarkdown.get(ranking.selectedCandidateId);
@@ -417,14 +426,26 @@ async function readTrustedPlanArtifacts(
   const knownDebts = new Map(
     storyState.narrativeDebts.map((debt) => [debt.id, debt.promise])
   );
-  const knownCharacters = new Map([
+  const knownCharacters = new Map<string, {
+    name: string;
+    role: string;
+    origin: 'committed' | 'introduced';
+  }>([
     ...storyState.characters.map((character) => [
       character.id,
-      { name: character.name, role: character.role }
+      {
+        name: character.name,
+        role: character.role,
+        origin: 'committed' as const
+      }
     ] as const),
     ...mission.charactersToIntroduce.map((character) => [
       character.characterId,
-      { name: character.name, role: character.role }
+      {
+        name: character.name,
+        role: character.role,
+        origin: 'introduced' as const
+      }
     ] as const)
   ]);
   const selectedParticipants = new Set([
@@ -479,6 +500,7 @@ async function readTrustedPlanArtifacts(
         characterId,
         name: character.name,
         role: character.role,
+        origin: character.origin,
         selected: selectedParticipants.has(characterId)
       })),
       readerInformationDelta: mission.readerInformationDelta,
@@ -564,6 +586,78 @@ async function readRegularText(filePath: string): Promise<string> {
     throw invalidTrustedReview();
   }
   return content;
+}
+
+async function resolveSafeCandidateRoot(
+  projectRootInput: string,
+  candidateRootInput: string
+): Promise<string> {
+  const projectRoot = path.resolve(projectRootInput);
+  const candidateRoot = path.resolve(candidateRootInput);
+  if (!isWithin(projectRoot, candidateRoot)) throw invalidTrustedReview();
+
+  const projectStat = await lstat(projectRoot);
+  if (!projectStat.isDirectory() || projectStat.isSymbolicLink()) {
+    throw invalidTrustedReview();
+  }
+  const canonicalProjectRoot = await realpath(projectRoot);
+  const relative = path.relative(projectRoot, candidateRoot);
+  let current = projectRoot;
+  for (const segment of relative.split(path.sep).filter(Boolean)) {
+    current = path.join(current, segment);
+    const stat = await lstat(current);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) {
+      throw invalidTrustedReview();
+    }
+    if (!isWithin(canonicalProjectRoot, await realpath(current))) {
+      throw invalidTrustedReview();
+    }
+  }
+  const canonicalCandidateRoot = await realpath(candidateRoot);
+  if (!isWithin(canonicalProjectRoot, canonicalCandidateRoot)) {
+    throw invalidTrustedReview();
+  }
+  return canonicalCandidateRoot;
+}
+
+async function readContainedCandidateText(
+  candidateRoot: string,
+  candidatePathInput: string
+): Promise<string> {
+  const candidatePath = path.resolve(candidatePathInput);
+  if (!isWithin(candidateRoot, candidatePath)) throw invalidTrustedReview();
+  const before = await lstat(candidatePath);
+  if (
+    !before.isFile()
+    || before.isSymbolicLink()
+    || before.size > MAX_ARTIFACT_BYTES
+  ) {
+    throw invalidTrustedReview();
+  }
+  const canonicalCandidatePath = await realpath(candidatePath);
+  if (!isWithin(candidateRoot, canonicalCandidatePath)) {
+    throw invalidTrustedReview();
+  }
+  const content = await readFile(canonicalCandidatePath, 'utf8');
+  const after = await lstat(canonicalCandidatePath);
+  if (
+    !after.isFile()
+    || after.isSymbolicLink()
+    || after.size > MAX_ARTIFACT_BYTES
+    || Buffer.byteLength(content, 'utf8') > MAX_ARTIFACT_BYTES
+    || !isWithin(candidateRoot, await realpath(canonicalCandidatePath))
+  ) {
+    throw invalidTrustedReview();
+  }
+  return content;
+}
+
+function isWithin(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative === ''
+    || (!relative.startsWith(`..${path.sep}`)
+      && relative !== '..'
+      && !path.isAbsolute(relative));
 }
 
 function markdownTitle(markdown: string, ordinal: number): string {

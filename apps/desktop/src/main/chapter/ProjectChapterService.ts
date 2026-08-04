@@ -279,6 +279,16 @@ export class ProjectChapterService implements ChapterApplicationService {
         }
         return resolved.value.optionBindings.get(optionToken) ?? null;
       };
+      const trustedParticipant = (optionToken: string): {
+        characterId: string;
+        origin: 'committed' | 'introduced';
+      } | null => {
+        const characterId = trustedOption(optionToken, 'participant');
+        const origin = resolved.value.participantOrigins.get(optionToken);
+        return characterId === null || origin === undefined
+          ? null
+          : { characterId, origin };
+      };
       const requiredObjectives = request.mission.requiredObjectives.map(
         (objective) => ({
           sourceObjectiveId: objective.itemToken === null
@@ -292,14 +302,19 @@ export class ProjectChapterService implements ChapterApplicationService {
       const debtsToPayOrAdvance = request.mission.debtTokens.map((token) => (
         trustedOption(token, 'debt')
       ));
-      const characterDeltas = request.mission.characterDeltas.map((delta) => ({
-        characterId: trustedOption(delta.participantToken, 'participant'),
-        from: delta.from,
-        to: delta.to,
-        evidenceRequired: delta.evidenceRequired
-      }));
-      const participatingCharacterIds = request.mission.participantTokens.map(
-        (token) => trustedOption(token, 'participant')
+      const characterDeltas = request.mission.characterDeltas.map((delta) => {
+        const participant = trustedParticipant(delta.participantToken);
+        return participant === null
+          ? null
+          : {
+              participant,
+              from: delta.from,
+              to: delta.to,
+              evidenceRequired: delta.evidenceRequired
+            };
+      });
+      const selectedParticipants = request.mission.participantTokens.map(
+        (token) => trustedParticipant(token)
       );
       if (
         requiredObjectives.some((objective) => (
@@ -310,11 +325,30 @@ export class ProjectChapterService implements ChapterApplicationService {
           )) !== undefined
         ))
         || debtsToPayOrAdvance.includes(null)
-        || characterDeltas.some(({ characterId }) => characterId === null)
-        || participatingCharacterIds.includes(null)
+        || characterDeltas.includes(null)
+        || selectedParticipants.includes(null)
       ) {
         return { outcome: 'stale', messageKey: 'stale_edit' };
       }
+      const resolvedCharacterDeltas = characterDeltas as Array<{
+        participant: {
+          characterId: string;
+          origin: 'committed' | 'introduced';
+        };
+        from: string;
+        to: string;
+        evidenceRequired: string;
+      }>;
+      const resolvedParticipants = selectedParticipants as Array<{
+        characterId: string;
+        origin: 'committed' | 'introduced';
+      }>;
+      const retainedIntroducedCharacterIds = uniqueStrings([
+        ...resolvedParticipants,
+        ...resolvedCharacterDeltas.map(({ participant }) => participant)
+      ].filter(({ origin }) => origin === 'introduced').map(({
+        characterId
+      }) => characterId));
       const edit: TrustedMissionRevisionInput['edit'] = {
         sourceMissionHash: resolved.value.missionHash,
         chapterFunction: request.mission.chapterFunction,
@@ -326,13 +360,23 @@ export class ProjectChapterService implements ChapterApplicationService {
         }>,
         debtsToPayOrAdvance: debtsToPayOrAdvance as string[],
         debtsToIntroduce: request.mission.debtsToIntroduce,
-        characterDeltas: characterDeltas as Array<{
-          characterId: string;
-          from: string;
-          to: string;
-          evidenceRequired: string;
-        }>,
-        participatingCharacterIds: participatingCharacterIds as string[],
+        characterDeltas: resolvedCharacterDeltas.map(({
+          participant,
+          from,
+          to,
+          evidenceRequired
+        }) => ({
+          characterId: participant.characterId,
+          from,
+          to,
+          evidenceRequired
+        })),
+        participatingCharacterIds: resolvedParticipants
+          .filter(({ origin }) => origin === 'committed')
+          .map(({ characterId }) => characterId),
+        ...(retainedIntroducedCharacterIds.length === 0
+          ? {}
+          : { retainedIntroducedCharacterIds }),
         newCharacters: request.mission.newParticipants,
         readerInformationDelta: request.mission.readerInformation,
         forbiddenMoves: request.mission.forbiddenMoves,
@@ -366,21 +410,27 @@ export class ProjectChapterService implements ChapterApplicationService {
       projectRoot,
       trusted
     ) => {
-      const resolved = this.tokenStore.consumeRevision({
+      const resolved = this.tokenStore.reserveRevision({
         projectKey: request.projectKey,
         projectRoot,
         revisionToken: request.revisionToken,
         currentLatestCommittedChapter: trusted.latestCommittedChapter
       });
       if (resolved.outcome === 'stale') return resolved;
-      await this.dependencies.gateway.adoptRevision({
-        projectRoot,
-        chapterNumber: resolved.value.chapterNumber,
-        revisionId: resolved.value.revisionId,
-        sourceHash: resolved.value.sourceHash,
-        purpose: resolved.value.purpose
-      });
-      return { outcome: 'adopted' };
+      try {
+        await this.dependencies.gateway.adoptRevision({
+          projectRoot,
+          chapterNumber: resolved.value.chapterNumber,
+          revisionId: resolved.value.revisionId,
+          sourceHash: resolved.value.sourceHash,
+          purpose: resolved.value.purpose
+        });
+        this.tokenStore.commitRevision(request.revisionToken);
+        return { outcome: 'adopted' };
+      } catch (error) {
+        this.tokenStore.releaseRevision(request.revisionToken);
+        throw error;
+      }
     });
   }
 
@@ -402,9 +452,10 @@ export class ProjectChapterService implements ChapterApplicationService {
         purpose: 'debt' as const,
         trustedId: id
       })),
-      ...trusted.mission.participants.map(({ characterId }) => ({
+      ...trusted.mission.participants.map(({ characterId, origin }) => ({
         purpose: 'participant' as const,
-        trustedId: characterId
+        trustedId: characterId,
+        participantOrigin: origin
       }))
     ];
     const created = this.tokenStore.createReview({

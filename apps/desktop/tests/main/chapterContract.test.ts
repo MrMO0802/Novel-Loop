@@ -6,19 +6,22 @@ import {
   ChapterAuthoringResultSchema,
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
+  ChapterOptionTokenSchema,
   ChapterPlanReviewResultSchema,
+  ChapterReviewTokenSchema,
+  ChapterRevisionTokenSchema,
   ChapterSaveMissionWorkingCopyRequestSchema,
   ChapterSavePlanWorkingCopyRequestSchema,
   ChapterSelectDirectionRequestSchema,
   ChapterTaskSchema
 } from '../../src/shared/chapterContract';
 
-const reviewToken = 'chapter_review_0123456789abcdef01234567';
-const activeOptionToken = 'chapter_option_0123456789abcdef01234567';
-const alternativeOptionToken = 'chapter_option_89abcdef0123456701234567';
-const objectiveToken = 'chapter_option_111111111111111111111111';
-const participantToken = 'chapter_option_222222222222222222222222';
-const debtToken = 'chapter_option_333333333333333333333333';
+const reviewToken = `chapter_review_${'1'.repeat(48)}`;
+const activeOptionToken = `chapter_option_${'2'.repeat(48)}`;
+const alternativeOptionToken = `chapter_option_${'3'.repeat(48)}`;
+const objectiveToken = `chapter_option_${'4'.repeat(48)}`;
+const participantToken = `chapter_option_${'5'.repeat(48)}`;
+const debtToken = `chapter_option_${'6'.repeat(48)}`;
 
 const validPlanReview = {
   available: true,
@@ -130,6 +133,21 @@ const validTask = {
 } as const;
 
 describe('chapter workspace contract', () => {
+  test('requires exactly 192-bit lowercase hexadecimal opaque tokens', () => {
+    const cases = [
+      [ChapterReviewTokenSchema, 'chapter_review'],
+      [ChapterOptionTokenSchema, 'chapter_option'],
+      [ChapterRevisionTokenSchema, 'chapter_revision']
+    ] as const;
+
+    for (const [schema, prefix] of cases) {
+      expect(schema.safeParse(`${prefix}_${'a'.repeat(48)}`).success).toBe(true);
+      expect(schema.safeParse(`${prefix}_${'a'.repeat(24)}`).success).toBe(false);
+      expect(schema.safeParse(`${prefix}_${'a'.repeat(49)}`).success).toBe(false);
+      expect(schema.safeParse(`${prefix}_${'A'.repeat(48)}`).success).toBe(false);
+    }
+  });
+
   test('exports strict request objects for all seven service operations', () => {
     const cases = [
       ['ChapterInspectRequestSchema', { projectKey: 'project_radio' }, {
@@ -205,12 +223,12 @@ describe('chapter workspace contract', () => {
 
     expect(ChapterAdoptRevisionRequestSchema.parse({
       projectKey: 'project_radio',
-      revisionToken: 'chapter_revision_0123456789abcdef01234567',
+      revisionToken: `chapter_revision_${'7'.repeat(48)}`,
       confirmInvalidation: true
     })).toBeDefined();
     expect(() => ChapterAdoptRevisionRequestSchema.parse({
       projectKey: 'project_radio',
-      revisionToken: 'chapter_revision_0123456789abcdef01234567',
+      revisionToken: `chapter_revision_${'7'.repeat(48)}`,
       confirmInvalidation: false
     })).toThrow();
   });
@@ -329,10 +347,77 @@ describe('chapter workspace contract', () => {
     }).success).toBe(false);
   });
 
+  test.each([
+    '/tmp/novel-loop/private.json',
+    '/Users/author/Library/private-plan.md',
+    'C:\\Users\\author\\private-plan.md',
+    '\\\\server\\share\\private-plan.md',
+    'workspace/private/cache.dat',
+    'scene_ch001_004',
+    'event_0001',
+    'author_revision_ch001_plan_v1',
+    '[private](%2Ftmp%2Fnovel-loop%2Fprivate.json)',
+    '[private](file:///tmp/novel-loop/private.json)',
+    '[private](https://example.com/%70lan%5F002)',
+    '&#47;tmp&#47;novel-loop&#47;private.json',
+    '&sol;tmp&sol;novel-loop&sol;private.json'
+  ])('rejects path, engine ID, and encoded leakage in both excerpts: %s', (leak) => {
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      alternatives: [{ ...validPlanReview.alternatives[0], excerpt: leak }]
+    }).success).toBe(false);
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      directions: validPlanReview.directions.map((direction, index) => (
+        index === 0 ? { ...direction, excerpt: leak } : direction
+      ))
+    }).success).toBe(false);
+  });
+
+  test('applies the leakage guard to every remaining renderer free-text shape', () => {
+    const leak = '[private](&#47;tmp&#47;engine&#47;scene_001.json)';
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      mission: {
+        ...validPlanReview.mission,
+        narrativePromises: [leak]
+      }
+    }).success).toBe(false);
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      mission: {
+        ...validPlanReview.mission,
+        characterDeltas: [leak]
+      }
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...validTask,
+      status: 'failed',
+      canCancel: false,
+      error: { kind: 'unexpected', message: leak }
+    }).success).toBe(false);
+  });
+
+  test('keeps bounded author prose with ordinary slashes and web links usable', () => {
+    const prose = 'Choose yes/no in chapter 1/2; reference https://example.com/story-notes.';
+    expect(ChapterPlanReviewResultSchema.safeParse({
+      ...validPlanReview,
+      alternatives: [{
+        ...validPlanReview.alternatives[0],
+        excerpt: prose,
+        strengths: [prose]
+      }],
+      directions: validPlanReview.directions.map((direction) => ({
+        ...direction,
+        excerpt: prose
+      }))
+    }).success).toBe(true);
+  });
+
   test('exposes only bounded authoring outcomes and message keys', () => {
     expect(ChapterAuthoringResultSchema.parse({
       outcome: 'saved',
-      revisionToken: 'chapter_revision_0123456789abcdef01234567'
+      revisionToken: `chapter_revision_${'7'.repeat(48)}`
     })).toBeDefined();
     expect(ChapterAuthoringResultSchema.parse({
       outcome: 'blocked',

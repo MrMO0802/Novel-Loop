@@ -7,7 +7,11 @@ import { afterEach, describe, expect, test } from 'vitest';
 import { buildBible } from '../../../../src/app/buildBible.js';
 import { initProjectFromBriefText } from '../../../../src/app/initProject.js';
 import { planGlobal } from '../../../../src/app/planGlobal.js';
-import { ChapterQueueSchema, StoryStateSchema } from '../../../../src/schemas/index.js';
+import {
+  ChapterMissionSchema,
+  ChapterQueueSchema,
+  StoryStateSchema
+} from '../../../../src/schemas/index.js';
 import { FileStore } from '../../../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../../../src/storage/ProjectPaths.js';
 import { validCharacterState } from '../../../../tests/fixtures/schemas/valid.js';
@@ -303,6 +307,83 @@ describe('chapter workspace Story State protection', () => {
         confirmInvalidation: true
       })).resolves.toEqual({ outcome: 'adopted' });
       expect(await sha256(context.paths.storyState())).toBe(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
+  test('preserves an existing introduced participant through an unchanged opaque edit', async () => {
+    const context = await createChapterProject(
+      'chapter-state-introduced-participant',
+      'valid'
+    );
+    const beforeState = await sha256(context.paths.storyState());
+    const projectKey = 'project_state_introduced_participant';
+    const service = chapterServiceFor(context, projectKey);
+
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      const missionPath = context.paths.chapterArtifact(1, 'mission.json');
+      const generatedMission = await store.readJson(
+        missionPath,
+        ChapterMissionSchema
+      );
+      const sourceMission = ChapterMissionSchema.parse({
+        ...generatedMission,
+        charactersToIntroduce: [{
+          characterId: 'char_provisional_0123456789abcdef',
+          name: 'Mara',
+          role: 'caller'
+        }]
+      });
+      await store.writeJson(missionPath, sourceMission, ChapterMissionSchema);
+
+      const review = await availablePlan(service, projectKey);
+      const saved = await service.saveMissionWorkingCopy({
+        projectKey,
+        reviewToken: review.reviewToken,
+        mission: {
+          chapterFunction: review.mission.chapterFunction,
+          requiredObjectives: review.mission.objectiveItems.map((item) => ({
+            itemToken: item.itemToken,
+            text: item.text,
+            type: item.type,
+            priority: item.priority
+          })),
+          debtTokens: review.mission.debtItems.map(({ itemToken }) => itemToken),
+          debtsToIntroduce: review.mission.introducedDebts,
+          characterDeltas: review.mission.characterDeltaItems.map((item) => ({
+            participantToken: item.participantToken,
+            from: item.from,
+            to: item.to,
+            evidenceRequired: item.evidenceRequired
+          })),
+          participantTokens: review.mission.participantOptions
+            .filter(({ selected }) => selected)
+            .map(({ participantToken }) => participantToken),
+          newParticipants: [],
+          readerInformation: review.mission.readerInformation,
+          forbiddenMoves: review.mission.forbiddenMoves,
+          targetEmotionalCurve: review.mission.targetEmotionalCurve,
+          targetWordCount: review.mission.targetWordCount
+        }
+      });
+      if (saved.outcome !== 'saved') throw new Error('Expected mission save.');
+      await expect(service.adoptRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmInvalidation: true
+      })).resolves.toEqual({ outcome: 'adopted' });
+
+      const adoptedMission = await store.readJson(
+        missionPath,
+        ChapterMissionSchema
+      );
+      expect(adoptedMission.charactersToIntroduce)
+        .toEqual(sourceMission.charactersToIntroduce);
+      expect(adoptedMission.participatingCharacterIds)
+        .toEqual(sourceMission.participatingCharacterIds);
+      expect(await sha256(context.paths.storyState())).toBe(beforeState);
     } finally {
       context.restoreCodexBin();
     }

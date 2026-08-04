@@ -57,12 +57,12 @@ const draftReview: ChapterDraftReviewResult = {
 };
 const savedResult: ChapterAuthoringResult = {
   outcome: 'saved',
-  revisionToken: 'chapter_revision_0123456789abcdef01234567'
+  revisionToken: `chapter_revision_${'3'.repeat(48)}`
 };
 const adoptedResult: ChapterAuthoringResult = { outcome: 'adopted' };
-const reviewToken = 'chapter_review_0123456789abcdef01234567';
-const optionToken = 'chapter_option_0123456789abcdef01234567';
-const participantToken = 'chapter_option_222222222222222222222222';
+const reviewToken = `chapter_review_${'1'.repeat(48)}`;
+const optionToken = `chapter_option_${'2'.repeat(48)}`;
+const participantToken = `chapter_option_${'4'.repeat(48)}`;
 
 const selectDirectionRequest: ChapterSelectDirectionRequest = {
   projectKey: task.projectKey,
@@ -97,7 +97,7 @@ const saveMissionRequest: ChapterSaveMissionWorkingCopyRequest = {
 };
 const adoptRequest: ChapterAdoptRevisionRequest = {
   projectKey: task.projectKey,
-  revisionToken: 'chapter_revision_0123456789abcdef01234567',
+  revisionToken: `chapter_revision_${'3'.repeat(48)}`,
   confirmInvalidation: true
 };
 

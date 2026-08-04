@@ -207,6 +207,39 @@ describe('chapter author revision storage', () => {
       content: '# 作者正文\n\n采用这份稿件。\n'
     });
   });
+
+  test('rejects a stale source before modifying the ready revision or protected state', async () => {
+    const created = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'selected_plan',
+      mode: 'direct_edit',
+      sourceArtifactPath: paths.chapterArtifact(1, 'selected_plan.md'),
+      sourceCandidateId: 'plan_001',
+      content: '# 作者方向\n\n基于原始来源。\n',
+      authorInstruction: null
+    });
+    const recordPath = paths.projectArtifact(created.relativeRecordPath);
+    const workingCopyPath = paths.projectArtifact(created.relativeMarkdownPath);
+    const recordBefore = await store.readText(recordPath);
+    const workingCopyBefore = await store.readText(workingCopyPath);
+    const storyStateBefore = await store.readText(paths.storyState());
+    const queueBefore = await store.readText(paths.chapterQueue());
+
+    await store.writeText(paths.chapterArtifact(1, 'selected_plan.md'), '# 已变更来源\n\n不再匹配。\n');
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: created.record.revisionId
+    })).rejects.toMatchObject({ code: 'AUTHOR_REVISION_SOURCE_STALE' });
+
+    expect(await store.readText(recordPath)).toBe(recordBefore);
+    expect((await store.readJson(recordPath, AuthorRevisionRecordSchema)).state).toBe('ready');
+    expect(await store.readText(workingCopyPath)).toBe(workingCopyBefore);
+    expect(await store.readText(paths.storyState())).toBe(storyStateBefore);
+    expect(await store.readText(paths.chapterQueue())).toBe(queueBefore);
+  });
 });
 
 async function sha256(filePath: string): Promise<string> {

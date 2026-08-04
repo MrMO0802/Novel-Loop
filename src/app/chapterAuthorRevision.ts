@@ -210,6 +210,7 @@ export async function adoptAuthorRevision(
     if (target.record.state !== 'ready' && target.record.state !== 'adopted') {
       throw new AppError('AUTHOR_REVISION_NOT_ADOPTABLE', `Author revision is not ready: ${input.revisionId}`, 2);
     }
+    await readVerifiedSourceArtifact(projectRoot, store, target.record);
     await readVerifiedWorkingCopy(projectRoot, store, target.record);
 
     for (const entry of revisions) {
@@ -445,6 +446,19 @@ async function readVerifiedWorkingCopy(
     throw new AppError('AUTHOR_REVISION_WORKING_COPY_INVALID', `Working copy hash does not match: ${record.revisionId}`, 2);
   }
   return content;
+}
+
+async function readVerifiedSourceArtifact(
+  projectRoot: string,
+  store: FileStore,
+  record: AuthorRevisionRecord
+): Promise<void> {
+  const sourceArtifactPath = resolveProjectPath(projectRoot, record.sourceArtifactPath);
+  await assertSafePath(projectRoot, sourceArtifactPath);
+  const content = await store.readText(sourceArtifactPath);
+  if (sha256(content) !== record.sourceHash) {
+    throw new AppError('AUTHOR_REVISION_SOURCE_STALE', `Source artifact hash does not match: ${record.revisionId}`, 2);
+  }
 }
 
 function validateCreateInput(input: CreateAuthorRevisionInput): void {

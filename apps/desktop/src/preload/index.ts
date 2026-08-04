@@ -20,6 +20,8 @@ import type {
 } from '../shared/planningContract';
 import type {
   ChapterAdoptRevisionRequest,
+  ChapterAdjustMissionRequest,
+  ChapterAdjustPlanRequest,
   ChapterAuthoringResult,
   ChapterCancelRequest,
   ChapterDraftReviewResult,
@@ -176,6 +178,20 @@ const novelLoopApi: NovelLoopDesktopApi = {
     startDrafting: async (request: ChapterStartDraftingRequest) => {
       const response: unknown = await ipcRenderer.invoke(
         IPC_CHANNELS.chapterStartDrafting,
+        request
+      );
+      return response as ChapterTask;
+    },
+    adjustMission: async (request: ChapterAdjustMissionRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterAdjustMission,
+        request
+      );
+      return response as ChapterTask;
+    },
+    adjustPlan: async (request: ChapterAdjustPlanRequest) => {
+      const response: unknown = await ipcRenderer.invoke(
+        IPC_CHANNELS.chapterAdjustPlan,
         request
       );
       return response as ChapterTask;

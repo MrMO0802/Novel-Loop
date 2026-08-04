@@ -1,0 +1,27 @@
+{
+  "type": "object",
+  "required": ["title", "markdown", "changeSummary", "preservedConstraints"],
+  "properties": {
+    "title": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 240
+    },
+    "markdown": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 2097152
+    },
+    "changeSummary": {
+      "type": "array",
+      "maxItems": 20,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    },
+    "preservedConstraints": {
+      "type": "array",
+      "maxItems": 50,
+      "items": { "type": "string", "minLength": 1, "maxLength": 2000 }
+    }
+  },
+  "additionalProperties": false
+}

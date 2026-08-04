@@ -17,6 +17,8 @@ export function createInertChapterApi() {
       }),
     startPlanning: vi.fn<NovelLoopDesktopApi['chapter']['startPlanning']>(),
     startDrafting: vi.fn<NovelLoopDesktopApi['chapter']['startDrafting']>(),
+    adjustMission: vi.fn<NovelLoopDesktopApi['chapter']['adjustMission']>(),
+    adjustPlan: vi.fn<NovelLoopDesktopApi['chapter']['adjustPlan']>(),
     get: vi.fn<NovelLoopDesktopApi['chapter']['get']>(),
     cancel: vi.fn<NovelLoopDesktopApi['chapter']['cancel']>(),
     readPlan: vi.fn<NovelLoopDesktopApi['chapter']['readPlan']>()

@@ -90,6 +90,31 @@ const SlimMissionSchema = z.object({
   forbiddenMoves: z.array(z.string().trim().min(1).max(2_000)).max(100).default([])
 });
 
+const SlimMissionAdjustmentSchema = SlimMissionSchema.strict();
+
+export const CodexPlanAdjustmentSchema = z.object({
+  title: z.string().trim().min(1).max(240),
+  markdown: z.string()
+    .min(1)
+    .max(2 * 1024 * 1024)
+    .refine(
+      (value) => new TextEncoder().encode(value).byteLength <= 2 * 1024 * 1024,
+      { message: 'Plan adjustment Markdown exceeds the 2 MiB limit.' }
+    )
+    .refine(
+      (value) => value.trim().length > 0,
+      { message: 'Plan adjustment Markdown must not be blank.' }
+    ),
+  changeSummary: z.array(
+    z.string().trim().min(1).max(2_000)
+  ).max(20),
+  preservedConstraints: z.array(
+    z.string().trim().min(1).max(2_000)
+  ).max(50)
+}).strict();
+
+export type CodexPlanAdjustment = z.infer<typeof CodexPlanAdjustmentSchema>;
+
 const SlimPlanCandidatesSchema = z.object({
   chapterNumber: z.number().int().positive(),
   candidates: z.array(
@@ -246,8 +271,14 @@ export function normalizeCodexSlimOutput(promptId: string, value: unknown, conte
   if (promptId === 'planning.plan_chapter_mission_slim') {
     return normalizeMission(value, context);
   }
+  if (promptId === 'planning.adjust_chapter_mission_slim') {
+    return normalizeMissionAdjustment(value, context);
+  }
   if (promptId === 'planning.generate_plan_candidates_slim') {
     return normalizePlanCandidates(value, context);
+  }
+  if (promptId === 'planning.adjust_plan_candidate_slim') {
+    return normalizePlanAdjustment(value);
   }
   if (promptId === 'planning.rank_plan_candidates_slim') {
     return normalizeRanking(value, context);
@@ -303,6 +334,24 @@ export function normalizeChapterQueue(value: unknown, context: CodexNormalizatio
 
 export function normalizeMission(value: unknown, context: CodexNormalizationContext): ChapterMission {
   const slim = SlimMissionSchema.parse(value);
+  return normalizedMission(slim, context);
+}
+
+export function normalizeMissionAdjustment(
+  value: unknown,
+  context: CodexNormalizationContext
+): ChapterMission {
+  return normalizedMission(SlimMissionAdjustmentSchema.parse(value), context);
+}
+
+export function normalizePlanAdjustment(value: unknown): CodexPlanAdjustment {
+  return CodexPlanAdjustmentSchema.parse(value);
+}
+
+function normalizedMission(
+  slim: z.infer<typeof SlimMissionSchema>,
+  context: CodexNormalizationContext
+): ChapterMission {
   const chapterNumber = context.chapterNumber ?? slim.chapterNumber;
   return ChapterMissionSchema.parse({
     id: `mission_ch${String(chapterNumber).padStart(3, '0')}_codex`,

@@ -10,6 +10,11 @@ import {
   type CreateAuthorRevisionResult
 } from '../app/chapterAuthorRevision.js';
 import {
+  adjustChapterMission,
+  adjustChapterPlan,
+  type ChapterAuthorAdjustmentInput
+} from '../app/chapterAuthorAdjustment.js';
+import {
   assertMissionHasParticipants,
   missionCharacterReferencesAreValid,
   missionDebtReferencesAreValid
@@ -148,6 +153,20 @@ export interface CreateDesktopMissionRevisionResult extends CreateAuthorRevision
   mission: ChapterMission;
 }
 
+export type AdjustDesktopChapterMissionInput = Omit<
+  ChapterAuthorAdjustmentInput,
+  'sourcePlan'
+>;
+
+export type AdjustDesktopChapterPlanInput = ChapterAuthorAdjustmentInput & {
+  sourcePlan: NonNullable<ChapterAuthorAdjustmentInput['sourcePlan']>;
+};
+
+export interface DesktopChapterAdjustmentResult
+  extends CreateAuthorRevisionResult {
+  content: string;
+}
+
 interface ChapterAuthoringSnapshot {
   projectRoot: string;
   paths: ProjectPaths;
@@ -176,6 +195,34 @@ interface AuthoringTransaction {
   archive: ArchiveInvalidatedChapterArtifactsResult | null;
   revisionRecords: RevisionRecordSnapshot[];
   createdProvenancePaths: string[];
+}
+
+export async function adjustDesktopChapterMission(
+  input: AdjustDesktopChapterMissionInput,
+  fileStore?: FileStore
+): Promise<DesktopChapterAdjustmentResult> {
+  const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
+  const created = await adjustChapterMission(input, store);
+  return {
+    ...created,
+    content: await store.readText(
+      path.join(path.resolve(input.projectRoot), created.relativeMarkdownPath)
+    )
+  };
+}
+
+export async function adjustDesktopChapterPlan(
+  input: AdjustDesktopChapterPlanInput,
+  fileStore?: FileStore
+): Promise<DesktopChapterAdjustmentResult> {
+  const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
+  const created = await adjustChapterPlan(input, store);
+  return {
+    ...created,
+    content: await store.readText(
+      path.join(path.resolve(input.projectRoot), created.relativeMarkdownPath)
+    )
+  };
 }
 
 export async function createDesktopMissionRevision(input: {

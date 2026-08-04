@@ -3,6 +3,8 @@ import { lstat, readFile, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import type {
+  AdjustDesktopChapterMissionInput,
+  AdjustDesktopChapterPlanInput,
   DesktopChapterDraftingInput,
   DesktopChapterPlanningInput,
   DesktopMissionAuthorEdit
@@ -175,10 +177,45 @@ export interface TrustedAdoptRevisionInput {
   purpose: 'mission' | 'plan';
 }
 
+export type ChapterAdjustmentStage =
+  | 'requesting_adjustment'
+  | 'validating_adjustment'
+  | 'ready_for_review';
+
+export interface TrustedMissionAdjustmentInput {
+  projectRoot: string;
+  chapterNumber: number;
+  expectedSourceHash: string;
+  authorInstruction: string;
+  shouldStop(): boolean;
+  onStage(stage: ChapterAdjustmentStage): void;
+}
+
+export interface TrustedPlanAdjustmentInput
+  extends TrustedMissionAdjustmentInput {
+  sourcePlan: {
+    candidateId: string;
+    content: string;
+    active: boolean;
+  };
+}
+
+export interface TrustedAdjustmentResult extends TrustedRevisionResult {
+  candidate: {
+    artifactKind: 'mission' | 'plan';
+    title: string;
+    markdown: string;
+  };
+}
+
 export interface ChapterEngineGateway {
   inspect(projectRoot: string): Promise<ChapterInspection>;
   plan(input: RunChapterInput): Promise<void>;
   draft(input: RunChapterInput): Promise<void>;
+  adjustMission(
+    input: TrustedMissionAdjustmentInput
+  ): Promise<TrustedAdjustmentResult>;
+  adjustPlan(input: TrustedPlanAdjustmentInput): Promise<TrustedAdjustmentResult>;
   readPlan(projectRoot: string): Promise<TrustedChapterPlanReview>;
   readDraft(projectRoot: string): Promise<ChapterDraftReviewResult>;
   selectDirection(input: {
@@ -226,6 +263,64 @@ export class EngineChapterGateway implements ChapterEngineGateway {
       onProgress: input.onProgress,
       shouldStop: input.shouldStop
     });
+  }
+
+  async adjustMission(
+    input: TrustedMissionAdjustmentInput
+  ): Promise<TrustedAdjustmentResult> {
+    const { adjustDesktopChapterMission } = await import(
+      'novel-loop-engine/desktop'
+    );
+    const trustedInput: AdjustDesktopChapterMissionInput = {
+      projectRoot: input.projectRoot,
+      chapterNumber: input.chapterNumber,
+      expectedSourceHash: input.expectedSourceHash,
+      authorInstruction: input.authorInstruction,
+      shouldCancel: input.shouldStop,
+      onStage: input.onStage
+    };
+    const created = await adjustDesktopChapterMission(trustedInput);
+    assertReadyAdjustment(created.record, 'mission');
+    const mission = MissionArtifactSchema.parse(JSON.parse(created.content));
+    const sourceReview = await this.readPlan(input.projectRoot);
+    if (!sourceReview.available) throw invalidTrustedReview();
+    return {
+      revisionId: created.record.revisionId,
+      sourceHash: created.record.sourceHash,
+      candidate: {
+        artifactKind: 'mission',
+        title: '调整后的本章任务',
+        markdown: missionAdjustmentMarkdown(mission, sourceReview)
+      }
+    };
+  }
+
+  async adjustPlan(
+    input: TrustedPlanAdjustmentInput
+  ): Promise<TrustedAdjustmentResult> {
+    const { adjustDesktopChapterPlan } = await import(
+      'novel-loop-engine/desktop'
+    );
+    const trustedInput: AdjustDesktopChapterPlanInput = {
+      projectRoot: input.projectRoot,
+      chapterNumber: input.chapterNumber,
+      expectedSourceHash: input.expectedSourceHash,
+      authorInstruction: input.authorInstruction,
+      sourcePlan: input.sourcePlan,
+      shouldCancel: input.shouldStop,
+      onStage: input.onStage
+    };
+    const created = await adjustDesktopChapterPlan(trustedInput);
+    assertReadyAdjustment(created.record, 'selected_plan');
+    return {
+      revisionId: created.record.revisionId,
+      sourceHash: created.record.sourceHash,
+      candidate: {
+        artifactKind: 'plan',
+        title: markdownTitle(created.content, 1),
+        markdown: created.content
+      }
+    };
   }
 
   async readPlan(projectRoot: string): Promise<TrustedChapterPlanReview> {
@@ -672,6 +767,93 @@ function markdownExcerpt(markdown: string): string {
     .map((item) => item.replace(/\r?\n/gu, ' ').trim())
     .find((item) => item.length > 0 && !/^#\s/u.test(item));
   return (paragraph ?? '').slice(0, 8_000).trim();
+}
+
+function assertReadyAdjustment(
+  record: {
+    artifactKind: string;
+    mode: string;
+    state: string;
+    storyStateMutated: boolean;
+  },
+  artifactKind: 'mission' | 'selected_plan'
+): void {
+  if (
+    record.artifactKind !== artifactKind
+    || record.mode !== 'codex_adjustment'
+    || record.state !== 'ready'
+    || record.storyStateMutated
+  ) {
+    throw invalidTrustedReview();
+  }
+}
+
+function missionAdjustmentMarkdown(
+  mission: z.infer<typeof MissionArtifactSchema>,
+  sourceReview: Extract<TrustedChapterPlanReview, { available: true }>
+): string {
+  const participantNames = new Map([
+    ...sourceReview.mission.participants.map((participant) => [
+      participant.characterId,
+      `${participant.name}（${participant.role}）`
+    ] as const),
+    ...mission.charactersToIntroduce.map((participant) => [
+      participant.characterId,
+      `${participant.name}（${participant.role}）`
+    ] as const)
+  ]);
+  const participantIds = new Set([
+    ...mission.participatingCharacterIds,
+    ...mission.charactersToIntroduce.map(({ characterId }) => characterId),
+    ...mission.characterDeltas.map(({ characterId }) => characterId)
+  ]);
+  const participants = [...participantIds].map((characterId) => {
+    const label = participantNames.get(characterId);
+    if (label === undefined) throw invalidTrustedReview();
+    return label;
+  });
+  const debtPromises = new Map(
+    sourceReview.mission.debtsToPayOrAdvance.map(({ id, promise }) => [id, promise])
+  );
+  const advancedDebts = mission.debtsToPayOrAdvance.map((debtId) => {
+    const promise = debtPromises.get(debtId);
+    if (promise === undefined) throw invalidTrustedReview();
+    return promise;
+  });
+  const characterDeltas = mission.characterDeltas.map((delta) => {
+    const name = participantNames.get(delta.characterId);
+    if (name === undefined) throw invalidTrustedReview();
+    return `${name}：${delta.from} → ${delta.to}；${delta.evidenceRequired}`;
+  });
+  return authorMissionMarkdown([
+    ['本章目的', [mission.chapterFunction]],
+    ['必须完成', mission.requiredObjectives.map(({ text }) => text)],
+    [
+      '推进的悬念与承诺',
+      [...advancedDebts, ...mission.debtsToIntroduce.map(({ promise }) => promise)]
+    ],
+    ['人物变化', characterDeltas],
+    ['本章人物', participants],
+    ['读者会知道', mission.readerInformationDelta.newKnowledge],
+    ['读者会产生的猜测', mission.readerInformationDelta.newSuspicions],
+    ['读者会继续追问', mission.readerInformationDelta.questionsToMaintain],
+    ['本章会回答的问题', mission.readerInformationDelta.questionsToAnswer],
+    ['本章不能做', mission.forbiddenMoves],
+    ['情绪节奏', mission.targetEmotionalCurve],
+    [
+      '目标字数',
+      mission.targetWordCount === undefined ? [] : [`${mission.targetWordCount} 字`]
+    ]
+  ]);
+}
+
+function authorMissionMarkdown(sections: Array<[string, string[]]>): string {
+  return sections.flatMap(([title, rows]) => [
+    `## ${title}`,
+    '',
+    rows.length > 0 ? rows.map((row) => `- ${row}`).join('\n') : '暂无',
+    ''
+  ]).join('\n');
 }
 
 function sha256(value: string): string {

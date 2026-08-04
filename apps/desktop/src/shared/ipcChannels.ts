@@ -18,6 +18,8 @@ export const IPC_CHANNELS = {
   chapterInspect: 'novel-loop:chapter:inspect',
   chapterStartPlanning: 'novel-loop:chapter:start-planning',
   chapterStartDrafting: 'novel-loop:chapter:start-drafting',
+  chapterAdjustMission: 'novel-loop:chapter:adjust-mission',
+  chapterAdjustPlan: 'novel-loop:chapter:adjust-plan',
   chapterGet: 'novel-loop:chapter:get',
   chapterCancel: 'novel-loop:chapter:cancel',
   chapterReadPlan: 'novel-loop:chapter:read-plan',

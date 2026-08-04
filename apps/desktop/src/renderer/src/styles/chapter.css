@@ -209,6 +209,7 @@
 
 .nl-chapter-directions,
 .nl-chapter-editor,
+.nl-chapter-adjustment,
 .nl-revision-compare {
   padding: 34px 0;
   border-top: 1px solid var(--nl-border);
@@ -389,6 +390,48 @@
 .nl-authoring-recovery .nl-inline-alert {
   flex: 1 1 auto;
   margin: 0;
+}
+
+.nl-authoring-recovery__actions,
+.nl-chapter-section-heading__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.nl-chapter-adjustment__scope {
+  max-width: 72ch;
+  margin: 12px 0 22px;
+  color: var(--nl-muted);
+  line-height: 1.7;
+}
+
+.nl-chapter-adjustment > .nl-field {
+  display: grid;
+  gap: 8px;
+}
+
+.nl-chapter-adjustment > .nl-field span {
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.nl-chapter-adjustment textarea {
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  resize: vertical;
+  border: 1px solid #aeb8b1;
+  border-radius: 6px;
+  background: var(--nl-surface);
+  color: var(--nl-text);
+  font: inherit;
+  line-height: 1.55;
+}
+
+.nl-chapter-adjustment .nl-foundation-progress {
+  margin-top: 18px;
 }
 
 .nl-edit-status {
@@ -863,6 +906,11 @@
   }
 
   .nl-direction-option__badges {
+    justify-content: flex-start;
+  }
+
+  .nl-authoring-recovery__actions,
+  .nl-chapter-section-heading__actions {
     justify-content: flex-start;
   }
 

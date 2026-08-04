@@ -202,9 +202,12 @@ describe('chapter plan review', () => {
     for (const button of screen.getAllByRole('button', {
       name: '让 AI 调整此方向'
     })) {
-      expect(button).toBeDisabled();
-      expect(button).toHaveAttribute('title', '将在下一阶段开放');
+      expect(button).toBeEnabled();
+      expect(button).not.toHaveAttribute('title');
     }
+    expect(screen.getByRole('button', {
+      name: '让 AI 调整本章任务'
+    })).toBeEnabled();
 
     const activeDirection = screen.getByRole('radio', {
       name: '遗物中的异常报告'
@@ -238,6 +241,127 @@ describe('chapter plan review', () => {
       description: /AI 推荐/u,
       name: '遗物中的异常报告'
     })).toBeVisible();
+  });
+
+  test('creates a pending AI plan comparison and keeps the active direction until adoption', async () => {
+    const api = installApi();
+    api.chapter.adjustPlan.mockResolvedValue({
+      taskId: 'chapter_adjust_plan_01',
+      projectKey,
+      kind: 'plan_adjustment',
+      chapterNumber: 1,
+      status: 'succeeded',
+      stage: 'ready_for_review',
+      completedStages: [
+        'requesting_adjustment',
+        'validating_adjustment',
+        'ready_for_review'
+      ],
+      sceneProgress: null,
+      startedAt: '2026-07-30T01:00:00.000Z',
+      updatedAt: '2026-07-30T01:00:01.000Z',
+      canCancel: false,
+      canRetry: false,
+      error: null,
+      resultRevisionToken: `chapter_revision_${'a'.repeat(48)}`,
+      resultCandidate: {
+        artifactKind: 'plan',
+        title: '事故现场先行',
+        markdown: '# 事故现场先行\n\n先展示重复事故，再核对被改写的记录。\n'
+      }
+    });
+    render(<App />);
+    await openReview();
+
+    const direction = directionOption('从交通事故切入');
+    const adjustmentTrigger = within(direction).getByRole('button', {
+      name: '让 AI 调整此方向'
+    });
+    fireEvent.click(adjustmentTrigger);
+    expect(screen.getByRole('heading', {
+      name: '调整方向：从交通事故切入'
+    })).toHaveFocus();
+    expect(screen.getByText(
+      'AI 只会调整这个方向并生成待采用版本，不会更换当前方向或修改正式故事状态。'
+    )).toBeVisible();
+    fireEvent.change(screen.getByRole('textbox', { name: '调整意见' }), {
+      target: { value: '把开场提前到事故现场，但不要新增人物。' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始调整' }));
+
+    await waitFor(() => expect(api.chapter.adjustPlan).toHaveBeenCalledWith({
+      projectKey,
+      reviewToken: availablePlan.reviewToken,
+      optionToken: availablePlan.directions[1]!.optionToken,
+      authorInstruction: '把开场提前到事故现场，但不要新增人物。'
+    }));
+    const comparison = await screen.findByRole('region', { name: '对比修改' });
+    expect(within(comparison).getByRole('region', {
+      name: '修订后的方向'
+    })).toHaveTextContent('先展示重复事故，再核对被改写的记录。');
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
+    expect(screen.getByRole('radio', {
+      name: '遗物中的异常报告'
+    })).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(screen.getByRole('button', { name: '保留当前版' }));
+    expect(screen.queryByRole('region', { name: '对比修改' }))
+      .not.toBeInTheDocument();
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
+    await waitFor(() => expect(adjustmentTrigger).toHaveFocus());
+  });
+
+  test('cancels an in-flight AI adjustment through the opaque task ID', async () => {
+    const api = installApi();
+    api.chapter.adjustMission.mockResolvedValue({
+      taskId: 'chapter_adjust_mission_01',
+      projectKey,
+      kind: 'mission_adjustment',
+      chapterNumber: 1,
+      status: 'running',
+      stage: 'requesting_adjustment',
+      completedStages: [],
+      sceneProgress: null,
+      startedAt: '2026-07-30T01:00:00.000Z',
+      updatedAt: '2026-07-30T01:00:01.000Z',
+      canCancel: true,
+      canRetry: false,
+      error: null
+    });
+    api.chapter.cancel.mockResolvedValue({
+      taskId: 'chapter_adjust_mission_01',
+      projectKey,
+      kind: 'mission_adjustment',
+      chapterNumber: 1,
+      status: 'stop_requested',
+      stage: 'requesting_adjustment',
+      completedStages: [],
+      sceneProgress: null,
+      startedAt: '2026-07-30T01:00:00.000Z',
+      updatedAt: '2026-07-30T01:00:02.000Z',
+      canCancel: false,
+      canRetry: false,
+      error: null
+    });
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', {
+      name: '让 AI 调整本章任务'
+    }));
+    fireEvent.change(screen.getByRole('textbox', { name: '调整意见' }), {
+      target: { value: '收紧本章任务。' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '开始调整' }));
+    expect(await screen.findByText('正在请求 AI 调整')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '取消调整' }));
+
+    await waitFor(() => expect(api.chapter.cancel).toHaveBeenCalledWith({
+      taskId: 'chapter_adjust_mission_01'
+    }));
+    expect(document.body).not.toHaveTextContent(
+      /sourceHash|author_revision|provider|schema|\/private\//iu
+    );
   });
 
   test('sanitizes an untitled direction in the chooser, editor, and preview', async () => {

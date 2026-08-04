@@ -2,6 +2,8 @@ import { describe, expect, test, vi } from 'vitest';
 
 import { registerChapterHandlers } from '../../src/main/ipc/registerChapterHandlers';
 import type {
+  ChapterAdjustMissionRequest,
+  ChapterAdjustPlanRequest,
   ChapterApplicationService
 } from '../../src/main/chapter/ProjectChapterService';
 import { IPC_CHANNELS } from '../../src/shared/ipcChannels';
@@ -100,6 +102,17 @@ const adoptRequest: ChapterAdoptRevisionRequest = {
   revisionToken: `chapter_revision_${'3'.repeat(48)}`,
   confirmInvalidation: true
 };
+const adjustMissionRequest: ChapterAdjustMissionRequest = {
+  projectKey: task.projectKey,
+  reviewToken,
+  authorInstruction: '收紧本章任务。'
+};
+const adjustPlanRequest: ChapterAdjustPlanRequest = {
+  projectKey: task.projectKey,
+  reviewToken,
+  optionToken,
+  authorInstruction: '把开场提前到事故现场。'
+};
 
 function createService(): ChapterApplicationService {
   return {
@@ -108,6 +121,14 @@ function createService(): ChapterApplicationService {
     startDrafting: vi.fn(async (): Promise<ChapterTask> => ({
       ...task,
       kind: 'drafting'
+    })),
+    adjustMission: vi.fn(async (): Promise<ChapterTask> => ({
+      ...task,
+      kind: 'mission_adjustment'
+    })),
+    adjustPlan: vi.fn(async (): Promise<ChapterTask> => ({
+      ...task,
+      kind: 'plan_adjustment'
     })),
     get: vi.fn(async () => task),
     cancel: vi.fn(async () => task),
@@ -173,6 +194,30 @@ const cases = [
     serviceMethod: 'startDrafting',
     response: { ...task, kind: 'drafting' },
     invalidResponse: { ...task, kind: 'drafting', chapterNumberInput: 1 }
+  },
+  {
+    channel: 'chapterAdjustMission',
+    request: adjustMissionRequest,
+    invalidRequest: { ...adjustMissionRequest, provider: 'codex-text' },
+    serviceMethod: 'adjustMission',
+    response: { ...task, kind: 'mission_adjustment' },
+    invalidResponse: {
+      ...task,
+      kind: 'mission_adjustment',
+      sourceHash: 'a'.repeat(64)
+    }
+  },
+  {
+    channel: 'chapterAdjustPlan',
+    request: adjustPlanRequest,
+    invalidRequest: { ...adjustPlanRequest, path: '/private/plan.md' },
+    serviceMethod: 'adjustPlan',
+    response: { ...task, kind: 'plan_adjustment' },
+    invalidResponse: {
+      ...task,
+      kind: 'plan_adjustment',
+      revisionId: 'author_revision_ch001_plan_v1'
+    }
   },
   {
     channel: 'chapterGet',
@@ -247,6 +292,10 @@ describe('chapter workspace IPC handlers', () => {
     expect(IPC_CHANNELS.chapterInspect).toBe('novel-loop:chapter:inspect');
     expect(IPC_CHANNELS.chapterStartPlanning).toBe('novel-loop:chapter:start-planning');
     expect(IPC_CHANNELS.chapterStartDrafting).toBe('novel-loop:chapter:start-drafting');
+    expect(IPC_CHANNELS.chapterAdjustMission)
+      .toBe('novel-loop:chapter:adjust-mission');
+    expect(IPC_CHANNELS.chapterAdjustPlan)
+      .toBe('novel-loop:chapter:adjust-plan');
     expect(IPC_CHANNELS.chapterGet).toBe('novel-loop:chapter:get');
     expect(IPC_CHANNELS.chapterCancel).toBe('novel-loop:chapter:cancel');
     expect(IPC_CHANNELS.chapterReadPlan).toBe('novel-loop:chapter:read-plan');
@@ -263,6 +312,8 @@ describe('chapter workspace IPC handlers', () => {
       'novel-loop:chapter:inspect',
       'novel-loop:chapter:start-planning',
       'novel-loop:chapter:start-drafting',
+      'novel-loop:chapter:adjust-mission',
+      'novel-loop:chapter:adjust-plan',
       'novel-loop:chapter:get',
       'novel-loop:chapter:cancel',
       'novel-loop:chapter:read-plan',
@@ -272,7 +323,7 @@ describe('chapter workspace IPC handlers', () => {
       'novel-loop:chapter:save-plan-working-copy',
       'novel-loop:chapter:adopt-revision'
     ]);
-    expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(11);
+    expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(13);
   });
 
   test.each(cases)('trusted $channel requests call only $serviceMethod', async ({
@@ -288,6 +339,8 @@ describe('chapter workspace IPC handlers', () => {
       .resolves.toEqual(response);
 
     const expectedArgument = [
+      'adjustMission',
+      'adjustPlan',
       'selectDirection',
       'saveMissionWorkingCopy',
       'savePlanWorkingCopy',

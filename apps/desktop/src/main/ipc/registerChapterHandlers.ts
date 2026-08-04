@@ -1,5 +1,7 @@
 import { IPC_CHANNELS } from '../../shared/ipcChannels';
 import {
+  ChapterAdjustMissionRequestSchema,
+  ChapterAdjustPlanRequestSchema,
   ChapterAdoptRevisionRequestSchema,
   ChapterAuthoringResultSchema,
   ChapterCancelRequestSchema,
@@ -69,6 +71,18 @@ export function registerChapterHandlers(
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterStartDraftingRequestSchema.parse(request);
     return ChapterTaskSchema.parse(await service.startDrafting(parsedRequest.projectKey));
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterAdjustMission, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterAdjustMissionRequestSchema.parse(request);
+    return ChapterTaskSchema.parse(await service.adjustMission(parsedRequest));
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterAdjustPlan, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterAdjustPlanRequestSchema.parse(request);
+    return ChapterTaskSchema.parse(await service.adjustPlan(parsedRequest));
   });
 
   registrar.handle(IPC_CHANNELS.chapterGet, async (event, request) => {

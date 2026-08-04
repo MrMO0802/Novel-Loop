@@ -5,6 +5,7 @@ import { CircleNotch } from '@phosphor-icons/react/CircleNotch';
 import { Eye } from '@phosphor-icons/react/Eye';
 import { FloppyDisk } from '@phosphor-icons/react/FloppyDisk';
 import { PencilSimple } from '@phosphor-icons/react/PencilSimple';
+import { Sparkle } from '@phosphor-icons/react/Sparkle';
 import { WarningCircle } from '@phosphor-icons/react/WarningCircle';
 import {
   useCallback,
@@ -26,7 +27,11 @@ import {
   sanitizeDirectionMarkdown,
   type ChapterDirection
 } from './ChapterDirectionChooser';
-import { ChapterMissionEditor } from './ChapterMissionEditor';
+import { ChapterAdjustmentPanel } from './ChapterAdjustmentPanel';
+import {
+  ChapterMissionEditor,
+  missionReviewSummary
+} from './ChapterMissionEditor';
 import { ChapterRevisionCompare } from './ChapterRevisionCompare';
 
 type AvailablePlan = Extract<ChapterPlanReviewResult, { available: true }>;
@@ -34,6 +39,21 @@ type EditorState =
   | { kind: 'mission' }
   | { authorTitle: string; direction: ChapterDirection; kind: 'plan' }
   | null;
+type AdjustmentState =
+  | {
+    artifactKind: 'mission';
+    autoStart?: boolean;
+    initialInstruction?: string;
+  }
+  | {
+    artifactKind: 'plan';
+    authorTitle: string;
+    direction: ChapterDirection;
+  }
+  | null;
+
+const PARTICIPANT_REPAIR_INSTRUCTION =
+  '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。';
 
 interface ChapterPlanReviewProps {
   initialEditor?: 'mission';
@@ -53,11 +73,13 @@ export function ChapterPlanReview({
   const confirmationTriggerRef = useRef<HTMLButtonElement>(null);
   const confirmationWasOpen = useRef(false);
   const initialEditorOpened = useRef(false);
+  const adjustmentTriggerRef = useRef<HTMLElement | null>(null);
   const requestToken = useRef(0);
   const [review, setReview] = useState<ChapterPlanReviewResult | null>(null);
   const [failed, setFailed] = useState(false);
   const [confirmingDraft, setConfirmingDraft] = useState(false);
   const [editor, setEditor] = useState<EditorState>(null);
+  const [adjustment, setAdjustment] = useState<AdjustmentState>(null);
   const [authoringIssue, setAuthoringIssue] = useState<{
     message: string;
     repairParticipants: boolean;
@@ -70,6 +92,7 @@ export function ChapterPlanReview({
       setReview(null);
       setFailed(false);
       setEditor(null);
+      setAdjustment(null);
       setConfirmingDraft(false);
     }
     try {
@@ -149,6 +172,11 @@ export function ChapterPlanReview({
     await loadReview(true);
   };
 
+  const closeAdjustment = () => {
+    setAdjustment(null);
+    window.setTimeout(() => adjustmentTriggerRef.current?.focus(), 0);
+  };
+
   return (
     <main className="nl-project-shell">
       <header className="nl-project-header">
@@ -213,17 +241,37 @@ export function ChapterPlanReview({
               {authoringIssue.message}
             </p>
             {authoringIssue.repairParticipants && (
-              <button
-                className="nl-primary-action"
-                onClick={() => {
-                  setAuthoringIssue(null);
-                  setEditor({ kind: 'mission' });
-                }}
-                type="button"
-              >
-                <PencilSimple aria-hidden size={18} />
-                {t('chapter.mission.repairParticipants')}
-              </button>
+              <div className="nl-authoring-recovery__actions">
+                <button
+                  className="nl-secondary-action"
+                  onClick={() => {
+                    setAuthoringIssue(null);
+                    setAdjustment(null);
+                    setEditor({ kind: 'mission' });
+                  }}
+                  type="button"
+                >
+                  <PencilSimple aria-hidden size={18} />
+                  {t('chapter.mission.repairParticipants')}
+                </button>
+                <button
+                  className="nl-primary-action"
+                  onClick={(event) => {
+                    adjustmentTriggerRef.current = event.currentTarget;
+                    setAuthoringIssue(null);
+                    setEditor(null);
+                    setAdjustment({
+                      artifactKind: 'mission',
+                      autoStart: true,
+                      initialInstruction: PARTICIPANT_REPAIR_INSTRUCTION
+                    });
+                  }}
+                  type="button"
+                >
+                  <Sparkle aria-hidden size={18} weight="fill" />
+                  {t('chapter.adjustment.repairParticipants')}
+                </button>
+              </div>
             )}
           </div>
         )}
@@ -233,15 +281,33 @@ export function ChapterPlanReview({
               mission={available.mission}
               onEdit={() => {
                 setAuthoringIssue(null);
+                setAdjustment(null);
                 setEditor({ kind: 'mission' });
+              }}
+              onAdjust={(trigger) => {
+                adjustmentTriggerRef.current = trigger;
+                setAuthoringIssue(null);
+                setEditor(null);
+                setAdjustment({ artifactKind: 'mission' });
               }}
               title={available.title}
             />
 
             <ChapterDirectionChooser
               directions={available.directions}
+              onAdjust={(direction, authorTitle, trigger) => {
+                adjustmentTriggerRef.current = trigger;
+                setAuthoringIssue(null);
+                setEditor(null);
+                setAdjustment({
+                  artifactKind: 'plan',
+                  authorTitle,
+                  direction
+                });
+              }}
               onEdit={(direction, authorTitle) => {
                 setAuthoringIssue(null);
+                setAdjustment(null);
                 setEditor({ authorTitle, direction, kind: 'plan' });
               }}
               onOutcome={handleOutcome}
@@ -265,6 +331,30 @@ export function ChapterPlanReview({
                 direction={editor.direction}
                 onAdopted={refreshAfterAdoption}
                 onClose={() => setEditor(null)}
+                onOutcome={handleOutcome}
+                projectKey={project.projectKey}
+                reviewToken={available.reviewToken}
+              />
+            )}
+            {adjustment && (
+              <ChapterAdjustmentPanel
+                artifactKind={adjustment.artifactKind}
+                {...(adjustment.artifactKind === 'mission'
+                  ? {
+                    autoStart: adjustment.autoStart ?? false,
+                    initialInstruction: adjustment.initialInstruction ?? '',
+                    source: missionReviewSummary(available.mission)
+                  }
+                  : {
+                    optionToken: adjustment.direction.optionToken,
+                    scopeTitle: adjustment.authorTitle,
+                    source: sanitizeDirectionMarkdown(
+                      adjustment.direction.markdown,
+                      adjustment.authorTitle
+                    )
+                  })}
+                onAdopted={refreshAfterAdoption}
+                onClose={closeAdjustment}
                 onOutcome={handleOutcome}
                 projectKey={project.projectKey}
                 reviewToken={available.reviewToken}
@@ -338,10 +428,12 @@ export function ChapterPlanReview({
 
 function MissionReview({
   mission,
+  onAdjust,
   onEdit,
   title
 }: {
   mission: AvailablePlan['mission'];
+  onAdjust: (trigger: HTMLButtonElement) => void;
   onEdit: () => void;
   title: string;
 }) {
@@ -355,10 +447,24 @@ function MissionReview({
           <p className="nl-section-label">{title}</p>
           <h2 id="chapter-mission-title">{t('chapter.review.mission')}</h2>
         </div>
-        <button className="nl-secondary-action" onClick={onEdit} type="button">
-          <PencilSimple aria-hidden size={18} />
-          {t('chapter.mission.edit')}
-        </button>
+        <div className="nl-chapter-section-heading__actions">
+          <button
+            className="nl-secondary-action"
+            onClick={onEdit}
+            type="button"
+          >
+            <PencilSimple aria-hidden size={18} />
+            {t('chapter.mission.edit')}
+          </button>
+          <button
+            className="nl-secondary-action"
+            onClick={(event) => onAdjust(event.currentTarget)}
+            type="button"
+          >
+            <Sparkle aria-hidden size={18} weight="fill" />
+            {t('chapter.adjustment.missionAction')}
+          </button>
+        </div>
       </div>
       <p className="nl-chapter-mission__purpose">{mission.chapterFunction}</p>
       <div className="nl-chapter-mission__sections">

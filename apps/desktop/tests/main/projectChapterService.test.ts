@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -127,6 +128,30 @@ interface DeferredRun {
   reject(error: unknown): void;
 }
 
+interface AdjustmentResult {
+  revisionId: string;
+  sourceHash: string;
+  candidate: {
+    artifactKind: 'mission' | 'plan';
+    title: string;
+    markdown: string;
+  };
+}
+
+interface DeferredAdjustment {
+  input: {
+    projectRoot: string;
+    chapterNumber: number;
+    authorInstruction: string;
+    expectedSourceHash: string;
+    shouldStop(): boolean;
+    onStage(stage: 'requesting_adjustment' | 'validating_adjustment' | 'ready_for_review'): void;
+  };
+  kind: 'mission' | 'plan';
+  resolve(value: AdjustmentResult): void;
+  reject(error: unknown): void;
+}
+
 class DeferredChapterGateway implements ChapterEngineGateway {
   readonly inspections = new Map<string, ChapterInspection>();
   readonly planReviews = new Map<string, TrustedChapterPlanReview>();
@@ -136,6 +161,7 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   readonly missionRevisions: unknown[] = [];
   readonly planRevisions: unknown[] = [];
   readonly adoptions: unknown[] = [];
+  readonly adjustments: DeferredAdjustment[] = [];
   autoComplete = false;
   inspectError: unknown;
   planReviewError: unknown;
@@ -158,6 +184,20 @@ class DeferredChapterGateway implements ChapterEngineGateway {
 
   async draft(input: RunChapterInput): Promise<void> {
     return this.startRun('drafting', input);
+  }
+
+  async adjustMission(input: DeferredAdjustment['input']) {
+    return this.startAdjustment('mission', input);
+  }
+
+  async adjustPlan(input: DeferredAdjustment['input'] & {
+    sourcePlan: {
+      candidateId: string;
+      content: string;
+      active: boolean;
+    };
+  }) {
+    return this.startAdjustment('plan', input);
   }
 
   async readPlan(root: string): Promise<TrustedChapterPlanReview> {
@@ -254,6 +294,41 @@ class DeferredChapterGateway implements ChapterEngineGateway {
     this.requireRun(index).reject(error);
   }
 
+  emitAdjustment(
+    index: number,
+    stage: 'requesting_adjustment' | 'validating_adjustment' | 'ready_for_review'
+  ): void {
+    this.adjustments[index]?.input.onStage(stage);
+  }
+
+  succeedAdjustment(index: number): void {
+    const adjustment = this.adjustments[index];
+    if (adjustment === undefined) throw new Error(`Expected adjustment ${index}.`);
+    adjustment.resolve({
+      revisionId: adjustment.kind === 'mission'
+        ? 'author_revision_ch001_mission_v1'
+        : 'author_revision_ch001_plan_v1',
+      sourceHash: adjustment.input.expectedSourceHash,
+      candidate: adjustment.kind === 'mission'
+        ? {
+            artifactKind: 'mission',
+            title: '调整后的本章任务',
+            markdown: '## 本章目的\n\n收紧本章任务。\n'
+          }
+        : {
+            artifactKind: 'plan',
+            title: '事故现场先行',
+            markdown: '# 事故现场先行\n\n先展示重复事故。\n'
+          }
+    });
+  }
+
+  failAdjustment(index: number, error: unknown): void {
+    const adjustment = this.adjustments[index];
+    if (adjustment === undefined) throw new Error(`Expected adjustment ${index}.`);
+    adjustment.reject(error);
+  }
+
   private async startRun(kind: ChapterTaskKind, input: RunChapterInput): Promise<void> {
     if (this.autoComplete) {
       if (kind === 'planning') {
@@ -276,6 +351,20 @@ class DeferredChapterGateway implements ChapterEngineGateway {
 
     return new Promise<void>((resolve, reject) => {
       this.runs.push({ input, kind, resolve, reject });
+    });
+  }
+
+  private async startAdjustment(
+    kind: 'mission' | 'plan',
+    input: DeferredAdjustment['input']
+  ): Promise<AdjustmentResult> {
+    return new Promise((resolve, reject) => {
+      this.adjustments.push({
+        input,
+        kind,
+        resolve,
+        reject
+      });
     });
   }
 
@@ -699,6 +788,111 @@ describe('ProjectChapterService', () => {
       expectedReviewHash: 'a'.repeat(64),
       markdown: '# Building revised\n\nThe radio waits upstairs.\n'
     }]);
+  });
+
+  test('runs mission and plan adjustments as cancellable tasks with opaque ready revisions', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const alternative = review.directions.find(({ active }) => !active)!;
+
+    const missionTask = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+    expect(missionTask).toMatchObject({
+      kind: 'mission_adjustment',
+      status: 'queued'
+    });
+    expect(gateway.adjustments[0]?.input).toMatchObject({
+      projectRoot,
+      chapterNumber: 1,
+      expectedSourceHash: 'b'.repeat(64),
+      authorInstruction: '收紧本章任务。'
+    });
+    gateway.emitAdjustment(0, 'requesting_adjustment');
+    gateway.emitAdjustment(0, 'validating_adjustment');
+    gateway.succeedAdjustment(0);
+    await eventually(async () => {
+      const completed = await service.get(missionTask.taskId);
+      expect(completed).toMatchObject({
+        kind: 'mission_adjustment',
+        status: 'succeeded',
+        stage: 'ready_for_review',
+        resultRevisionToken: expect.stringMatching(
+          /^chapter_revision_[a-f0-9]{48}$/u
+        ),
+        resultCandidate: {
+          artifactKind: 'mission',
+          title: '调整后的本章任务'
+        }
+      });
+      expect(JSON.stringify(completed)).not.toMatch(
+        /author_revision|sourceHash|plan_\d|\/library\//iu
+      );
+    });
+
+    const planTask = await service.adjustPlan({
+      projectKey,
+      reviewToken: review.reviewToken,
+      optionToken: alternative.optionToken,
+      authorInstruction: '把开场提前到事故现场。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(2));
+    expect(gateway.adjustments[1]?.input).toMatchObject({
+      projectRoot,
+      chapterNumber: 1,
+      expectedSourceHash: sha256(planReview.directions[1]!.markdown),
+      authorInstruction: '把开场提前到事故现场。',
+      sourcePlan: {
+        candidateId: 'plan_002',
+        content: planReview.directions[1]!.markdown,
+        active: false
+      }
+    });
+    gateway.succeedAdjustment(1);
+    await eventually(async () => {
+      await expect(service.get(planTask.taskId)).resolves.toMatchObject({
+        kind: 'plan_adjustment',
+        status: 'succeeded',
+        stage: 'ready_for_review',
+        resultCandidate: { artifactKind: 'plan', title: '事故现场先行' }
+      });
+    });
+    expect(gateway.adoptions).toHaveLength(0);
+  });
+
+  test('cancels an adjustment through the shared task lifecycle without creating a token', async () => {
+    const { gateway, service } = createService();
+    gateway.planReviews.set(projectRoot, planReview);
+    const review = await readAvailablePlan(service);
+    const task = await service.adjustMission({
+      projectKey,
+      reviewToken: review.reviewToken,
+      authorInstruction: '收紧本章任务。'
+    });
+    await eventually(() => expect(gateway.adjustments).toHaveLength(1));
+
+    await expect(service.cancel(task.taskId)).resolves.toMatchObject({
+      status: 'stop_requested',
+      canCancel: false
+    });
+    expect(gateway.adjustments[0]!.input.shouldStop()).toBe(true);
+    gateway.failAdjustment(0, withCode(
+      'CHAPTER_ADJUSTMENT_CANCELLED',
+      '/private/internal cancellation'
+    ));
+
+    await eventually(async () => {
+      const cancelled = await service.get(task.taskId);
+      expect(cancelled).toMatchObject({
+        status: 'cancelled',
+        canRetry: true
+      });
+      expect(cancelled.resultRevisionToken).toBeUndefined();
+    });
   });
 
   test('resolves mission item tokens while new participants remain name and role only', async () => {
@@ -1451,6 +1645,10 @@ function inspectionChapterNumber(
 
 function withCode(code: string, message: string): Error & { code: string } {
   return Object.assign(new Error(message), { code });
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function emitEngineCompletion(

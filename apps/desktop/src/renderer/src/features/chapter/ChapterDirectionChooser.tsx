@@ -20,6 +20,11 @@ export type ChapterDirection = AvailablePlan['directions'][number];
 
 interface ChapterDirectionChooserProps {
   directions: ChapterDirection[];
+  onAdjust: (
+    direction: ChapterDirection,
+    authorTitle: string,
+    trigger: HTMLButtonElement
+  ) => void;
   onEdit: (direction: ChapterDirection, authorTitle: string) => void;
   onOutcome: (result: ChapterAuthoringResult) => void;
   onSelect: (direction: ChapterDirection) => Promise<ChapterAuthoringResult>;
@@ -28,6 +33,7 @@ interface ChapterDirectionChooserProps {
 
 export function ChapterDirectionChooser({
   directions,
+  onAdjust,
   onEdit,
   onOutcome,
   onSelect,
@@ -234,8 +240,11 @@ export function ChapterDirectionChooser({
                 </button>
                 <button
                   className="nl-secondary-action"
-                  disabled
-                  title={t('chapter.direction.adjustTooltip')}
+                  onClick={(event) => onAdjust(
+                    direction,
+                    title,
+                    event.currentTarget
+                  )}
                   type="button"
                 >
                   <Sparkle aria-hidden size={18} />

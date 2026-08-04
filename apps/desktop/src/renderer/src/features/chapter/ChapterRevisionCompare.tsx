@@ -7,6 +7,7 @@ import { SafeChapterMarkdown } from './ChapterDirectionChooser';
 
 interface ChapterRevisionCompareProps {
   artifactKind: 'mission' | 'plan';
+  backLabel?: string;
   candidate: string;
   fallbackTitle?: string;
   onAdopt: () => Promise<boolean>;
@@ -18,6 +19,7 @@ interface ChapterRevisionCompareProps {
 
 export function ChapterRevisionCompare({
   artifactKind,
+  backLabel,
   candidate,
   fallbackTitle,
   onAdopt,
@@ -87,7 +89,7 @@ export function ChapterRevisionCompare({
         </div>
         <button className="nl-tertiary-action" onClick={onBack} type="button">
           <ArrowLeft aria-hidden size={17} />
-          {t('chapter.revision.back')}
+          {backLabel ?? t('chapter.revision.back')}
         </button>
       </div>
       <div className="nl-revision-compare__columns">

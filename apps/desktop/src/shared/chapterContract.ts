@@ -56,6 +56,24 @@ export const ChapterSavePlanWorkingCopyRequestSchema = z.object({
   markdown: markdownSchema()
 }).strict();
 
+const ChapterAuthorInstructionSchema = z.string()
+  .trim()
+  .min(1)
+  .max(4_000);
+
+export const ChapterAdjustMissionRequestSchema = z.object({
+  projectKey: ChapterProjectKeySchema,
+  reviewToken: ChapterReviewTokenSchema,
+  authorInstruction: ChapterAuthorInstructionSchema
+}).strict();
+
+export const ChapterAdjustPlanRequestSchema = z.object({
+  projectKey: ChapterProjectKeySchema,
+  reviewToken: ChapterReviewTokenSchema,
+  optionToken: ChapterOptionTokenSchema,
+  authorInstruction: ChapterAuthorInstructionSchema
+}).strict();
+
 const ChapterObjectiveTypeSchema = z.enum([
   'plot',
   'character',
@@ -129,7 +147,12 @@ export const ChapterAdoptRevisionRequestSchema = z.object({
   confirmInvalidation: z.literal(true)
 }).strict();
 
-export const ChapterTaskKindSchema = z.enum(['planning', 'drafting']);
+export const ChapterTaskKindSchema = z.enum([
+  'planning',
+  'drafting',
+  'mission_adjustment',
+  'plan_adjustment'
+]);
 
 export const ChapterTaskStatusSchema = z.enum([
   'queued',
@@ -149,6 +172,9 @@ export const ChapterTaskStageSchema = z.enum([
   'scene_drafts',
   'draft_assembly',
   'finalizing',
+  'requesting_adjustment',
+  'validating_adjustment',
+  'ready_for_review',
   'completed'
 ]);
 
@@ -179,6 +205,12 @@ export const ChapterSceneProgressSchema = z.object({
   { message: 'Scene progress cannot exceed the scene total.' }
 );
 
+export const ChapterAdjustmentCandidateSchema = z.object({
+  artifactKind: z.enum(['mission', 'plan']),
+  title: boundedText(240),
+  markdown: markdownSchema()
+}).strict();
+
 export const ChapterTaskSchema = z.object({
   taskId: ChapterTaskIdSchema,
   projectKey: ChapterProjectKeySchema,
@@ -197,8 +229,40 @@ export const ChapterTaskSchema = z.object({
   updatedAt: z.string().max(40).datetime(),
   canCancel: z.boolean(),
   canRetry: z.boolean(),
-  error: ChapterErrorSchema.nullable()
-}).strict();
+  error: ChapterErrorSchema.nullable(),
+  resultRevisionToken: ChapterRevisionTokenSchema.optional(),
+  resultCandidate: ChapterAdjustmentCandidateSchema.optional()
+}).strict().superRefine((task, context) => {
+  const adjustment = task.kind === 'mission_adjustment'
+    || task.kind === 'plan_adjustment';
+  const hasResult = task.resultRevisionToken !== undefined
+    || task.resultCandidate !== undefined;
+  if (adjustment && task.status === 'succeeded') {
+    if (task.stage !== 'ready_for_review') {
+      context.addIssue({ code: 'custom', path: ['stage'] });
+    }
+    if (task.resultRevisionToken === undefined) {
+      context.addIssue({ code: 'custom', path: ['resultRevisionToken'] });
+    }
+    if (task.resultCandidate === undefined) {
+      context.addIssue({ code: 'custom', path: ['resultCandidate'] });
+    }
+  }
+  if (adjustment && task.status !== 'succeeded' && hasResult) {
+    context.addIssue({ code: 'custom', path: ['resultRevisionToken'] });
+  }
+  if (adjustment && task.resultCandidate !== undefined) {
+    const expectedArtifact = task.kind === 'mission_adjustment'
+      ? 'mission'
+      : 'plan';
+    if (task.resultCandidate.artifactKind !== expectedArtifact) {
+      context.addIssue({ code: 'custom', path: ['resultCandidate', 'artifactKind'] });
+    }
+  }
+  if (!adjustment && hasResult) {
+    context.addIssue({ code: 'custom', path: ['resultRevisionToken'] });
+  }
+});
 
 export const ChapterPhaseSchema = z.enum([
   'not_started',
@@ -385,6 +449,12 @@ export type ChapterSaveMissionWorkingCopyRequest = z.infer<
 export type ChapterSavePlanWorkingCopyRequest = z.infer<
   typeof ChapterSavePlanWorkingCopyRequestSchema
 >;
+export type ChapterAdjustMissionRequest = z.infer<
+  typeof ChapterAdjustMissionRequestSchema
+>;
+export type ChapterAdjustPlanRequest = z.infer<
+  typeof ChapterAdjustPlanRequestSchema
+>;
 export type ChapterAdoptRevisionRequest = z.infer<
   typeof ChapterAdoptRevisionRequestSchema
 >;
@@ -392,6 +462,9 @@ export type ChapterTaskStatus = z.infer<typeof ChapterTaskStatusSchema>;
 export type ChapterTaskStage = z.infer<typeof ChapterTaskStageSchema>;
 export type ChapterErrorKind = z.infer<typeof ChapterErrorKindSchema>;
 export type ChapterSceneProgress = z.infer<typeof ChapterSceneProgressSchema>;
+export type ChapterAdjustmentCandidate = z.infer<
+  typeof ChapterAdjustmentCandidateSchema
+>;
 export type ChapterTask = z.infer<typeof ChapterTaskSchema>;
 export type ChapterPhase = z.infer<typeof ChapterPhaseSchema>;
 export type ChapterInspection = z.infer<typeof ChapterInspectionSchema>;

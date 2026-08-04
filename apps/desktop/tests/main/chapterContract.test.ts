@@ -2,6 +2,8 @@ import { describe, expect, test } from 'vitest';
 
 import * as chapterContract from '../../src/shared/chapterContract';
 import {
+  ChapterAdjustMissionRequestSchema,
+  ChapterAdjustPlanRequestSchema,
   ChapterAdoptRevisionRequestSchema,
   ChapterAuthoringResultSchema,
   ChapterDraftReviewResultSchema,
@@ -231,6 +233,81 @@ describe('chapter workspace contract', () => {
       revisionToken: `chapter_revision_${'7'.repeat(48)}`,
       confirmInvalidation: false
     })).toThrow();
+  });
+
+  test('accepts only bounded author adjustment requests', () => {
+    expect(ChapterAdjustMissionRequestSchema.parse({
+      projectKey: 'project_radio',
+      reviewToken,
+      authorInstruction: '收紧本章任务，但不要新增人物。'
+    })).toBeDefined();
+    expect(ChapterAdjustPlanRequestSchema.parse({
+      projectKey: 'project_radio',
+      reviewToken,
+      optionToken: alternativeOptionToken,
+      authorInstruction: '把开场提前到事故现场。'
+    })).toBeDefined();
+    for (const internalField of [
+      'path',
+      'provider',
+      'profile',
+      'schema',
+      'sourceHash',
+      'revisionId',
+      'rawOutput'
+    ]) {
+      expect(ChapterAdjustMissionRequestSchema.safeParse({
+        projectKey: 'project_radio',
+        reviewToken,
+        authorInstruction: '收紧本章任务。',
+        [internalField]: 'internal'
+      }).success).toBe(false);
+    }
+    expect(ChapterAdjustMissionRequestSchema.safeParse({
+      projectKey: 'project_radio',
+      reviewToken,
+      authorInstruction: '调'.repeat(4_001)
+    }).success).toBe(false);
+  });
+
+  test('returns adjustment tasks with only an opaque revision token and safe candidate', () => {
+    const resultRevisionToken = `chapter_revision_${'7'.repeat(48)}`;
+    const task = ChapterTaskSchema.parse({
+      ...validTask,
+      kind: 'plan_adjustment',
+      status: 'succeeded',
+      stage: 'ready_for_review',
+      completedStages: [
+        'requesting_adjustment',
+        'validating_adjustment',
+        'ready_for_review'
+      ],
+      canCancel: false,
+      resultRevisionToken,
+      resultCandidate: {
+        artifactKind: 'plan',
+        title: '事故现场先行',
+        markdown: '# 事故现场先行\n\n先展示重复事故。\n'
+      }
+    });
+
+    expect(task).toMatchObject({
+      kind: 'plan_adjustment',
+      stage: 'ready_for_review',
+      resultRevisionToken
+    });
+    expect(JSON.stringify(task)).not.toMatch(
+      /author_revision|sourceHash|schema|provider|profile|rawOutput|\/library\//iu
+    );
+    expect(ChapterTaskSchema.safeParse({
+      ...task,
+      resultCandidate: { ...task.resultCandidate, artifactKind: 'mission' }
+    }).success).toBe(false);
+    expect(ChapterTaskSchema.safeParse({
+      ...task,
+      status: 'failed',
+      error: { kind: 'invalid_output', message: '调整失败。' }
+    }).success).toBe(false);
   });
 
   test('accepts structured mission edits without trusted identifiers', () => {

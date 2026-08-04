@@ -305,6 +305,24 @@ function jsonFor(promptId, mode, repairMode, stdin) {
       readerQuestions: ['What does chapter ' + chapterNumber + ' imply for the building?'],
       forbiddenMoves: ['Do not reveal the final caller identity.']
     },
+    'planning.adjust_chapter_mission_slim': {
+      chapterNumber,
+      chapterFunction: '把开场提前到事故现场，同时保持既有故事约束。',
+      objectives: ['让林澈核对重复事故记录。'],
+      debtsToPayOrAdvance: ['debt_0001'],
+      debtsToIntroduce: [],
+      participatingCharacterIds: ['char_lincheng'],
+      charactersToIntroduce: [],
+      characterDeltas: [{
+        characterId: 'char_lincheng',
+        from: '逃避麻烦',
+        to: '主动核对事故',
+        evidenceRequired: '他保存两份互相冲突的事故记录。'
+      }],
+      readerKnowledge: ['事故在同一时间重复发生。'],
+      readerQuestions: ['是谁改写了事故记录？'],
+      forbiddenMoves: ['不要新增人物或揭示幕后主使。']
+    },
     'planning.generate_plan_candidates_slim': {
       chapterNumber,
       candidates: [
@@ -312,6 +330,12 @@ function jsonFor(promptId, mode, repairMode, stdin) {
         { id: 'plan_002', title: 'Building First', summary: 'Open at the old building.', markdown: '# Plan 002\\n\\nThe building hints before the radio.' },
         { id: 'plan_003', title: 'Memory First', summary: 'Open with a family memory.', markdown: '# Plan 003\\n\\nThe memory frames the radio.' }
       ]
+    },
+    'planning.adjust_plan_candidate_slim': {
+      title: '事故现场先行',
+      markdown: '# 事故现场先行\\n\\n先展示重复事故现场，再让林澈核对被改写的记录。\\n',
+      changeSummary: ['把开场提前到事故现场。'],
+      preservedConstraints: ['不新增人物。', '不揭示幕后主使。']
     },
     'planning.rank_plan_candidates_slim': {
       chapterNumber,

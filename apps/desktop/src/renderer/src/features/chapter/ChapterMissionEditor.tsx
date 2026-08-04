@@ -822,7 +822,7 @@ function cleanTextRows(rows: string[]): string[] {
   return rows.map((row) => row.trim()).filter(Boolean);
 }
 
-function missionReviewSummary(mission: Mission): string {
+export function missionReviewSummary(mission: Mission): string {
   return authorMissionSummary([
     ['本章目的', [mission.chapterFunction]],
     ['必须完成', mission.objectives],

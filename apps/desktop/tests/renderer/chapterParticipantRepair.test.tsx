@@ -208,6 +208,59 @@ describe('chapter participant repair', () => {
     })).toHaveFocus();
   });
 
+  test('uses the fixed AI participant repair instruction and leaves the result pending adoption', async () => {
+    const api = installApi();
+    api.chapter.selectDirection.mockResolvedValue({
+      outcome: 'blocked',
+      messageKey: 'participant_roster_missing'
+    });
+    api.chapter.adjustMission.mockResolvedValue({
+      taskId: 'chapter_adjust_participants_01',
+      projectKey,
+      kind: 'mission_adjustment',
+      chapterNumber: 1,
+      status: 'succeeded',
+      stage: 'ready_for_review',
+      completedStages: [
+        'requesting_adjustment',
+        'validating_adjustment',
+        'ready_for_review'
+      ],
+      sceneProgress: null,
+      startedAt: '2026-07-30T01:00:00.000Z',
+      updatedAt: '2026-07-30T01:00:01.000Z',
+      canCancel: false,
+      canRetry: false,
+      error: null,
+      resultRevisionToken: `chapter_revision_${'d'.repeat(48)}`,
+      resultCandidate: {
+        artifactKind: 'mission',
+        title: '调整后的本章任务',
+        markdown: '## 本章人物\n\n- 林默（主角）\n'
+      }
+    });
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(within(directionOption('从交通事故切入'))
+      .getByRole('button', { name: '设为本章方向' }));
+    fireEvent.click(screen.getByRole('button', {
+      name: '确认设为本章方向'
+    }));
+    fireEvent.click(await screen.findByRole('button', {
+      name: 'AI 补全本章人物'
+    }));
+
+    await waitFor(() => expect(api.chapter.adjustMission).toHaveBeenCalledWith({
+      projectKey,
+      reviewToken: availablePlan.reviewToken,
+      authorInstruction: '补全本章场景所需人物，只声明已有或本章首次出场人物，不新增剧情事实。'
+    }));
+    expect(await screen.findByRole('region', { name: '对比修改' }))
+      .toBeVisible();
+    expect(api.chapter.adoptRevision).not.toHaveBeenCalled();
+  });
+
   test.each([
     ['无法读取', { kind: 'unavailable' as const }],
     ['读取被拒绝', { kind: 'rejected' as const }]

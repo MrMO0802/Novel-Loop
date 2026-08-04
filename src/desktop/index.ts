@@ -46,16 +46,21 @@ export {
 } from './chapterWorkspace.js';
 
 export {
+  adjustDesktopChapterMission,
+  adjustDesktopChapterPlan,
   adoptDesktopMissionRevision,
   adoptDesktopChapterPlanRevision,
   createDesktopMissionRevision,
   createDesktopChapterPlanRevision,
   selectDesktopChapterDirection,
   type AdoptDesktopChapterPlanRevisionInput,
+  type AdjustDesktopChapterMissionInput,
+  type AdjustDesktopChapterPlanInput,
   type CreateDesktopMissionRevisionResult,
   type CreateDesktopChapterPlanRevisionInput,
   type DesktopAuthorAdoptionResult,
   type DesktopChapterDirectionSelectionResult,
+  type DesktopChapterAdjustmentResult,
   type DesktopMissionAuthorEdit,
   type SelectDesktopChapterDirectionInput
 } from './chapterAuthoring.js';

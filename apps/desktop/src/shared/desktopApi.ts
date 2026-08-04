@@ -23,6 +23,8 @@ import type {
 } from './planningContract';
 import type {
   ChapterAdoptRevisionRequest,
+  ChapterAdjustMissionRequest,
+  ChapterAdjustPlanRequest,
   ChapterAuthoringResult,
   ChapterCancelRequest,
   ChapterDraftReviewResult,
@@ -68,6 +70,8 @@ export interface NovelLoopDesktopApi {
     inspect(request: ChapterInspectRequest): Promise<ChapterInspection>;
     startPlanning(request: ChapterStartPlanningRequest): Promise<ChapterTask>;
     startDrafting(request: ChapterStartDraftingRequest): Promise<ChapterTask>;
+    adjustMission(request: ChapterAdjustMissionRequest): Promise<ChapterTask>;
+    adjustPlan(request: ChapterAdjustPlanRequest): Promise<ChapterTask>;
     get(request: ChapterGetRequest): Promise<ChapterTask>;
     cancel(request: ChapterCancelRequest): Promise<ChapterTask>;
     readPlan(request: ChapterReadPlanRequest): Promise<ChapterPlanReviewResult>;

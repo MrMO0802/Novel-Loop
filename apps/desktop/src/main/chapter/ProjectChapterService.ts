@@ -1,12 +1,16 @@
-import { randomBytes as nodeRandomBytes } from 'node:crypto';
+import { createHash, randomBytes as nodeRandomBytes } from 'node:crypto';
 
 import {
+  ChapterAdjustMissionRequestSchema,
+  ChapterAdjustPlanRequestSchema,
   ChapterAuthoringResultSchema,
   ChapterDraftReviewResultSchema,
   ChapterInspectionSchema,
   ChapterPlanReviewResultSchema,
   ChapterTaskSchema,
   type ChapterAdoptRevisionRequest,
+  type ChapterAdjustMissionRequest,
+  type ChapterAdjustPlanRequest,
   type ChapterAuthoringResult,
   type ChapterDraftReviewResult,
   type ChapterErrorKind,
@@ -30,6 +34,11 @@ import {
 } from './EngineChapterGateway';
 import { ChapterReviewTokenStore } from './ChapterReviewTokenStore';
 
+export type {
+  ChapterAdjustMissionRequest,
+  ChapterAdjustPlanRequest
+} from '../../shared/chapterContract';
+
 const MAX_TERMINAL_TASKS = 100;
 
 export interface ChapterProjectRootResolver {
@@ -40,6 +49,8 @@ export interface ChapterApplicationService {
   inspect(projectKey: string): Promise<ChapterInspection>;
   startPlanning(projectKey: string): Promise<ChapterTask>;
   startDrafting(projectKey: string): Promise<ChapterTask>;
+  adjustMission(request: ChapterAdjustMissionRequest): Promise<ChapterTask>;
+  adjustPlan(request: ChapterAdjustPlanRequest): Promise<ChapterTask>;
   get(taskId: string): Promise<ChapterTask>;
   cancel(taskId: string): Promise<ChapterTask>;
   readPlan(projectKey: string): Promise<ChapterPlanReviewResult>;
@@ -76,6 +87,20 @@ interface InternalChapterTask {
 interface StartingTask {
   kind: ChapterTaskKind;
   promise: Promise<ChapterTask>;
+}
+
+interface PendingAdjustment {
+  projectRoot: string;
+  chapterNumber: number;
+  latestCommittedChapter: number;
+  expectedSourceHash: string;
+  authorInstruction: string;
+  purpose: 'mission' | 'plan';
+  sourcePlan?: {
+    candidateId: string;
+    content: string;
+    active: boolean;
+  };
 }
 
 export class ProjectChapterService implements ChapterApplicationService {
@@ -122,6 +147,20 @@ export class ProjectChapterService implements ChapterApplicationService {
 
   async startDrafting(projectKey: string): Promise<ChapterTask> {
     return this.start(projectKey, 'drafting');
+  }
+
+  async adjustMission(request: ChapterAdjustMissionRequest): Promise<ChapterTask> {
+    return this.startAdjustment(
+      ChapterAdjustMissionRequestSchema.parse(request),
+      'mission_adjustment'
+    );
+  }
+
+  async adjustPlan(request: ChapterAdjustPlanRequest): Promise<ChapterTask> {
+    return this.startAdjustment(
+      ChapterAdjustPlanRequestSchema.parse(request),
+      'plan_adjustment'
+    );
   }
 
   async get(taskId: string): Promise<ChapterTask> {
@@ -662,6 +701,270 @@ export class ProjectChapterService implements ChapterApplicationService {
     return promise;
   }
 
+  private async startAdjustment(
+    request: ChapterAdjustMissionRequest | ChapterAdjustPlanRequest,
+    kind: Extract<ChapterTaskKind, 'mission_adjustment' | 'plan_adjustment'>
+  ): Promise<ChapterTask> {
+    if (this.authoringByProject.has(request.projectKey)) {
+      return this.createFailedTask(request.projectKey, kind, 1, 'generation_busy');
+    }
+    const active = this.activeTask(request.projectKey);
+    if (active !== null) {
+      return active.task.kind === kind
+        ? this.copyTask(active)
+        : this.createFailedTask(
+            request.projectKey,
+            kind,
+            active.task.chapterNumber,
+            'generation_busy'
+          );
+    }
+    const starting = this.startingByProject.get(request.projectKey);
+    if (starting !== undefined) {
+      if (starting.kind === kind) return starting.promise;
+      const pending = await starting.promise;
+      const activeAfterStart = this.activeTask(request.projectKey);
+      if (activeAfterStart !== null || !isTerminalStatus(pending.status)) {
+        return this.createFailedTask(
+          request.projectKey,
+          kind,
+          pending.chapterNumber,
+          'generation_busy'
+        );
+      }
+      return this.startAdjustment(request, kind);
+    }
+
+    const promise = this.beginAdjustment(request, kind).finally(() => {
+      const current = this.startingByProject.get(request.projectKey);
+      if (current?.promise === promise) {
+        this.startingByProject.delete(request.projectKey);
+      }
+    });
+    this.startingByProject.set(request.projectKey, { kind, promise });
+    return promise;
+  }
+
+  private async beginAdjustment(
+    request: ChapterAdjustMissionRequest | ChapterAdjustPlanRequest,
+    kind: Extract<ChapterTaskKind, 'mission_adjustment' | 'plan_adjustment'>
+  ): Promise<ChapterTask> {
+    const projectRoot = await this.resolveProjectRoot(request.projectKey);
+    if (projectRoot === null) {
+      return this.createFailedTask(
+        request.projectKey,
+        kind,
+        1,
+        'project_unavailable'
+      );
+    }
+    let trusted: Extract<TrustedChapterPlanReview, { available: true }>;
+    try {
+      const review = TrustedChapterPlanReviewSchema.parse(
+        await this.dependencies.gateway.readPlan(projectRoot)
+      );
+      if (!review.available) {
+        return this.createFailedTask(
+          request.projectKey,
+          kind,
+          1,
+          'invalid_output'
+        );
+      }
+      trusted = review;
+    } catch (error) {
+      return this.createFailedTask(
+        request.projectKey,
+        kind,
+        1,
+        toChapterStartErrorKind(error, kind)
+      );
+    }
+
+    const base = {
+      projectKey: request.projectKey,
+      projectRoot,
+      reviewToken: request.reviewToken,
+      currentLatestCommittedChapter: trusted.latestCommittedChapter,
+      currentReviewHash: trusted.reviewHash
+    };
+    let pending: PendingAdjustment;
+    if (kind === 'mission_adjustment') {
+      const resolved = this.tokenStore.resolveReview(base);
+      if (resolved.outcome === 'stale') {
+        return this.createFailedTask(
+          request.projectKey,
+          kind,
+          trusted.chapterNumber,
+          'stale_chapter'
+        );
+      }
+      pending = {
+        projectRoot,
+        chapterNumber: resolved.value.chapterNumber,
+        latestCommittedChapter: resolved.value.latestCommittedChapter,
+        expectedSourceHash: resolved.value.missionHash,
+        authorInstruction: request.authorInstruction,
+        purpose: 'mission'
+      };
+    } else {
+      if (!('optionToken' in request)) {
+        throw new Error('Plan adjustment option token is missing.');
+      }
+      const resolved = this.tokenStore.resolveOption({
+        ...base,
+        optionToken: request.optionToken,
+        purpose: 'direction'
+      });
+      if (resolved.outcome === 'stale') {
+        return this.createFailedTask(
+          request.projectKey,
+          kind,
+          trusted.chapterNumber,
+          'stale_chapter'
+        );
+      }
+      const direction = trusted.directions.find(
+        ({ candidateId }) => candidateId === resolved.value.trustedId
+      );
+      if (direction === undefined) {
+        return this.createFailedTask(
+          request.projectKey,
+          kind,
+          trusted.chapterNumber,
+          'stale_chapter'
+        );
+      }
+      pending = {
+        projectRoot,
+        chapterNumber: resolved.value.chapterNumber,
+        latestCommittedChapter: resolved.value.latestCommittedChapter,
+        expectedSourceHash: sha256(direction.markdown),
+        authorInstruction: request.authorInstruction,
+        purpose: 'plan',
+        sourcePlan: {
+          candidateId: direction.candidateId,
+          content: direction.markdown,
+          active: direction.active
+        }
+      };
+    }
+
+    const internal = this.createTask(request.projectKey, kind, pending.chapterNumber);
+    this.tasks.set(internal.task.taskId, internal);
+    this.activeByProject.set(request.projectKey, internal.task.taskId);
+    const task = this.copyTask(internal);
+    void this.runAdjustment(internal, pending).catch(() => undefined);
+    return task;
+  }
+
+  private async runAdjustment(
+    internal: InternalChapterTask,
+    pending: PendingAdjustment
+  ): Promise<void> {
+    try {
+      this.updateTask(internal, {
+        status: 'running',
+        stage: 'requesting_adjustment',
+        canCancel: true,
+        canRetry: false,
+        error: null
+      });
+      const common = {
+        projectRoot: pending.projectRoot,
+        chapterNumber: pending.chapterNumber,
+        expectedSourceHash: pending.expectedSourceHash,
+        authorInstruction: pending.authorInstruction,
+        shouldStop: () => internal.stopRequested,
+        onStage: (stage: Extract<
+          ChapterTaskStage,
+          | 'requesting_adjustment'
+          | 'validating_adjustment'
+          | 'ready_for_review'
+        >) => this.reportAdjustmentStage(internal, stage)
+      };
+      const result = pending.purpose === 'mission'
+        ? await this.dependencies.gateway.adjustMission(common)
+        : await this.dependencies.gateway.adjustPlan({
+            ...common,
+            sourcePlan: pending.sourcePlan!
+          });
+      const resultRevisionToken = this.tokenStore.createRevision({
+        projectKey: internal.task.projectKey,
+        projectRoot: pending.projectRoot,
+        chapterNumber: pending.chapterNumber,
+        latestCommittedChapter: pending.latestCommittedChapter,
+        purpose: pending.purpose,
+        sourceHash: result.sourceHash,
+        revisionId: result.revisionId
+      });
+      this.finishAdjustmentSucceeded(
+        internal,
+        resultRevisionToken,
+        result.candidate
+      );
+    } catch (error) {
+      if (isCancellation(error)) {
+        this.finishCancelled(internal);
+      } else {
+        this.finishFailed(internal, toChapterRunErrorKind(error, internal.task.kind));
+      }
+    } finally {
+      if (this.activeByProject.get(internal.task.projectKey) === internal.task.taskId) {
+        this.activeByProject.delete(internal.task.projectKey);
+      }
+      this.retainTerminalTask(internal);
+    }
+  }
+
+  private reportAdjustmentStage(
+    internal: InternalChapterTask,
+    stage: Extract<
+      ChapterTaskStage,
+      'requesting_adjustment' | 'validating_adjustment' | 'ready_for_review'
+    >
+  ): void {
+    if (internal.terminal) return;
+    const previous = stage === 'validating_adjustment'
+      ? ['requesting_adjustment'] as ChapterTaskStage[]
+      : stage === 'ready_for_review'
+        ? ['requesting_adjustment', 'validating_adjustment'] as ChapterTaskStage[]
+        : [];
+    this.updateTask(internal, {
+      stage,
+      completedStages: previous.reduce(addCompletedStage, internal.task.completedStages)
+    });
+  }
+
+  private finishAdjustmentSucceeded(
+    internal: InternalChapterTask,
+    resultRevisionToken: string,
+    resultCandidate: NonNullable<ChapterTask['resultCandidate']>
+  ): void {
+    if (internal.terminal) return;
+    const adjustmentStages: ChapterTaskStage[] = [
+      'requesting_adjustment',
+      'validating_adjustment',
+      'ready_for_review'
+    ];
+    const completedStages = adjustmentStages.reduce(
+      addCompletedStage,
+      internal.task.completedStages
+    );
+    this.updateTask(internal, {
+      status: 'succeeded',
+      stage: 'ready_for_review',
+      completedStages,
+      sceneProgress: null,
+      canCancel: false,
+      canRetry: false,
+      error: null,
+      resultRevisionToken,
+      resultCandidate
+    });
+    internal.terminal = true;
+  }
+
   private async begin(
     projectKey: string,
     kind: ChapterTaskKind
@@ -1010,7 +1313,8 @@ function addCompletedStage(
 function isCancellation(error: unknown): boolean {
   const code = errorCode(error);
   return code === 'CHAPTER_PLANNING_CANCELLED'
-    || code === 'CHAPTER_DRAFT_CANCELLED';
+    || code === 'CHAPTER_DRAFT_CANCELLED'
+    || code === 'CHAPTER_ADJUSTMENT_CANCELLED';
 }
 
 function toInspectionErrorKind(
@@ -1124,6 +1428,10 @@ function errorName(error: unknown): string {
     if (typeof name === 'string') return name;
   }
   return '';
+}
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
 }
 
 function isTerminalStatus(status: ChapterTask['status']): boolean {

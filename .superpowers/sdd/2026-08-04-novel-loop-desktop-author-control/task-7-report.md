@@ -2,7 +2,7 @@
 
 ## Scope
 
-Fix round 3 hardens Task 7 on top of `63a7651`. Local `codex-text`
+The final closure hardens Task 7 through `388f01f`. Local `codex-text`
 mission and plan adjustments create a schema-validated `publishing` author
 revision first. Main durably binds its opaque publication token and promotes
 it to `ready`; no application-layer adjustment is adoptable before that
@@ -29,6 +29,17 @@ change queue state, advance `latestCommittedChapter`, or write Story State.
   a token. Schema and storage tests also rejected the proposed publication
   state and metadata. GREEN: `publishing` is schema-defined and non-adoptable;
   bind and promotion are separate atomic record writes with recovery coverage.
+- RED: debt `type` values bypassed the author-facing leakage traversal, plan
+  context only recognized internal character IDs, expired durable tokens were
+  recreated with a fresh TTL, and capacity eviction could later resurrect a
+  persisted token. GREEN: all introduced-debt fields are checked, ordinary
+  character names prioritize context, recovery preserves `boundAt`, and
+  durable publication tokens are never capacity-eviction candidates.
+- RED: a plan read could discard the unbound record of either an already-live
+  adjustment or an adjustment started while the recovery listing was pending.
+  GREEN: per-project recovery promises serialize both interleavings with
+  adjustment starts and authoring operations; forward and inverse race tests
+  cover the publication boundary.
 
 The initial focused RED runs observed six mission/context failures, two token
 reservation failures, eight main publication/recovery failures, and three
@@ -75,7 +86,7 @@ fields come from the trusted source mission.
 General mission adjustment requires existing objective IDs to be unique and
 source-owned and validates chapter, mission, character, debt, participant,
 introduction, and objective references. The complete merged mission traversal
-checks chapter function, objective text, introduced-debt promises, every
+checks chapter function, objective text, introduced-debt types and promises, every
 character delta field, every introduction name and role independently of the
 participant list, every reader-information list, forbidden moves, and the
 emotional curve.
@@ -119,11 +130,20 @@ tests cover publishing and ready records. Deterministic storage tests cover
 bind-write failure, after-bind promotion failure, record cleanup failure, and
 idempotent promotion/recovery.
 
+Recovery keeps the durable `boundAt` timestamp as the in-memory token age.
+Expired records are discarded instead of receiving a fresh lifetime, and
+durable publication tokens are excluded from bounded-capacity eviction.
+Recovery and adjustment startup share one per-project promise lock, including
+the inverse case where an adjustment is requested while publication listing is
+still pending. Live unbound publications are therefore never treated as crash
+residue by the same service process.
+
 ## Context And Boundary
 
 Story State summaries are always complete bounded JSON, never raw string
 slices. Character slots prioritize mission participants and trusted plan
-references before deterministic fill; tests place the relevant character
+references by author-facing character name, with internal IDs retained for
+compatibility, before deterministic fill; tests place the relevant character
 beyond the first five. Lists and strings retain fixed item/character limits and
 the small fallback also parses as JSON within the 8,000-character bound.
 
@@ -150,12 +170,13 @@ same no-auto-adoption and no-canonical-mutation guarantees.
 
 ## Verification
 
-- Required root suite: 3 files, 36 tests passed.
-- Required desktop suite: 6 files, 230 tests passed.
-- Additional schema/revision-store suite: 2 files, 17 tests passed.
+- Required root plus schema/revision-store suite: 5 files, 54 tests passed.
+- Required desktop suite: 6 files, 234 tests passed.
 - `corepack pnpm build`: passed.
 - `corepack pnpm --dir apps/desktop check`: passed for node, web, and e2e
   TypeScript configurations.
+- Independent final review: PASS with no Critical, Important, or Minor
+  findings after the forward and inverse recovery race coverage.
 - Every Vitest/build/check command used a bounded shell timeout. No test
   process remained running after verification.
 

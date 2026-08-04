@@ -362,6 +362,26 @@ export type {
 } from './codexHardening.js';
 
 export { ArcMapSchema, ChapterQueueSchema, ChapterQueueStageSchema, ChapterQueueStatusSchema } from './planningArtifacts.js';
+export {
+  AuthorArtifactReferenceSchema,
+  AuthorArchivedArtifactReferenceSchema,
+  AuthorEditInvalidationReportSchema,
+  AuthorInvalidatedNodeSchema,
+  AuthorRevisionArtifactKindSchema,
+  AuthorRevisionModeSchema,
+  AuthorRevisionRecordSchema,
+  AuthorRevisionStateSchema,
+  ChapterDirectionSelectionSchema,
+  type AuthorArtifactReference,
+  type AuthorArchivedArtifactReference,
+  type AuthorEditInvalidationReport,
+  type AuthorInvalidatedNode,
+  type AuthorRevisionArtifactKind,
+  type AuthorRevisionMode,
+  type AuthorRevisionRecord,
+  type AuthorRevisionState,
+  type ChapterDirectionSelection
+} from './chapterAuthorRevision.js';
 export type { ArcMap, ChapterQueue, ChapterQueueItem, ChapterQueueStage, ChapterQueueStatus } from './planningArtifacts.js';
 
 export {

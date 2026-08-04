@@ -40,6 +40,13 @@ export const ChapterGetRequestSchema = ChapterTaskRequestSchema;
 export const ChapterCancelRequestSchema = ChapterTaskRequestSchema;
 export const ChapterReadPlanRequestSchema = ChapterProjectRequestSchema;
 export const ChapterReadDraftRequestSchema = ChapterProjectRequestSchema;
+export const ChapterReadDraftWorkingCopyRequestSchema = ChapterProjectRequestSchema;
+export const ChapterDiscardDraftWorkingCopyRequestSchema = ChapterProjectRequestSchema;
+
+export const ChapterSaveDraftWorkingCopyRequestSchema = z.object({
+  projectKey: ChapterProjectKeySchema,
+  markdown: markdownSchema()
+}).strict();
 
 export const ChapterSelectDirectionRequestSchema = z.object({
   projectKey: ChapterProjectKeySchema,
@@ -146,6 +153,12 @@ export const ChapterAdoptRevisionRequestSchema = z.object({
   projectKey: ChapterProjectKeySchema,
   revisionToken: ChapterRevisionTokenSchema,
   confirmInvalidation: z.literal(true)
+}).strict();
+
+export const ChapterAdoptDraftRevisionRequestSchema = z.object({
+  projectKey: ChapterProjectKeySchema,
+  revisionToken: ChapterRevisionTokenSchema,
+  confirmAdoption: z.literal(true)
 }).strict();
 
 export const ChapterTaskKindSchema = z.enum([
@@ -486,9 +499,31 @@ export const ChapterDraftReviewResultSchema = z.discriminatedUnion('available', 
     chapterNumber: z.number().int().positive(),
     title: boundedText(240),
     markdown: markdownSchema(),
+    versionKind: z.enum(['generated', 'author_adopted']).optional(),
     scenes: z.array(ChapterSceneReviewSchema).max(MAX_SCENES)
   }).strict().superRefine(enforceReviewPayloadLimit)
 ]);
+
+export const ChapterDraftWorkingCopyResultSchema = z.object({
+  recoveryAvailable: z.boolean(),
+  stale: z.boolean(),
+  markdown: z.string().nullable(),
+  savedAt: z.string().datetime({ offset: true }).nullable(),
+  revisionToken: ChapterRevisionTokenSchema.nullable()
+}).strict();
+
+export const ChapterDraftWorkingCopySaveResultSchema = z.object({
+  saveState: z.literal('saved'),
+  revisionToken: ChapterRevisionTokenSchema
+}).strict();
+
+export const ChapterDiscardDraftWorkingCopyResultSchema = z.object({
+  discarded: z.literal(true)
+}).strict();
+
+export const ChapterDraftAdoptionResultSchema = z.object({
+  outcome: z.literal('adopted')
+}).strict();
 
 export type ChapterTaskKind = z.infer<typeof ChapterTaskKindSchema>;
 export type ChapterProjectRequest = z.infer<
@@ -512,6 +547,18 @@ export type ChapterReadPlanRequest = z.infer<
 >;
 export type ChapterReadDraftRequest = z.infer<
   typeof ChapterReadDraftRequestSchema
+>;
+export type ChapterReadDraftWorkingCopyRequest = z.infer<
+  typeof ChapterReadDraftWorkingCopyRequestSchema
+>;
+export type ChapterSaveDraftWorkingCopyRequest = z.infer<
+  typeof ChapterSaveDraftWorkingCopyRequestSchema
+>;
+export type ChapterDiscardDraftWorkingCopyRequest = z.infer<
+  typeof ChapterDiscardDraftWorkingCopyRequestSchema
+>;
+export type ChapterAdoptDraftRevisionRequest = z.infer<
+  typeof ChapterAdoptDraftRevisionRequestSchema
 >;
 export type ChapterSelectDirectionRequest = z.infer<
   typeof ChapterSelectDirectionRequestSchema
@@ -546,6 +593,18 @@ export type ChapterPlanReviewResult = z.infer<
 >;
 export type ChapterDraftReviewResult = z.infer<
   typeof ChapterDraftReviewResultSchema
+>;
+export type ChapterDraftWorkingCopyResult = z.infer<
+  typeof ChapterDraftWorkingCopyResultSchema
+>;
+export type ChapterDraftWorkingCopySaveResult = z.infer<
+  typeof ChapterDraftWorkingCopySaveResultSchema
+>;
+export type ChapterDiscardDraftWorkingCopyResult = z.infer<
+  typeof ChapterDiscardDraftWorkingCopyResultSchema
+>;
+export type ChapterDraftAdoptionResult = z.infer<
+  typeof ChapterDraftAdoptionResultSchema
 >;
 export type ChapterAuthoringMessageKey = z.infer<
   typeof ChapterAuthoringMessageKeySchema

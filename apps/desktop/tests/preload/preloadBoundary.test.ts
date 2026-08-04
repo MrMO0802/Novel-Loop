@@ -40,7 +40,7 @@ async function exposeApi(): Promise<NovelLoopDesktopApi> {
 }
 
 describe('typed preload boundary', () => {
-  test('exposes exactly the eleven named chapter methods', async () => {
+  test('exposes exactly the draft-authoring chapter methods', async () => {
     const api = await exposeApi();
 
     expect(Object.keys(api)).toEqual([
@@ -54,10 +54,16 @@ describe('typed preload boundary', () => {
       'inspect',
       'startPlanning',
       'startDrafting',
+      'adjustMission',
+      'adjustPlan',
       'get',
       'cancel',
       'readPlan',
       'readDraft',
+      'readDraftWorkingCopy',
+      'saveDraftWorkingCopy',
+      'discardDraftWorkingCopy',
+      'adoptDraftRevision',
       'selectDirection',
       'saveMissionWorkingCopy',
       'savePlanWorkingCopy',
@@ -80,6 +86,17 @@ describe('typed preload boundary', () => {
     await api.chapter.cancel(taskRequest);
     await api.chapter.readPlan(projectRequest);
     await api.chapter.readDraft(projectRequest);
+    await api.chapter.readDraftWorkingCopy(projectRequest);
+    await api.chapter.saveDraftWorkingCopy({
+      ...projectRequest,
+      markdown: '# Draft\n'
+    });
+    await api.chapter.discardDraftWorkingCopy(projectRequest);
+    await api.chapter.adoptDraftRevision({
+      ...projectRequest,
+      revisionToken,
+      confirmAdoption: true
+    });
     await api.chapter.selectDirection({
       ...projectRequest,
       reviewToken,
@@ -127,6 +144,17 @@ describe('typed preload boundary', () => {
       [IPC_CHANNELS.chapterCancel, taskRequest],
       [IPC_CHANNELS.chapterReadPlan, projectRequest],
       [IPC_CHANNELS.chapterReadDraft, projectRequest],
+      [IPC_CHANNELS.chapterReadDraftWorkingCopy, projectRequest],
+      [IPC_CHANNELS.chapterSaveDraftWorkingCopy, {
+        ...projectRequest,
+        markdown: '# Draft\n'
+      }],
+      [IPC_CHANNELS.chapterDiscardDraftWorkingCopy, projectRequest],
+      [IPC_CHANNELS.chapterAdoptDraftRevision, {
+        ...projectRequest,
+        revisionToken,
+        confirmAdoption: true
+      }],
       [IPC_CHANNELS.chapterSelectDirection, {
         ...projectRequest,
         reviewToken,

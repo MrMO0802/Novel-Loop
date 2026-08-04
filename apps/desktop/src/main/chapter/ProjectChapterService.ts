@@ -4,16 +4,32 @@ import {
   ChapterAdjustMissionRequestSchema,
   ChapterAdjustPlanRequestSchema,
   ChapterAuthoringResultSchema,
+  ChapterAdoptDraftRevisionRequestSchema,
+  ChapterDraftAdoptionResultSchema,
   ChapterDraftReviewResultSchema,
+  ChapterDraftWorkingCopyResultSchema,
+  ChapterDraftWorkingCopySaveResultSchema,
+  ChapterDiscardDraftWorkingCopyResultSchema,
+  ChapterReadDraftWorkingCopyRequestSchema,
+  ChapterSaveDraftWorkingCopyRequestSchema,
+  ChapterDiscardDraftWorkingCopyRequestSchema,
   ChapterInspectionSchema,
   ChapterPlanReviewResultSchema,
   PARTICIPANT_REPAIR_INSTRUCTION,
   ChapterTaskSchema,
   type ChapterAdoptRevisionRequest,
+  type ChapterAdoptDraftRevisionRequest,
   type ChapterAdjustMissionRequest,
   type ChapterAdjustPlanRequest,
   type ChapterAuthoringResult,
   type ChapterDraftReviewResult,
+  type ChapterDraftAdoptionResult,
+  type ChapterDraftWorkingCopyResult,
+  type ChapterDraftWorkingCopySaveResult,
+  type ChapterDiscardDraftWorkingCopyResult,
+  type ChapterReadDraftWorkingCopyRequest,
+  type ChapterSaveDraftWorkingCopyRequest,
+  type ChapterDiscardDraftWorkingCopyRequest,
   type ChapterErrorKind,
   type ChapterInspection,
   type ChapterPlanReviewResult,
@@ -35,6 +51,7 @@ import {
   TrustedChapterPlanReviewSchema
 } from './EngineChapterGateway';
 import { ChapterReviewTokenStore } from './ChapterReviewTokenStore';
+import { DraftWorkingCopyStore } from './DraftWorkingCopyStore';
 
 export type {
   ChapterAdjustMissionRequest,
@@ -57,6 +74,10 @@ export interface ChapterApplicationService {
   cancel(taskId: string): Promise<ChapterTask>;
   readPlan(projectKey: string): Promise<ChapterPlanReviewResult>;
   readDraft(projectKey: string): Promise<ChapterDraftReviewResult>;
+  readDraftWorkingCopy(request: ChapterReadDraftWorkingCopyRequest): Promise<ChapterDraftWorkingCopyResult>;
+  saveDraftWorkingCopy(request: ChapterSaveDraftWorkingCopyRequest): Promise<ChapterDraftWorkingCopySaveResult>;
+  discardDraftWorkingCopy(request: ChapterDiscardDraftWorkingCopyRequest): Promise<ChapterDiscardDraftWorkingCopyResult>;
+  adoptDraftRevision(request: ChapterAdoptDraftRevisionRequest): Promise<ChapterDraftAdoptionResult>;
   selectDirection(
     request: ChapterSelectDirectionRequest
   ): Promise<ChapterAuthoringResult>;
@@ -77,6 +98,7 @@ export interface ProjectChapterServiceDependencies {
   clock?: () => Date;
   randomBytes?: (size: number) => Uint8Array;
   tokenStore?: ChapterReviewTokenStore;
+  workingCopies?: DraftWorkingCopyStore;
 }
 
 interface InternalChapterTask {
@@ -110,10 +132,19 @@ interface PendingAdjustment {
   };
 }
 
+interface PendingDraftAdoption {
+  projectRoot: string;
+  chapterNumber: number;
+  sourceHash: string;
+  markdown: string;
+}
+
 export class ProjectChapterService implements ChapterApplicationService {
   private readonly clock: () => Date;
   private readonly randomBytes: (size: number) => Uint8Array;
   private readonly tokenStore: ChapterReviewTokenStore;
+  private readonly workingCopies: DraftWorkingCopyStore | null;
+  private readonly draftAdoptions = new Map<string, PendingDraftAdoption>();
   private readonly tasks = new Map<string, InternalChapterTask>();
   private readonly activeByProject = new Map<string, string>();
   private readonly startingByProject = new Map<string, StartingTask>();
@@ -125,6 +156,7 @@ export class ProjectChapterService implements ChapterApplicationService {
     this.clock = dependencies.clock ?? (() => new Date());
     this.randomBytes = dependencies.randomBytes ?? nodeRandomBytes;
     this.tokenStore = dependencies.tokenStore ?? new ChapterReviewTokenStore();
+    this.workingCopies = dependencies.workingCopies ?? null;
   }
 
   async inspect(projectKey: string): Promise<ChapterInspection> {
@@ -239,6 +271,96 @@ export class ProjectChapterService implements ChapterApplicationService {
         reason: toReviewUnavailableReason(error)
       });
     }
+  }
+
+  async readDraftWorkingCopy(
+    request: ChapterReadDraftWorkingCopyRequest
+  ): Promise<ChapterDraftWorkingCopyResult> {
+    const parsed = ChapterReadDraftWorkingCopyRequestSchema.parse(request);
+    const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
+    if (!review.available || sourceHash === null || this.workingCopies === null) {
+      return ChapterDraftWorkingCopyResultSchema.parse({
+        recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null
+      });
+    }
+    const copy = await this.workingCopies.read(
+      parsed.projectKey, review.chapterNumber, sourceHash
+    );
+    const revisionToken = copy.recoveryAvailable && !copy.stale && copy.markdown !== null
+      ? this.issueDraftAdoptionToken({
+          projectRoot,
+          chapterNumber: review.chapterNumber,
+          sourceHash,
+          markdown: copy.markdown
+        })
+      : null;
+    return ChapterDraftWorkingCopyResultSchema.parse({ ...copy, revisionToken });
+  }
+
+  async saveDraftWorkingCopy(
+    request: ChapterSaveDraftWorkingCopyRequest
+  ): Promise<ChapterDraftWorkingCopySaveResult> {
+    const parsed = ChapterSaveDraftWorkingCopyRequestSchema.parse(request);
+    const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
+    if (!review.available || sourceHash === null || this.workingCopies === null) {
+      throw new Error('Draft working copies are unavailable.');
+    }
+    await this.workingCopies.save({
+      projectKey: parsed.projectKey,
+      chapterNumber: review.chapterNumber,
+      sourceHash,
+      markdown: parsed.markdown,
+      savedAt: this.clock().toISOString()
+    });
+    return ChapterDraftWorkingCopySaveResultSchema.parse({
+      saveState: 'saved',
+      revisionToken: this.issueDraftAdoptionToken({
+        projectRoot,
+        chapterNumber: review.chapterNumber,
+        sourceHash,
+        markdown: parsed.markdown
+      })
+    });
+  }
+
+  async discardDraftWorkingCopy(
+    request: ChapterDiscardDraftWorkingCopyRequest
+  ): Promise<ChapterDiscardDraftWorkingCopyResult> {
+    const parsed = ChapterDiscardDraftWorkingCopyRequestSchema.parse(request);
+    const { review } = await this.currentDraft(parsed.projectKey);
+    if (review.available && this.workingCopies !== null) {
+      await this.workingCopies.discard(parsed.projectKey, review.chapterNumber);
+    }
+    return ChapterDiscardDraftWorkingCopyResultSchema.parse({ discarded: true });
+  }
+
+  async adoptDraftRevision(
+    request: ChapterAdoptDraftRevisionRequest
+  ): Promise<ChapterDraftAdoptionResult> {
+    const parsed = ChapterAdoptDraftRevisionRequestSchema.parse(request);
+    const pending = this.draftAdoptions.get(parsed.revisionToken);
+    if (pending === undefined) throw new Error('Draft adoption request is stale.');
+    const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
+    if (
+      !review.available
+      || projectRoot !== pending.projectRoot
+      || sourceHash !== pending.sourceHash
+    ) {
+      throw new Error('Draft adoption request is stale.');
+    }
+    if (this.dependencies.gateway.adoptDraft === undefined) {
+      throw new Error('Draft adoption is unavailable.');
+    }
+    await this.dependencies.gateway.adoptDraft({
+      projectRoot: pending.projectRoot,
+      markdown: pending.markdown,
+      expectedSourceHash: pending.sourceHash
+    });
+    if (this.workingCopies !== null) {
+      await this.workingCopies.discard(parsed.projectKey, pending.chapterNumber);
+    }
+    this.draftAdoptions.delete(parsed.revisionToken);
+    return ChapterDraftAdoptionResultSchema.parse({ outcome: 'adopted' });
   }
 
   async selectDirection(
@@ -607,6 +729,46 @@ export class ProjectChapterService implements ChapterApplicationService {
         active: direction.active
       }))
     });
+  }
+
+  private async currentDraft(projectKey: string): Promise<{
+    projectRoot: string;
+    review: ChapterDraftReviewResult;
+    sourceHash: string | null;
+  }> {
+    const projectRoot = await this.resolveProjectRoot(projectKey);
+    if (projectRoot === null) {
+      return {
+        projectRoot: '',
+        review: ChapterDraftReviewResultSchema.parse({
+          available: false,
+          reason: 'project_unavailable'
+        }),
+        sourceHash: null
+      };
+    }
+    if (this.dependencies.gateway.readDraftWithSource !== undefined) {
+      return { projectRoot, ...(await this.dependencies.gateway.readDraftWithSource(projectRoot)) };
+    }
+    const review = await this.dependencies.gateway.readDraft(projectRoot);
+    return {
+      projectRoot,
+      review,
+      sourceHash: review.available
+        ? createHash('sha256').update(review.markdown).digest('hex')
+        : null
+    };
+  }
+
+  private issueDraftAdoptionToken(input: PendingDraftAdoption): string {
+    for (let attempt = 0; attempt < 10; attempt += 1) {
+      const token = `chapter_revision_${Buffer.from(this.randomBytes(24)).toString('hex')}`;
+      if (!this.draftAdoptions.has(token)) {
+        this.draftAdoptions.set(token, input);
+        return token;
+      }
+    }
+    throw new Error('Unable to allocate a draft adoption token.');
   }
 
   private async withAuthoringOperation(

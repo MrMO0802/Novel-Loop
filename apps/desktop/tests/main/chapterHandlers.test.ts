@@ -141,6 +141,15 @@ function createService(): ChapterApplicationService {
     cancel: vi.fn(async () => task),
     readPlan: vi.fn(async () => planReview),
     readDraft: vi.fn(async () => draftReview),
+    readDraftWorkingCopy: vi.fn(async () => ({
+      recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null
+    })),
+    saveDraftWorkingCopy: vi.fn(async () => ({
+      saveState: 'saved' as const,
+      revisionToken: `chapter_revision_${'4'.repeat(48)}`
+    })),
+    discardDraftWorkingCopy: vi.fn(async () => ({ discarded: true as const })),
+    adoptDraftRevision: vi.fn(async () => ({ outcome: 'adopted' as const })),
     selectDirection: vi.fn(async () => adoptedResult),
     saveMissionWorkingCopy: vi.fn(async () => savedResult),
     savePlanWorkingCopy: vi.fn(async () => savedResult),
@@ -323,12 +332,16 @@ describe('chapter workspace IPC handlers', () => {
       'novel-loop:chapter:cancel',
       'novel-loop:chapter:read-plan',
       'novel-loop:chapter:read-draft',
+      'novel-loop:chapter:read-draft-working-copy',
+      'novel-loop:chapter:save-draft-working-copy',
+      'novel-loop:chapter:discard-draft-working-copy',
+      'novel-loop:chapter:adopt-draft-revision',
       'novel-loop:chapter:select-direction',
       'novel-loop:chapter:save-mission-working-copy',
       'novel-loop:chapter:save-plan-working-copy',
       'novel-loop:chapter:adopt-revision'
     ]);
-    expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(13);
+    expect(new Set(registrations.map(({ channel }) => channel)).size).toBe(17);
   });
 
   test.each(cases)('trusted $channel requests call only $serviceMethod', async ({

@@ -48,6 +48,7 @@ export {
 export {
   adjustDesktopChapterMission,
   adjustDesktopChapterPlan,
+  adoptDesktopChapterDraft,
   bindDesktopChapterAdjustmentPublication,
   adoptDesktopMissionRevision,
   adoptDesktopChapterPlanRevision,
@@ -60,11 +61,13 @@ export {
   type AdoptDesktopChapterPlanRevisionInput,
   type AdjustDesktopChapterMissionInput,
   type AdjustDesktopChapterPlanInput,
+  type AdoptDesktopChapterDraftInput,
   type CreateDesktopMissionRevisionResult,
   type CreateDesktopChapterPlanRevisionInput,
   type DesktopAuthorAdoptionResult,
   type DesktopChapterDirectionSelectionResult,
   type DesktopChapterAdjustmentResult,
+  type DesktopDraftAdoptionResult,
   type DesktopMissionAuthorEdit,
   type SelectDesktopChapterDirectionInput
 } from './chapterAuthoring.js';

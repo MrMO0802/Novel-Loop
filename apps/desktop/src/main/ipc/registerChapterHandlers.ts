@@ -6,13 +6,21 @@ import {
   ChapterAuthoringResultSchema,
   ChapterCancelRequestSchema,
   ChapterDraftReviewResultSchema,
+  ChapterDraftWorkingCopyResultSchema,
+  ChapterDraftWorkingCopySaveResultSchema,
+  ChapterDiscardDraftWorkingCopyResultSchema,
+  ChapterDraftAdoptionResultSchema,
   ChapterGetRequestSchema,
   ChapterInspectRequestSchema,
   ChapterInspectionSchema,
   ChapterPlanReviewResultSchema,
   ChapterReadDraftRequestSchema,
+  ChapterReadDraftWorkingCopyRequestSchema,
   ChapterReadPlanRequestSchema,
   ChapterSaveMissionWorkingCopyRequestSchema,
+  ChapterSaveDraftWorkingCopyRequestSchema,
+  ChapterDiscardDraftWorkingCopyRequestSchema,
+  ChapterAdoptDraftRevisionRequestSchema,
   ChapterSavePlanWorkingCopyRequestSchema,
   ChapterSelectDirectionRequestSchema,
   ChapterStartDraftingRequestSchema,
@@ -40,6 +48,10 @@ type ChapterHandler = (
   request: unknown
 ) => Promise<
   | ChapterDraftReviewResult
+  | ReturnType<typeof ChapterDraftWorkingCopyResultSchema.parse>
+  | ReturnType<typeof ChapterDraftWorkingCopySaveResultSchema.parse>
+  | ReturnType<typeof ChapterDiscardDraftWorkingCopyResultSchema.parse>
+  | ReturnType<typeof ChapterDraftAdoptionResultSchema.parse>
   | ChapterAuthoringResult
   | ChapterInspection
   | ChapterPlanReviewResult
@@ -107,6 +119,38 @@ export function registerChapterHandlers(
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterReadDraftRequestSchema.parse(request);
     return ChapterDraftReviewResultSchema.parse(await service.readDraft(parsedRequest.projectKey));
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterReadDraftWorkingCopy, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterReadDraftWorkingCopyRequestSchema.parse(request);
+    return ChapterDraftWorkingCopyResultSchema.parse(
+      await service.readDraftWorkingCopy(parsedRequest)
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterSaveDraftWorkingCopy, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterSaveDraftWorkingCopyRequestSchema.parse(request);
+    return ChapterDraftWorkingCopySaveResultSchema.parse(
+      await service.saveDraftWorkingCopy(parsedRequest)
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterDiscardDraftWorkingCopy, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterDiscardDraftWorkingCopyRequestSchema.parse(request);
+    return ChapterDiscardDraftWorkingCopyResultSchema.parse(
+      await service.discardDraftWorkingCopy(parsedRequest)
+    );
+  });
+
+  registrar.handle(IPC_CHANNELS.chapterAdoptDraftRevision, async (event, request) => {
+    assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
+    const parsedRequest = ChapterAdoptDraftRevisionRequestSchema.parse(request);
+    return ChapterDraftAdoptionResultSchema.parse(
+      await service.adoptDraftRevision(parsedRequest)
+    );
   });
 
   registrar.handle(IPC_CHANNELS.chapterSelectDirection, async (event, request) => {

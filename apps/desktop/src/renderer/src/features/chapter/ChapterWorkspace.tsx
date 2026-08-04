@@ -8,8 +8,10 @@ import { useEffect, useRef, useState } from 'react';
 
 import type {
   ChapterDraftReviewResult,
+  ChapterDraftWorkingCopyResult,
   ChapterPlanReviewResult
 } from '../../../../shared/chapterContract';
+import { ChapterDraftEditor } from './ChapterDraftEditor';
 import type { ProjectSummary } from '../../../../shared/projectContract';
 import { formatMessage, t } from '../../i18n/messages.zh-CN';
 
@@ -26,17 +28,20 @@ export function ChapterWorkspace({
   const requestToken = useRef(0);
   const [draft, setDraft] = useState<ChapterDraftReviewResult | null>(null);
   const [plan, setPlan] = useState<ChapterPlanReviewResult | null>(null);
+  const [workingCopy, setWorkingCopy] = useState<ChapterDraftWorkingCopyResult | null>(null);
   const [failed, setFailed] = useState(false);
 
   useEffect(() => {
     const currentRequest = ++requestToken.current;
     void Promise.all([
       window.novelLoop.chapter.readDraft({ projectKey: project.projectKey }),
+      window.novelLoop.chapter.readDraftWorkingCopy({ projectKey: project.projectKey }),
       window.novelLoop.chapter.readPlan({ projectKey: project.projectKey })
         .catch(() => null)
-    ]).then(([draftResult, planResult]) => {
+    ]).then(([draftResult, copyResult, planResult]) => {
       if (currentRequest !== requestToken.current) return;
       setDraft(draftResult);
+      setWorkingCopy(copyResult);
       setPlan(planResult);
       setFailed(!draftResult.available);
     }).catch(() => {
@@ -97,7 +102,7 @@ export function ChapterWorkspace({
             </h2>
             <div className="nl-draft-status">
               <FileText aria-hidden size={18} />
-              <span>{t('chapter.workspace.draftStatus')}</span>
+              <span>{availableDraft.versionKind === 'author_adopted' ? '作者采用修订' : t('chapter.workspace.draftStatus')}</span>
             </div>
             <p className="nl-chapter-word-count">
               {formatMessage('chapter.workspace.wordCount', {
@@ -125,7 +130,17 @@ export function ChapterWorkspace({
                 })}
               </h1>
             </header>
-            <SafeDraftBlocks markdown={availableDraft.markdown} />
+            {workingCopy && (
+              <ChapterDraftEditor
+                draft={availableDraft}
+                onAdopted={() => {
+                  void window.novelLoop.chapter.readDraft({ projectKey: project.projectKey })
+                    .then((result) => setDraft(result));
+                }}
+                projectKey={project.projectKey}
+                workingCopy={workingCopy}
+              />
+            )}
           </article>
 
           <aside

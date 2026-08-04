@@ -115,7 +115,7 @@ describe('initial chapter workspace', () => {
     const workspace = screen.getByTestId('chapter-workspace');
     expect(workspace).toHaveClass('nl-chapter-workspace');
     expect(within(workspace).getByText('初稿')).toBeVisible();
-    expect(within(workspace).getByText(/^\d+ 字$/)).toBeVisible();
+    expect(within(workspace).getAllByText(/^\d+ 字$/)).toHaveLength(2);
     expect(within(workspace).getByRole('navigation', {
       name: '章节导航'
     })).toBeVisible();
@@ -129,13 +129,14 @@ describe('initial chapter workspace', () => {
     )).toBeVisible();
   });
 
-  test('does not expose editing, diagnostics, final, patch, or commit controls', async () => {
+  test('exposes draft editing without diagnostics, final, patch, or commit controls', async () => {
     installApi();
     render(<App />);
     await openWorkspace();
 
-    expect(screen.queryByRole('textbox')).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /保存|诊断|修订|定稿|提交/i }))
+    expect(screen.getByRole('textbox', { name: '章节正文' })).toBeVisible();
+    expect(screen.getByRole('button', { name: '采用此修订' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: /诊断|定稿|提交/i }))
       .not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(
       /canon_patch|story_state|mutation|jsonl|runId|taskId|artifact path/i

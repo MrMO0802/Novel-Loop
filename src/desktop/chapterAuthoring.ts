@@ -10,6 +10,7 @@ import {
   listAuthorRevisionPublications,
   promoteAuthorRevisionPublication,
   readAuthorRevision,
+  readLatestAdoptedDraft,
   type ArchiveInvalidatedChapterArtifactsResult,
   type CreateAuthorRevisionResult
 } from '../app/chapterAuthorRevision.js';
@@ -47,6 +48,7 @@ import type {
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { AppError, getErrorMessage } from '../utils/AppError.js';
+import { readDesktopChapterDraft } from './chapterWorkspace.js';
 
 const DIRECTION_INVALIDATED_NODES = [
   'selected_plan',
@@ -172,6 +174,19 @@ export interface DesktopChapterAdjustmentResult
   content: string;
 }
 
+export interface AdoptDesktopChapterDraftInput {
+  projectRoot: string;
+  markdown: string;
+  expectedSourceHash: string;
+}
+
+export interface DesktopDraftAdoptionResult {
+  chapterNumber: number;
+  revisionId: string;
+  versionKind: 'author_adopted';
+  storyStateMutated: false;
+}
+
 interface ChapterAuthoringSnapshot {
   projectRoot: string;
   paths: ProjectPaths;
@@ -258,6 +273,61 @@ export async function listDesktopChapterAdjustmentPublications(input: {
 }, fileStore?: FileStore) {
   const store = fileStore ?? FileStore.forProject(path.resolve(input.projectRoot));
   return listAuthorRevisionPublications(input, store);
+}
+
+export async function adoptDesktopChapterDraft(
+  input: AdoptDesktopChapterDraftInput,
+  fileStore?: FileStore
+): Promise<DesktopDraftAdoptionResult> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  const current = await readDesktopChapterDraft({ projectRoot });
+  if (!current.available || current.sourceHash !== input.expectedSourceHash) {
+    throw new AppError(
+      'DESKTOP_CHAPTER_EDIT_STALE',
+      'The chapter draft changed before the author revision was adopted.',
+      2
+    );
+  }
+  if (Buffer.byteLength(input.markdown, 'utf8') > 2 * 1024 * 1024) {
+    throw new AppError('DESKTOP_CHAPTER_EDIT_INVALID', 'The chapter draft is too large.', 2);
+  }
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: current.chapterNumber,
+    operation: 'desktop-draft-author-adoption',
+    allowStoryStateWrite: false
+  }, async () => {
+    const latestAdopted = await readLatestAdoptedDraft({
+      projectRoot,
+      chapterNumber: current.chapterNumber
+    }, store);
+    const created = await createAuthorRevision({
+      projectRoot,
+      chapterNumber: current.chapterNumber,
+      artifactKind: 'draft',
+      mode: 'direct_edit',
+      sourceArtifactPath: latestAdopted?.relativeMarkdownPath
+        ?? path.join('chapters', `chapter_${String(current.chapterNumber).padStart(3, '0')}`, 'draft_v1.md'),
+      sourceCandidateId: null,
+      expectedSourceHash: current.sourceHash,
+      content: input.markdown,
+      authorInstruction: null
+    }, store);
+    await adoptAuthorRevision({
+      projectRoot,
+      chapterNumber: current.chapterNumber,
+      revisionId: created.record.revisionId,
+      expectedSourceHash: current.sourceHash
+    }, store);
+    return {
+      chapterNumber: current.chapterNumber,
+      revisionId: created.record.revisionId,
+      versionKind: 'author_adopted',
+      storyStateMutated: false
+    };
+  });
 }
 
 export async function createDesktopMissionRevision(input: {

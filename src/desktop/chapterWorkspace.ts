@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { lstat, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
@@ -11,6 +12,7 @@ import {
   missionCharacterReferencesAreValid,
   missionDebtReferencesAreValid
 } from '../app/chapterReferenceValidation.js';
+import { readLatestAdoptedDraft } from '../app/chapterAuthorRevision.js';
 import {
   runChapterDryRun,
   type ChapterPlanningProgressEvent
@@ -88,6 +90,8 @@ const DesktopChapterDraftReviewSchema = z.discriminatedUnion('available', [
     chapterNumber: z.number().int().positive(),
     title: z.string().min(1),
     markdown: z.string(),
+    sourceHash: z.string().regex(/^[a-f0-9]{64}$/u),
+    versionKind: z.enum(['generated', 'author_adopted']),
     scenes: z.array(z.object({ summary: z.string() }).strict()).max(MAX_SCENE_SUMMARIES)
   }).strict()
 ]);
@@ -321,7 +325,11 @@ export async function readDesktopChapterDraft(
     context.paths.chapterArtifact(inspection.chapterNumber, 'scene_cards.json'),
     SceneCardsSchema
   );
-  const markdown = await readRequiredMarkdown(
+  const adopted = await readLatestAdoptedDraft({
+    projectRoot: context.projectRoot,
+    chapterNumber: inspection.chapterNumber
+  });
+  const markdown = adopted?.content ?? await readRequiredMarkdown(
     context.paths.chapterArtifact(inspection.chapterNumber, 'draft_v1.md')
   );
   return parseReview(DesktopChapterDraftReviewSchema, {
@@ -329,11 +337,17 @@ export async function readDesktopChapterDraft(
     chapterNumber: inspection.chapterNumber,
     title: inspection.title,
     markdown,
+    sourceHash: sha256(markdown),
+    versionKind: adopted === null ? 'generated' : 'author_adopted',
     scenes: [...sceneCards]
       .sort((left, right) => left.order - right.order)
       .slice(0, MAX_SCENE_SUMMARIES)
       .map((scene) => ({ summary: scene.purpose }))
   });
+}
+
+function sha256(content: string): string {
+  return createHash('sha256').update(content).digest('hex');
 }
 
 function createContext(projectRootInput: string): { projectRoot: string; projectsRoot: string; projectId: string; paths: ProjectPaths } {

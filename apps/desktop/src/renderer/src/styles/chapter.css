@@ -2,6 +2,47 @@
   max-width: 900px;
 }
 
+.nl-draft-editor {
+  display: grid;
+  gap: 16px;
+  margin-top: 24px;
+}
+
+.nl-draft-editor__toolbar,
+.nl-draft-editor__footer,
+.nl-draft-editor__recovery {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.nl-draft-editor textarea,
+.nl-draft-editor__preview {
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 55vh;
+  padding: 18px;
+  border: 1px solid var(--nl-border);
+  border-radius: 6px;
+  background: var(--nl-surface);
+  color: var(--nl-text);
+  font: inherit;
+  line-height: 1.8;
+  white-space: pre-wrap;
+}
+
+.nl-draft-editor textarea { resize: vertical; }
+
+.nl-draft-editor__dialog {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--nl-border);
+  border-radius: 6px;
+  background: var(--nl-surface);
+}
+
 .nl-chapter-task > section {
   max-width: 720px;
 }

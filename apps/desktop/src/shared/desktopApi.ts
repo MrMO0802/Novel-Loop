@@ -23,18 +23,26 @@ import type {
 } from './planningContract';
 import type {
   ChapterAdoptRevisionRequest,
+  ChapterAdoptDraftRevisionRequest,
   ChapterAdjustMissionRequest,
   ChapterAdjustPlanRequest,
   ChapterAuthoringResult,
   ChapterCancelRequest,
   ChapterDraftReviewResult,
+  ChapterDraftAdoptionResult,
+  ChapterDraftWorkingCopyResult,
+  ChapterDraftWorkingCopySaveResult,
+  ChapterDiscardDraftWorkingCopyRequest,
+  ChapterDiscardDraftWorkingCopyResult,
   ChapterGetRequest,
   ChapterInspectRequest,
   ChapterInspection,
   ChapterPlanReviewResult,
   ChapterReadDraftRequest,
+  ChapterReadDraftWorkingCopyRequest,
   ChapterReadPlanRequest,
   ChapterSaveMissionWorkingCopyRequest,
+  ChapterSaveDraftWorkingCopyRequest,
   ChapterSavePlanWorkingCopyRequest,
   ChapterSelectDirectionRequest,
   ChapterStartDraftingRequest,
@@ -76,6 +84,10 @@ export interface NovelLoopDesktopApi {
     cancel(request: ChapterCancelRequest): Promise<ChapterTask>;
     readPlan(request: ChapterReadPlanRequest): Promise<ChapterPlanReviewResult>;
     readDraft(request: ChapterReadDraftRequest): Promise<ChapterDraftReviewResult>;
+    readDraftWorkingCopy(request: ChapterReadDraftWorkingCopyRequest): Promise<ChapterDraftWorkingCopyResult>;
+    saveDraftWorkingCopy(request: ChapterSaveDraftWorkingCopyRequest): Promise<ChapterDraftWorkingCopySaveResult>;
+    discardDraftWorkingCopy(request: ChapterDiscardDraftWorkingCopyRequest): Promise<ChapterDiscardDraftWorkingCopyResult>;
+    adoptDraftRevision(request: ChapterAdoptDraftRevisionRequest): Promise<ChapterDraftAdoptionResult>;
     selectDirection(
       request: ChapterSelectDirectionRequest
     ): Promise<ChapterAuthoringResult>;

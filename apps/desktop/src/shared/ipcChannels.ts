@@ -24,6 +24,10 @@ export const IPC_CHANNELS = {
   chapterCancel: 'novel-loop:chapter:cancel',
   chapterReadPlan: 'novel-loop:chapter:read-plan',
   chapterReadDraft: 'novel-loop:chapter:read-draft',
+  chapterReadDraftWorkingCopy: 'novel-loop:chapter:read-draft-working-copy',
+  chapterSaveDraftWorkingCopy: 'novel-loop:chapter:save-draft-working-copy',
+  chapterDiscardDraftWorkingCopy: 'novel-loop:chapter:discard-draft-working-copy',
+  chapterAdoptDraftRevision: 'novel-loop:chapter:adopt-draft-revision',
   chapterSelectDirection: 'novel-loop:chapter:select-direction',
   chapterSaveMissionWorkingCopy:
     'novel-loop:chapter:save-mission-working-copy',

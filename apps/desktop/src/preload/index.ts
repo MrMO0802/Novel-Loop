@@ -25,13 +25,21 @@ import type {
   ChapterAuthoringResult,
   ChapterCancelRequest,
   ChapterDraftReviewResult,
+  ChapterDraftWorkingCopyResult,
+  ChapterDraftWorkingCopySaveResult,
+  ChapterDiscardDraftWorkingCopyResult,
+  ChapterDraftAdoptionResult,
   ChapterGetRequest,
   ChapterInspectRequest,
   ChapterInspection,
   ChapterPlanReviewResult,
   ChapterReadDraftRequest,
+  ChapterReadDraftWorkingCopyRequest,
   ChapterReadPlanRequest,
   ChapterSaveMissionWorkingCopyRequest,
+  ChapterSaveDraftWorkingCopyRequest,
+  ChapterDiscardDraftWorkingCopyRequest,
+  ChapterAdoptDraftRevisionRequest,
   ChapterSavePlanWorkingCopyRequest,
   ChapterSelectDirectionRequest,
   ChapterStartDraftingRequest,
@@ -223,6 +231,22 @@ const novelLoopApi: NovelLoopDesktopApi = {
         request
       );
       return response as ChapterDraftReviewResult;
+    },
+    readDraftWorkingCopy: async (request: ChapterReadDraftWorkingCopyRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.chapterReadDraftWorkingCopy, request);
+      return response as ChapterDraftWorkingCopyResult;
+    },
+    saveDraftWorkingCopy: async (request: ChapterSaveDraftWorkingCopyRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.chapterSaveDraftWorkingCopy, request);
+      return response as ChapterDraftWorkingCopySaveResult;
+    },
+    discardDraftWorkingCopy: async (request: ChapterDiscardDraftWorkingCopyRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.chapterDiscardDraftWorkingCopy, request);
+      return response as ChapterDiscardDraftWorkingCopyResult;
+    },
+    adoptDraftRevision: async (request: ChapterAdoptDraftRevisionRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.chapterAdoptDraftRevision, request);
+      return response as ChapterDraftAdoptionResult;
     },
     selectDirection: async (request: ChapterSelectDirectionRequest) => {
       const response: unknown = await ipcRenderer.invoke(

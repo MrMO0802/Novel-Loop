@@ -177,6 +177,12 @@ export interface TrustedAdoptRevisionInput {
   purpose: 'mission' | 'plan';
 }
 
+export interface TrustedAdoptDraftInput {
+  projectRoot: string;
+  markdown: string;
+  expectedSourceHash: string;
+}
+
 export type ChapterAdjustmentStage =
   | 'requesting_adjustment'
   | 'validating_adjustment'
@@ -280,6 +286,11 @@ export interface ChapterEngineGateway {
   ): Promise<TrustedRecoverableAdjustmentPublication[]>;
   readPlan(projectRoot: string): Promise<TrustedChapterPlanReview>;
   readDraft(projectRoot: string): Promise<ChapterDraftReviewResult>;
+  readDraftWithSource?(projectRoot: string): Promise<{
+    review: ChapterDraftReviewResult;
+    sourceHash: string | null;
+  }>;
+  adoptDraft?(input: TrustedAdoptDraftInput): Promise<void>;
   selectDirection(input: {
     projectRoot: string;
     chapterNumber: number;
@@ -451,9 +462,44 @@ export class EngineChapterGateway implements ChapterEngineGateway {
     const review = await readDesktopChapterDraft({ projectRoot });
     return ChapterDraftReviewResultSchema.parse(
       review.available
-        ? review
+        ? {
+            available: true,
+            chapterNumber: review.chapterNumber,
+            title: review.title,
+            markdown: review.markdown,
+            versionKind: review.versionKind,
+            scenes: review.scenes
+          }
         : { available: false, reason: 'not_ready' }
     );
+  }
+
+  async readDraftWithSource(projectRoot: string): Promise<{
+    review: ChapterDraftReviewResult;
+    sourceHash: string | null;
+  }> {
+    const { readDesktopChapterDraft } = await import('novel-loop-engine/desktop');
+    const review = await readDesktopChapterDraft({ projectRoot });
+    return {
+      review: ChapterDraftReviewResultSchema.parse(
+        review.available
+          ? {
+              available: true,
+              chapterNumber: review.chapterNumber,
+              title: review.title,
+              markdown: review.markdown,
+              versionKind: review.versionKind,
+              scenes: review.scenes
+            }
+          : { available: false, reason: 'not_ready' }
+      ),
+      sourceHash: review.available ? review.sourceHash : null
+    };
+  }
+
+  async adoptDraft(input: TrustedAdoptDraftInput): Promise<void> {
+    const { adoptDesktopChapterDraft } = await import('novel-loop-engine/desktop');
+    await adoptDesktopChapterDraft(input);
   }
 
   async selectDirection(input: {

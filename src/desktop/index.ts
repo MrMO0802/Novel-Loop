@@ -44,3 +44,14 @@ export {
   type DesktopChapterPlanningInput,
   type DesktopNextChapterInspection
 } from './chapterWorkspace.js';
+
+export {
+  adoptDesktopChapterPlanRevision,
+  createDesktopChapterPlanRevision,
+  selectDesktopChapterDirection,
+  type AdoptDesktopChapterPlanRevisionInput,
+  type CreateDesktopChapterPlanRevisionInput,
+  type DesktopAuthorAdoptionResult,
+  type DesktopChapterDirectionSelectionResult,
+  type SelectDesktopChapterDirectionInput
+} from './chapterAuthoring.js';

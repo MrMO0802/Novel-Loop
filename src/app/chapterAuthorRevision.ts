@@ -83,6 +83,20 @@ export interface AdoptAuthorRevisionInput {
   projectRoot: string;
   chapterNumber: number;
   revisionId: string;
+  expectedSourceHash?: string;
+  invalidationReportPath?: string;
+  sourceArtifactPathOverride?: string;
+}
+
+export interface ReadAuthorRevisionInput {
+  projectRoot: string;
+  chapterNumber: number;
+  revisionId: string;
+  expectedSourceHash: string;
+}
+
+export interface ReadAuthorRevisionResult extends CreateAuthorRevisionResult {
+  content: string;
 }
 
 export interface ArchiveInvalidatedChapterArtifactsInput {
@@ -96,6 +110,16 @@ export interface ArchiveInvalidatedChapterArtifactsResult {
   relativeArchiveDir: string;
   archivedArtifacts: AuthorArchivedArtifactReference[];
   missingArtifactPaths: string[];
+}
+
+export interface ArchiveAuthorChapterArtifactsInput {
+  projectRoot: string;
+  chapterNumber: number;
+  archiveId: string;
+  nodes: Array<Extract<
+    AuthorInvalidatedNode,
+    'selected_plan' | 'scene_cards' | 'scene_drafts' | 'draft'
+  >>;
 }
 
 export interface ReadLatestAdoptedDraftInput {
@@ -210,7 +234,22 @@ export async function adoptAuthorRevision(
     if (target.record.state !== 'ready' && target.record.state !== 'adopted') {
       throw new AppError('AUTHOR_REVISION_NOT_ADOPTABLE', `Author revision is not ready: ${input.revisionId}`, 2);
     }
-    await readVerifiedSourceArtifact(projectRoot, store, target.record);
+    if (
+      input.expectedSourceHash !== undefined
+      && input.expectedSourceHash !== target.record.sourceHash
+    ) {
+      throw new AppError('AUTHOR_REVISION_SOURCE_STALE', `Source artifact hash does not match: ${input.revisionId}`, 2);
+    }
+    const sourceRecord = input.sourceArtifactPathOverride === undefined
+      ? target.record
+      : AuthorRevisionRecordSchema.parse({
+          ...target.record,
+          sourceArtifactPath: toProjectRelativePath(
+            projectRoot,
+            resolveProjectPath(projectRoot, input.sourceArtifactPathOverride)
+          )
+        });
+    await readVerifiedSourceArtifact(projectRoot, store, sourceRecord);
     await readVerifiedWorkingCopy(projectRoot, store, target.record);
 
     for (const entry of revisions) {
@@ -228,12 +267,97 @@ export async function adoptAuthorRevision(
 
     if (target.record.state === 'adopted') return target.record;
     const adopted = AuthorRevisionRecordSchema.parse({
-      ...target.record,
+      ...sourceRecord,
       state: 'adopted',
-      adoptedAt: new Date().toISOString()
+      adoptedAt: new Date().toISOString(),
+      invalidationReportPath: input.invalidationReportPath
+        ?? target.record.invalidationReportPath
     });
     await store.writeJson(target.absoluteRecordPath, adopted, AuthorRevisionRecordSchema);
     return adopted;
+  });
+}
+
+export async function readAuthorRevision(
+  input: ReadAuthorRevisionInput,
+  fileStore?: FileStore
+): Promise<ReadAuthorRevisionResult> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter_author_revision_read',
+    allowStoryStateWrite: false
+  }, async () => {
+    const context = await readProjectContext(projectRoot, input.chapterNumber, store);
+    rejectCommittedChapter(input.chapterNumber, context.latestCommittedChapter);
+    const target = await findRevision(context, input.chapterNumber, input.revisionId);
+    if (target.record.state !== 'ready' && target.record.state !== 'adopted') {
+      throw new AppError('AUTHOR_REVISION_NOT_ADOPTABLE', `Author revision is not ready: ${input.revisionId}`, 2);
+    }
+    if (target.record.sourceHash !== input.expectedSourceHash) {
+      throw new AppError('AUTHOR_REVISION_SOURCE_STALE', `Source artifact hash does not match: ${input.revisionId}`, 2);
+    }
+    await readVerifiedSourceArtifact(projectRoot, store, target.record);
+    return {
+      record: target.record,
+      relativeRecordPath: target.relativeRecordPath,
+      relativeMarkdownPath: target.record.workingCopyPath,
+      content: await readVerifiedWorkingCopy(projectRoot, store, target.record)
+    };
+  });
+}
+
+export async function archiveAuthorChapterArtifacts(
+  input: ArchiveAuthorChapterArtifactsInput,
+  fileStore?: FileStore
+): Promise<ArchiveInvalidatedChapterArtifactsResult> {
+  const projectRoot = path.resolve(input.projectRoot);
+  const store = fileStore ?? FileStore.forProject(projectRoot);
+  await FileStore.forProject(projectRoot).assertSafePath(projectRoot);
+
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: input.chapterNumber,
+    operation: 'chapter_author_revision_archive',
+    allowStoryStateWrite: false
+  }, async () => {
+    const context = await readProjectContext(projectRoot, input.chapterNumber, store);
+    rejectCommittedChapter(input.chapterNumber, context.latestCommittedChapter);
+    if (!/^[A-Za-z0-9_-]+$/u.test(input.archiveId)) {
+      throw new AppError('AUTHOR_REVISION_ARCHIVE_ID_INVALID', 'Author archive ID is invalid.', 2);
+    }
+    const archiveDir = context.paths.chapterArtifact(
+      input.chapterNumber,
+      'author_revisions',
+      'archive',
+      input.archiveId
+    );
+    const chapterDir = context.paths.chapterDir(input.chapterNumber);
+    const archivedArtifacts: AuthorArchivedArtifactReference[] = [];
+    const missingArtifactPaths: string[] = [];
+
+    await store.ensureDir(archiveDir);
+    for (const node of input.nodes) {
+      await archiveOptionalPath({
+        projectRoot,
+        store,
+        chapterDir,
+        archiveDir,
+        sourcePath: path.join(chapterDir, archivePathForNode(node)),
+        node,
+        archivedArtifacts,
+        missingArtifactPaths
+      });
+    }
+    return {
+      relativeArchiveDir: toProjectRelativePath(projectRoot, archiveDir),
+      archivedArtifacts,
+      missingArtifactPaths
+    };
   });
 }
 
@@ -538,6 +662,15 @@ function archiveNodeForPath(editedNode: AuthorInvalidatedNode, allowedPath: stri
   if (allowedPath === 'draft_v1.md') return 'draft';
   if (allowedPath === 'diagnostics_v1.json') return 'future_diagnostics';
   return editedNode;
+}
+
+function archivePathForNode(
+  node: ArchiveAuthorChapterArtifactsInput['nodes'][number]
+): string {
+  if (node === 'selected_plan') return 'selected_plan.md';
+  if (node === 'scene_cards') return 'scene_cards.json';
+  if (node === 'scene_drafts') return 'scenes';
+  return 'draft_v1.md';
 }
 
 function sha256(content: string): string {

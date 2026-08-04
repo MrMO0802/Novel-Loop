@@ -59,6 +59,9 @@ export type {
 } from '../../shared/chapterContract';
 
 const MAX_TERMINAL_TASKS = 100;
+const MAX_DRAFT_ADOPTION_TOKENS = 100;
+const MAX_RETIRED_DRAFT_TOKENS = 500;
+const DRAFT_ADOPTION_TOKEN_TTL_MS = 30 * 60 * 1_000;
 
 export interface ChapterProjectRootResolver {
   resolveProjectRoot(projectKey: string): Promise<string | null>;
@@ -133,10 +136,13 @@ interface PendingAdjustment {
 }
 
 interface PendingDraftAdoption {
+  projectKey: string;
   projectRoot: string;
   chapterNumber: number;
   sourceHash: string;
+  contentHash: string;
   markdown: string;
+  issuedAtMs: number;
 }
 
 export class ProjectChapterService implements ChapterApplicationService {
@@ -145,6 +151,9 @@ export class ProjectChapterService implements ChapterApplicationService {
   private readonly tokenStore: ChapterReviewTokenStore;
   private readonly workingCopies: DraftWorkingCopyStore | null;
   private readonly draftAdoptions = new Map<string, PendingDraftAdoption>();
+  private readonly retiredDraftAdoptions = new Set<string>();
+  private readonly retiredDraftAdoptionOrder: string[] = [];
+  private readonly draftOperations = new Map<string, Promise<void>>();
   private readonly tasks = new Map<string, InternalChapterTask>();
   private readonly activeByProject = new Map<string, string>();
   private readonly startingByProject = new Map<string, StartingTask>();
@@ -277,49 +286,68 @@ export class ProjectChapterService implements ChapterApplicationService {
     request: ChapterReadDraftWorkingCopyRequest
   ): Promise<ChapterDraftWorkingCopyResult> {
     const parsed = ChapterReadDraftWorkingCopyRequestSchema.parse(request);
-    const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
-    if (!review.available || sourceHash === null || this.workingCopies === null) {
-      return ChapterDraftWorkingCopyResultSchema.parse({
-        recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null
-      });
-    }
-    const copy = await this.workingCopies.read(
-      parsed.projectKey, review.chapterNumber, sourceHash
-    );
-    const revisionToken = copy.recoveryAvailable && !copy.stale && copy.markdown !== null
-      ? this.issueDraftAdoptionToken({
-          projectRoot,
-          chapterNumber: review.chapterNumber,
-          sourceHash,
-          markdown: copy.markdown
-        })
-      : null;
-    return ChapterDraftWorkingCopyResultSchema.parse({ ...copy, revisionToken });
+    return this.withDraftOperation(parsed.projectKey, async () => {
+      try {
+        const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
+        if (!review.available || sourceHash === null || this.workingCopies === null) {
+          return ChapterDraftWorkingCopyResultSchema.parse({
+            recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null
+          });
+        }
+        const copy = await this.workingCopies.read(
+          parsed.projectKey, review.chapterNumber, sourceHash
+        );
+        const revisionToken = copy.recoveryAvailable && !copy.stale && copy.markdown !== null
+          ? this.issueDraftAdoptionToken({
+              projectKey: parsed.projectKey,
+              projectRoot,
+              chapterNumber: review.chapterNumber,
+              sourceHash,
+              contentHash: sha256(copy.markdown),
+              markdown: copy.markdown,
+              issuedAtMs: this.clock().getTime()
+            })
+          : null;
+        return ChapterDraftWorkingCopyResultSchema.parse({ ...copy, revisionToken });
+      } catch (error) {
+        throw mapDraftBoundaryError(error);
+      }
+    });
   }
 
   async saveDraftWorkingCopy(
     request: ChapterSaveDraftWorkingCopyRequest
   ): Promise<ChapterDraftWorkingCopySaveResult> {
     const parsed = ChapterSaveDraftWorkingCopyRequestSchema.parse(request);
-    const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
-    if (!review.available || sourceHash === null || this.workingCopies === null) {
-      throw new Error('Draft working copies are unavailable.');
-    }
-    await this.workingCopies.save({
-      projectKey: parsed.projectKey,
-      chapterNumber: review.chapterNumber,
-      sourceHash,
-      markdown: parsed.markdown,
-      savedAt: this.clock().toISOString()
-    });
-    return ChapterDraftWorkingCopySaveResultSchema.parse({
-      saveState: 'saved',
-      revisionToken: this.issueDraftAdoptionToken({
-        projectRoot,
-        chapterNumber: review.chapterNumber,
-        sourceHash,
-        markdown: parsed.markdown
-      })
+    return this.withDraftOperation(parsed.projectKey, async () => {
+      try {
+        const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
+        if (!review.available || sourceHash === null || this.workingCopies === null) {
+          throw draftBoundaryError('DRAFT_WORKING_COPY_UNAVAILABLE');
+        }
+        const savedAt = this.clock();
+        await this.workingCopies.save({
+          projectKey: parsed.projectKey,
+          chapterNumber: review.chapterNumber,
+          sourceHash,
+          markdown: parsed.markdown,
+          savedAt: savedAt.toISOString()
+        });
+        return ChapterDraftWorkingCopySaveResultSchema.parse({
+          saveState: 'saved',
+          revisionToken: this.issueDraftAdoptionToken({
+            projectKey: parsed.projectKey,
+            projectRoot,
+            chapterNumber: review.chapterNumber,
+            sourceHash,
+            contentHash: sha256(parsed.markdown),
+            markdown: parsed.markdown,
+            issuedAtMs: savedAt.getTime()
+          })
+        });
+      } catch (error) {
+        throw mapDraftBoundaryError(error);
+      }
     });
   }
 
@@ -327,40 +355,76 @@ export class ProjectChapterService implements ChapterApplicationService {
     request: ChapterDiscardDraftWorkingCopyRequest
   ): Promise<ChapterDiscardDraftWorkingCopyResult> {
     const parsed = ChapterDiscardDraftWorkingCopyRequestSchema.parse(request);
-    const { review } = await this.currentDraft(parsed.projectKey);
-    if (review.available && this.workingCopies !== null) {
-      await this.workingCopies.discard(parsed.projectKey, review.chapterNumber);
-    }
-    return ChapterDiscardDraftWorkingCopyResultSchema.parse({ discarded: true });
+    return this.withDraftOperation(parsed.projectKey, async () => {
+      try {
+        const { review } = await this.currentDraft(parsed.projectKey);
+        if (review.available && this.workingCopies !== null) {
+          await this.workingCopies.discard(parsed.projectKey, review.chapterNumber);
+          this.revokeDraftAdoptions(parsed.projectKey, review.chapterNumber);
+        }
+        return ChapterDiscardDraftWorkingCopyResultSchema.parse({ discarded: true });
+      } catch (error) {
+        throw mapDraftBoundaryError(error);
+      }
+    });
   }
 
   async adoptDraftRevision(
     request: ChapterAdoptDraftRevisionRequest
   ): Promise<ChapterDraftAdoptionResult> {
     const parsed = ChapterAdoptDraftRevisionRequestSchema.parse(request);
-    const pending = this.draftAdoptions.get(parsed.revisionToken);
-    if (pending === undefined) throw new Error('Draft adoption request is stale.');
-    const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
-    if (
-      !review.available
-      || projectRoot !== pending.projectRoot
-      || sourceHash !== pending.sourceHash
-    ) {
-      throw new Error('Draft adoption request is stale.');
-    }
-    if (this.dependencies.gateway.adoptDraft === undefined) {
-      throw new Error('Draft adoption is unavailable.');
-    }
-    await this.dependencies.gateway.adoptDraft({
-      projectRoot: pending.projectRoot,
-      markdown: pending.markdown,
-      expectedSourceHash: pending.sourceHash
+    return this.withDraftOperation(parsed.projectKey, async () => {
+      try {
+        this.purgeDraftAdoptions();
+        const pending = this.draftAdoptions.get(parsed.revisionToken);
+        if (pending === undefined || pending.projectKey !== parsed.projectKey) {
+          throw draftBoundaryError('DRAFT_ADOPTION_STALE');
+        }
+        const { projectRoot, review, sourceHash } = await this.currentDraft(parsed.projectKey);
+        if (
+          !review.available
+          || projectRoot !== pending.projectRoot
+          || sourceHash !== pending.sourceHash
+          || this.workingCopies === null
+        ) {
+          this.retireDraftAdoption(parsed.revisionToken);
+          throw draftBoundaryError('DRAFT_ADOPTION_STALE');
+        }
+        const copy = await this.workingCopies.read(
+          parsed.projectKey,
+          pending.chapterNumber,
+          pending.sourceHash
+        );
+        if (
+          !copy.recoveryAvailable
+          || copy.stale
+          || copy.markdown === null
+          || sha256(copy.markdown) !== pending.contentHash
+          || copy.markdown !== pending.markdown
+        ) {
+          this.retireDraftAdoption(parsed.revisionToken);
+          throw draftBoundaryError('DRAFT_ADOPTION_STALE');
+        }
+        if (this.dependencies.gateway.adoptDraft === undefined) {
+          throw draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
+        }
+        await this.dependencies.gateway.adoptDraft({
+          projectRoot: pending.projectRoot,
+          markdown: pending.markdown,
+          expectedSourceHash: pending.sourceHash
+        });
+        this.revokeDraftAdoptions(parsed.projectKey, pending.chapterNumber);
+        await this.workingCopies.discardIfMatches(
+          parsed.projectKey,
+          pending.chapterNumber,
+          pending.sourceHash,
+          pending.contentHash
+        ).catch(() => false);
+        return ChapterDraftAdoptionResultSchema.parse({ outcome: 'adopted' });
+      } catch (error) {
+        throw mapDraftBoundaryError(error);
+      }
     });
-    if (this.workingCopies !== null) {
-      await this.workingCopies.discard(parsed.projectKey, pending.chapterNumber);
-    }
-    this.draftAdoptions.delete(parsed.revisionToken);
-    return ChapterDraftAdoptionResultSchema.parse({ outcome: 'adopted' });
   }
 
   async selectDirection(
@@ -761,14 +825,73 @@ export class ProjectChapterService implements ChapterApplicationService {
   }
 
   private issueDraftAdoptionToken(input: PendingDraftAdoption): string {
+    this.purgeDraftAdoptions(input.issuedAtMs);
+    this.revokeDraftAdoptions(input.projectKey, input.chapterNumber);
+    while (this.draftAdoptions.size >= MAX_DRAFT_ADOPTION_TOKENS) {
+      const oldest = [...this.draftAdoptions.entries()]
+        .sort((left, right) => left[1].issuedAtMs - right[1].issuedAtMs)[0];
+      if (oldest === undefined) break;
+      this.retireDraftAdoption(oldest[0]);
+    }
     for (let attempt = 0; attempt < 10; attempt += 1) {
-      const token = `chapter_revision_${Buffer.from(this.randomBytes(24)).toString('hex')}`;
-      if (!this.draftAdoptions.has(token)) {
+      const bytes = this.randomBytes(24);
+      if (bytes.byteLength !== 24) {
+        throw draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
+      }
+      const token = `chapter_revision_${Buffer.from(bytes).toString('hex')}`;
+      if (!this.draftAdoptions.has(token) && !this.retiredDraftAdoptions.has(token)) {
         this.draftAdoptions.set(token, input);
         return token;
       }
     }
-    throw new Error('Unable to allocate a draft adoption token.');
+    throw draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
+  }
+
+  private purgeDraftAdoptions(now = this.clock().getTime()): void {
+    for (const [token, pending] of this.draftAdoptions) {
+      if (now - pending.issuedAtMs >= DRAFT_ADOPTION_TOKEN_TTL_MS) {
+        this.retireDraftAdoption(token);
+      }
+    }
+  }
+
+  private revokeDraftAdoptions(projectKey: string, chapterNumber: number): void {
+    for (const [token, pending] of this.draftAdoptions) {
+      if (
+        pending.projectKey === projectKey
+        && pending.chapterNumber === chapterNumber
+      ) {
+        this.retireDraftAdoption(token);
+      }
+    }
+  }
+
+  private retireDraftAdoption(token: string): void {
+    this.draftAdoptions.delete(token);
+    if (this.retiredDraftAdoptions.has(token)) return;
+    this.retiredDraftAdoptions.add(token);
+    this.retiredDraftAdoptionOrder.push(token);
+    while (this.retiredDraftAdoptionOrder.length > MAX_RETIRED_DRAFT_TOKENS) {
+      const expired = this.retiredDraftAdoptionOrder.shift();
+      if (expired !== undefined) this.retiredDraftAdoptions.delete(expired);
+    }
+  }
+
+  private async withDraftOperation<T>(
+    projectKey: string,
+    operation: () => Promise<T>
+  ): Promise<T> {
+    const previous = this.draftOperations.get(projectKey) ?? Promise.resolve();
+    const current = previous.catch(() => undefined).then(operation);
+    const tail = current.then(() => undefined, () => undefined);
+    this.draftOperations.set(projectKey, tail);
+    try {
+      return await current;
+    } finally {
+      if (this.draftOperations.get(projectKey) === tail) {
+        this.draftOperations.delete(projectKey);
+      }
+    }
   }
 
   private async withAuthoringOperation(
@@ -1882,6 +2005,35 @@ function errorName(error: unknown): string {
     if (typeof name === 'string') return name;
   }
   return '';
+}
+
+type DraftBoundaryErrorCode =
+  | 'DRAFT_ADOPTION_STALE'
+  | 'DRAFT_ADOPTION_UNAVAILABLE'
+  | 'DRAFT_WORKING_COPY_UNAVAILABLE';
+
+function draftBoundaryError(code: DraftBoundaryErrorCode): Error & { code: string } {
+  const message = code === 'DRAFT_ADOPTION_STALE'
+    ? 'This edit is no longer current. Review the latest draft before adopting it.'
+    : code === 'DRAFT_ADOPTION_UNAVAILABLE'
+      ? 'This edit could not be adopted. The official story state was not changed.'
+      : 'The local editing draft is temporarily unavailable.';
+  return Object.assign(new Error(message), { code });
+}
+
+function mapDraftBoundaryError(error: unknown): Error & { code: string } {
+  const code = errorCode(error);
+  if (
+    code === 'DRAFT_ADOPTION_STALE'
+    || code === 'DESKTOP_CHAPTER_EDIT_STALE'
+    || code === 'AUTHOR_REVISION_SOURCE_STALE'
+  ) {
+    return draftBoundaryError('DRAFT_ADOPTION_STALE');
+  }
+  if (code === 'DRAFT_ADOPTION_UNAVAILABLE') {
+    return draftBoundaryError('DRAFT_ADOPTION_UNAVAILABLE');
+  }
+  return draftBoundaryError('DRAFT_WORKING_COPY_UNAVAILABLE');
 }
 
 function sha256(value: string): string {

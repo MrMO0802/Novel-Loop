@@ -499,7 +499,7 @@ export const ChapterDraftReviewResultSchema = z.discriminatedUnion('available', 
     chapterNumber: z.number().int().positive(),
     title: boundedText(240),
     markdown: markdownSchema(),
-    versionKind: z.enum(['generated', 'author_adopted']).optional(),
+    versionKind: z.enum(['generated', 'author_adopted']),
     scenes: z.array(ChapterSceneReviewSchema).max(MAX_SCENES)
   }).strict().superRefine(enforceReviewPayloadLimit)
 ]);

@@ -9,12 +9,17 @@ import { initProject } from '../../src/app/initProject.js';
 import { planGlobal } from '../../src/app/planGlobal.js';
 import { runChapterUntilDraft } from '../../src/app/chapterDrafting.js';
 import { runChapterDryRun } from '../../src/app/chapterPlanning.js';
+import { adoptAuthorRevision, createAuthorRevision } from '../../src/app/chapterAuthorRevision.js';
 import {
   adoptDesktopChapterDraft,
   readDesktopChapterDraft
 } from '../../src/desktop/index.js';
 import { FileStore } from '../../src/storage/FileStore.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
+import {
+  AuthorEditInvalidationReportSchema,
+  AuthorRevisionRecordSchema
+} from '../../src/schemas/index.js';
 
 const projectId = 'demo-novel';
 const promptRoot = path.resolve('prompts');
@@ -43,6 +48,7 @@ describe('desktop draft adoption', () => {
     const store = new FileStore();
     const generatedBefore = await readFile(paths.chapterArtifact(1, 'draft_v1.md'));
     const stateBefore = await readFile(paths.storyState());
+    const queueBefore = await readFile(paths.chapterQueue());
     const current = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
     if (!current.available) throw new Error('Expected a generated draft.');
 
@@ -54,12 +60,129 @@ describe('desktop draft adoption', () => {
 
     expect(await readFile(paths.chapterArtifact(1, 'draft_v1.md'))).toEqual(generatedBefore);
     expect(await readFile(paths.storyState())).toEqual(stateBefore);
-    await expect(store.readText(paths.chapterQueue())).resolves.toContain('draft_assembly');
+    expect(await readFile(paths.chapterQueue())).toEqual(queueBefore);
     await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
       available: true,
       versionKind: 'author_adopted',
       markdown: expect.stringContaining('作者采用的结尾。')
     });
     await expect(store.exists(paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v1.md'))).resolves.toBe(true);
+    const reportPath = paths.chapterArtifact(
+      1,
+      'author_revisions',
+      'edit_invalidation_report_v1.json'
+    );
+    await expect(store.readJson(reportPath, AuthorEditInvalidationReportSchema))
+      .resolves.toMatchObject({
+        editedNode: 'draft',
+        invalidatedNodes: ['future_diagnostics'],
+        queueBefore: { status: 'draft_ready', stage: 'draft_assembly' },
+        queueAfter: { status: 'draft_ready', stage: 'draft_assembly' },
+        storyStateMutated: false
+      });
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v1.json'),
+      AuthorRevisionRecordSchema
+    )).resolves.toMatchObject({
+      invalidationReportPath: 'chapters/chapter_001/author_revisions/edit_invalidation_report_v1.json'
+    });
+    await expect(store.exists(paths.chapterArtifact(1, 'diagnostics_v1.json')))
+      .resolves.toBe(false);
+  }, 30_000);
+
+  test('rolls back the older adopted revision when the second adoption record write fails', async () => {
+    const store = new FileStore();
+    const initial = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!initial.available) throw new Error('Expected a generated draft.');
+    await adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${initial.markdown}\n\n第一版。\n`,
+      expectedSourceHash: initial.sourceHash
+    }, store);
+    const active = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!active.available) throw new Error('Expected an adopted draft.');
+    const second = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'draft',
+      mode: 'direct_edit',
+      sourceArtifactPath: 'chapters/chapter_001/author_revisions/draft_revision_v1.md',
+      sourceCandidateId: null,
+      expectedSourceHash: active.sourceHash,
+      content: `${active.markdown}\n\n第二版。\n`,
+      authorInstruction: null
+    }, store);
+    const writeJson = store.writeJson.bind(store);
+    let failed = false;
+    store.writeJson = async (filePath, value, schema) => {
+      if (!failed && filePath.endsWith('draft_revision_v2.json')) {
+        failed = true;
+        await writeJson(filePath, value, schema);
+        throw new Error('forced post-write target failure');
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: active.sourceHash
+    }, store)).rejects.toThrow('forced post-write target failure');
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot })).resolves.toMatchObject({
+      versionKind: 'author_adopted',
+      markdown: expect.stringContaining('第一版。')
+    });
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v1.json'),
+      AuthorRevisionRecordSchema
+    )).resolves.toMatchObject({ state: 'adopted' });
+    await expect(store.readJson(
+      paths.chapterArtifact(1, 'author_revisions', 'draft_revision_v2.json'),
+      AuthorRevisionRecordSchema
+    )).resolves.toMatchObject({ state: 'ready', adoptedAt: null });
+  }, 30_000);
+
+  test('keeps the older adopted revision active when superseding it fails', async () => {
+    const store = new FileStore();
+    const initial = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!initial.available) throw new Error('Expected a generated draft.');
+    await adoptDesktopChapterDraft({
+      projectRoot: paths.projectRoot,
+      markdown: `${initial.markdown}\n\n第一版。\n`,
+      expectedSourceHash: initial.sourceHash
+    }, store);
+    const active = await readDesktopChapterDraft({ projectRoot: paths.projectRoot });
+    if (!active.available) throw new Error('Expected an adopted draft.');
+    const second = await createAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      artifactKind: 'draft',
+      mode: 'direct_edit',
+      sourceArtifactPath: 'chapters/chapter_001/author_revisions/draft_revision_v1.md',
+      sourceCandidateId: null,
+      expectedSourceHash: active.sourceHash,
+      content: `${active.markdown}\n\n第二版。\n`,
+      authorInstruction: null
+    }, store);
+    const writeJson = store.writeJson.bind(store);
+    store.writeJson = async (filePath, value, schema) => {
+      if (filePath.endsWith('draft_revision_v1.json')) {
+        throw new Error('forced supersede failure');
+      }
+      return writeJson(filePath, value, schema);
+    };
+
+    await expect(adoptAuthorRevision({
+      projectRoot: paths.projectRoot,
+      chapterNumber: 1,
+      revisionId: second.record.revisionId,
+      expectedSourceHash: active.sourceHash
+    }, store)).rejects.toThrow('forced supersede failure');
+    await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
+      .resolves.toMatchObject({
+        versionKind: 'author_adopted',
+        markdown: expect.stringContaining('第一版。')
+      });
   }, 30_000);
 });

@@ -1,4 +1,4 @@
-import { lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test } from 'vitest';
@@ -107,6 +107,79 @@ describe('DraftWorkingCopyStore', () => {
       markdown: original,
       recoveryAvailable: true
     });
+  });
+
+  test('serializes inverse replacement completion so the newest save wins', async () => {
+    const root = await makeRoot();
+    let firstStarted!: () => void;
+    const replacementStarted = new Promise<void>((resolve) => { firstStarted = resolve; });
+    let releaseFirst!: () => void;
+    const firstReplacement = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    let replacements = 0;
+    const store = new DraftWorkingCopyStore(root, {
+      replace: async (temporary, target) => {
+        replacements += 1;
+        if (replacements === 1) {
+          firstStarted();
+          await firstReplacement;
+        }
+        await import('node:fs/promises').then(({ rename }) => rename(temporary, target));
+      }
+    });
+    const first = store.save({
+      projectKey, chapterNumber: 1, sourceHash, markdown: '# 第一章\n\nA\n', savedAt: '2026-08-04T01:00:00.000Z'
+    });
+    const second = store.save({
+      projectKey, chapterNumber: 1, sourceHash, markdown: '# 第一章\n\nB\n', savedAt: '2026-08-04T01:00:01.000Z'
+    });
+
+    await replacementStarted;
+    releaseFirst();
+    await Promise.all([first, second]);
+    await expect(store.read(projectKey, 1, sourceHash)).resolves.toMatchObject({ markdown: '# 第一章\n\nB\n' });
+  });
+
+  test('quarantines oversized and symlinked working-copy files without following them', async () => {
+    const root = await makeRoot();
+    const store = new DraftWorkingCopyStore(root);
+    const directory = path.join(root, 'working-copies', projectKey, 'chapter_001');
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(path.join(directory, 'draft.json'), 'x'.repeat(2 * 1024 * 1024 + 16 * 1024 + 1));
+    await expect(store.read(projectKey, 1)).resolves.toMatchObject({ recoveryAvailable: false });
+
+    const outside = path.join(root, 'outside.json');
+    await writeFile(outside, JSON.stringify({
+      schemaVersion: '1.0', projectKey, chapterNumber: 1, sourceHash,
+      markdown: '# 外部草稿\n', savedAt: '2026-08-04T01:00:00.000Z'
+    }));
+    await rm(path.join(directory, 'draft.json'), { force: true });
+    await symlink(outside, path.join(directory, 'draft.json'));
+    await expect(store.read(projectKey, 1)).resolves.toMatchObject({ recoveryAvailable: false });
+    expect(await readFile(outside, 'utf8')).toContain('外部草稿');
+  });
+
+  test('rejects a symlinked working-copy directory before reading or writing outside user data', async () => {
+    const root = await makeRoot();
+    const outside = await makeRoot();
+    const workingCopiesRoot = path.join(root, 'working-copies');
+    await mkdir(workingCopiesRoot, { mode: 0o700 });
+    await symlink(outside, path.join(workingCopiesRoot, projectKey));
+    const outsideChapter = path.join(outside, 'chapter_001');
+    await mkdir(outsideChapter, { mode: 0o700 });
+    const outsideDraft = path.join(outsideChapter, 'draft.json');
+    await writeFile(outsideDraft, 'outside remains unchanged', 'utf8');
+    const store = new DraftWorkingCopyStore(root);
+
+    await expect(store.read(projectKey, 1, sourceHash))
+      .rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+    await expect(store.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: '# 第一章\n\n不得写到外部。\n',
+      savedAt: '2026-08-04T01:00:00.000Z'
+    })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+    expect(await readFile(outsideDraft, 'utf8')).toBe('outside remains unchanged');
   });
 });
 

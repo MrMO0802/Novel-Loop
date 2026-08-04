@@ -215,6 +215,7 @@ export const completeChapterDraft: ChapterDraftReviewResult = {
   available: true,
   chapterNumber: 1,
   title: '凌晨三点十七分',
+  versionKind: 'generated',
   markdown: [
     '# 第 1 章 凌晨三点十七分',
     '',

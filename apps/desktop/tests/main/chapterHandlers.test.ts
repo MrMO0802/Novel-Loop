@@ -300,6 +300,37 @@ const cases = [
 ] as const;
 
 describe('chapter workspace IPC handlers', () => {
+  test.each([
+    [IPC_CHANNELS.chapterReadDraftWorkingCopy, 'readDraftWorkingCopy', { projectKey: task.projectKey }],
+    [IPC_CHANNELS.chapterSaveDraftWorkingCopy, 'saveDraftWorkingCopy', {
+      projectKey: task.projectKey,
+      markdown: '# Draft\n\nEdited text.\n'
+    }],
+    [IPC_CHANNELS.chapterDiscardDraftWorkingCopy, 'discardDraftWorkingCopy', { projectKey: task.projectKey }],
+    [IPC_CHANNELS.chapterAdoptDraftRevision, 'adoptDraftRevision', {
+      projectKey: task.projectKey,
+      revisionToken: `chapter_revision_${'4'.repeat(48)}`,
+      confirmAdoption: true
+    }]
+  ] as const)('redacts filesystem details from %s failures', async (
+    channel,
+    serviceMethod,
+    request
+  ) => {
+    const service = createService();
+    const privatePath = '/home/author/.config/Novel Loop/working-copies/private/draft.json';
+    service[serviceMethod] = vi.fn(async () => {
+      throw new Error(`EACCES: permission denied, open '${privatePath}'`);
+    }) as never;
+    const { handlerFor } = register(service);
+
+    const failure = await handlerFor(channel)(trustedEvent, request)
+      .catch((error: unknown) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect((failure as Error).message).not.toContain(privatePath);
+    expect((failure as Error).message).not.toContain('EACCES');
+  });
+
   test('registers each fixed chapter channel exactly once', () => {
     const { registrations } = register(createService());
 

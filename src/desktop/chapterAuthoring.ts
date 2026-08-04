@@ -184,6 +184,7 @@ export interface DesktopDraftAdoptionResult {
   chapterNumber: number;
   revisionId: string;
   versionKind: 'author_adopted';
+  invalidationReportPath: string;
   storyStateMutated: false;
 }
 
@@ -299,6 +300,12 @@ export async function adoptDesktopChapterDraft(
     operation: 'desktop-draft-author-adoption',
     allowStoryStateWrite: false
   }, async () => {
+    const snapshot = await readChapterAuthoringSnapshot(
+      projectRoot,
+      current.chapterNumber,
+      store
+    );
+    assertUncommitted(snapshot);
     const latestAdopted = await readLatestAdoptedDraft({
       projectRoot,
       chapterNumber: current.chapterNumber
@@ -315,16 +322,61 @@ export async function adoptDesktopChapterDraft(
       content: input.markdown,
       authorInstruction: null
     }, store);
-    await adoptAuthorRevision({
-      projectRoot,
+    const reportVersion = await nextArtifactVersion(
+      snapshot.paths,
+      store,
+      current.chapterNumber,
+      INVALIDATION_REPORT_PATTERN
+    );
+    const reportPath = snapshot.paths.chapterArtifact(
+      current.chapterNumber,
+      'author_revisions',
+      `edit_invalidation_report_v${reportVersion}.json`
+    );
+    const relativeReportPath = projectRelative(projectRoot, reportPath);
+    const report = AuthorEditInvalidationReportSchema.parse({
+      schemaVersion: '1.0',
+      reportId: `edit_invalidation_ch${padChapter(current.chapterNumber)}_v${reportVersion}`,
+      projectId: snapshot.paths.projectId,
       chapterNumber: current.chapterNumber,
       revisionId: created.record.revisionId,
-      expectedSourceHash: current.sourceHash
-    }, store);
+      editedNode: 'draft',
+      invalidatedNodes: ['future_diagnostics'],
+      retainedArtifacts: [{
+        node: 'draft',
+        path: created.relativeMarkdownPath
+      }],
+      archivedArtifacts: [],
+      missingArtifactPaths: [],
+      queueBefore: queueSnapshot(snapshot.queueItem),
+      queueAfter: queueSnapshot(snapshot.queueItem),
+      reason: '作者采用了新的章节正文，后续诊断必须基于该版本重新运行。',
+      nextStep: '保留当前章节规划，并在后续阶段重新运行章节诊断。',
+      generatedAt: new Date().toISOString(),
+      storyStateMutated: false
+    });
+    try {
+      await store.writeJson(
+        reportPath,
+        report,
+        AuthorEditInvalidationReportSchema
+      );
+      await adoptAuthorRevision({
+        projectRoot,
+        chapterNumber: current.chapterNumber,
+        revisionId: created.record.revisionId,
+        expectedSourceHash: current.sourceHash,
+        invalidationReportPath: relativeReportPath
+      }, store);
+    } catch (error) {
+      await store.removePath(reportPath).catch(() => undefined);
+      throw error;
+    }
     return {
       chapterNumber: current.chapterNumber,
       revisionId: created.record.revisionId,
       versionKind: 'author_adopted',
+      invalidationReportPath: relativeReportPath,
       storyStateMutated: false
     };
   });

@@ -5,6 +5,7 @@ import path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 
 import { ChapterReviewTokenStore } from '../../src/main/chapter/ChapterReviewTokenStore';
+import { DraftWorkingCopyStore } from '../../src/main/chapter/DraftWorkingCopyStore';
 
 import type {
   ChapterDraftReviewResult,
@@ -107,6 +108,7 @@ const draftReview: Extract<ChapterDraftReviewResult, { available: true }> = {
   chapterNumber: 1,
   title: 'The Radio Wakes',
   markdown: '# The Radio Wakes\n\nThe radio clicked once.\n',
+  versionKind: 'generated',
   scenes: [{ summary: 'The radio names the old building.' }]
 };
 
@@ -163,6 +165,11 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   readonly missionRevisions: unknown[] = [];
   readonly planRevisions: unknown[] = [];
   readonly adoptions: unknown[] = [];
+  readonly draftAdoptions: Array<{
+    projectRoot: string;
+    markdown: string;
+    expectedSourceHash: string;
+  }> = [];
   readonly adjustments: DeferredAdjustment[] = [];
   readonly discardedAdjustments: unknown[] = [];
   readonly boundAdjustmentPublications: unknown[] = [];
@@ -191,6 +198,9 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   planReviewError: unknown;
   draftReviewError: unknown;
   authoringError: unknown;
+  draftAdoptionError: unknown;
+  draftAdoptionBarrier: Promise<void> | null = null;
+  draftAdoptionCalls = 0;
 
   constructor() {
     this.inspections.set(projectRoot, availableInspection('not_started'));
@@ -232,6 +242,33 @@ class DeferredChapterGateway implements ChapterEngineGateway {
   async readDraft(root: string): Promise<ChapterDraftReviewResult> {
     if (this.draftReviewError !== undefined) throw this.draftReviewError;
     return this.draftReviews.get(root) ?? { available: false, reason: 'not_ready' };
+  }
+
+  async readDraftWithSource(root: string): Promise<{
+    review: ChapterDraftReviewResult;
+    sourceHash: string | null;
+  }> {
+    const review = await this.readDraft(root);
+    return {
+      review,
+      sourceHash: review.available ? sha256(review.markdown) : null
+    };
+  }
+
+  async adoptDraft(input: {
+    projectRoot: string;
+    markdown: string;
+    expectedSourceHash: string;
+  }): Promise<void> {
+    this.draftAdoptionCalls += 1;
+    await this.draftAdoptionBarrier;
+    if (this.draftAdoptionError !== undefined) throw this.draftAdoptionError;
+    this.draftAdoptions.push(input);
+    this.draftReviews.set(input.projectRoot, {
+      ...draftReview,
+      markdown: input.markdown,
+      versionKind: 'author_adopted'
+    });
   }
 
   async selectDirection(input: unknown): Promise<void> {
@@ -451,6 +488,184 @@ class DeferredChapterGateway implements ChapterEngineGateway {
 }
 
 describe('ProjectChapterService', () => {
+  test('revokes an older draft token when a newer working copy is saved', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-token-'));
+    try {
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot);
+      const { gateway, service } = createService({ workingCopies });
+      gateway.draftReviews.set(projectRoot, draftReview);
+
+      const first = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nAuthor version A.\n'
+      });
+      const second = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nAuthor version B.\n'
+      });
+
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: first.revisionToken,
+        confirmAdoption: true
+      })).rejects.toMatchObject({ code: 'DRAFT_ADOPTION_STALE' });
+      expect(gateway.draftAdoptions).toHaveLength(0);
+
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: second.revisionToken,
+        confirmAdoption: true
+      })).resolves.toEqual({ outcome: 'adopted' });
+      expect(gateway.draftAdoptions[0]?.markdown).toContain('version B');
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('rejects adoption when the exact current working-copy content changed', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-generation-'));
+    try {
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot);
+      const { gateway, service } = createService({ workingCopies });
+      gateway.draftReviews.set(projectRoot, draftReview);
+      const saved = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nToken-bound content.\n'
+      });
+      await workingCopies.save({
+        projectKey,
+        chapterNumber: 1,
+        sourceHash: sha256(draftReview.markdown),
+        markdown: '# The Radio Wakes\n\nExternally replaced content.\n',
+        savedAt: '2026-08-04T02:00:00.000Z'
+      });
+
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmAdoption: true
+      })).rejects.toMatchObject({ code: 'DRAFT_ADOPTION_STALE' });
+      expect(gateway.draftAdoptions).toHaveLength(0);
+      await expect(workingCopies.read(
+        projectKey,
+        1,
+        sha256(draftReview.markdown)
+      )).resolves.toMatchObject({
+        recoveryAvailable: true,
+        markdown: expect.stringContaining('Externally replaced')
+      });
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('serializes draft adoption and discard without deleting a later save', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-race-'));
+    try {
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot);
+      const { gateway, service } = createService({ workingCopies });
+      gateway.draftReviews.set(projectRoot, draftReview);
+      const saved = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nAdopt this content.\n'
+      });
+      let releaseAdoption!: () => void;
+      gateway.draftAdoptionBarrier = new Promise<void>((resolve) => {
+        releaseAdoption = resolve;
+      });
+
+      const adoption = service.adoptDraftRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmAdoption: true
+      });
+      await eventually(() => expect(gateway.draftAdoptionCalls).toBe(1));
+      const discard = service.discardDraftWorkingCopy({ projectKey });
+      const laterSave = service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nLater content.\n'
+      });
+      releaseAdoption();
+
+      await expect(adoption).resolves.toEqual({ outcome: 'adopted' });
+      await expect(discard).resolves.toEqual({ discarded: true });
+      const later = await laterSave;
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: later.revisionToken,
+        confirmAdoption: true
+      })).resolves.toEqual({ outcome: 'adopted' });
+      expect(gateway.draftAdoptions.at(-1)?.markdown).toContain('Later content');
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('redacts absolute user-data paths from draft storage failures', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-redaction-'));
+    try {
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot, {
+        replace: async () => {
+          throw new Error(`rename failed at ${path.join(userDataRoot, 'working-copies', 'secret')}`);
+        }
+      });
+      const { gateway, service } = createService({ workingCopies });
+      gateway.draftReviews.set(projectRoot, draftReview);
+
+      const failure = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nWill fail.\n'
+      }).catch((error: unknown) => error);
+
+      expect(failure).toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+      expect(failure).toBeInstanceOf(Error);
+      expect((failure as Error).message).not.toContain(userDataRoot);
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('expires draft adoption tokens after thirty minutes without deleting recovery content', async () => {
+    const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-expiry-'));
+    try {
+      let now = Date.parse('2026-08-04T01:00:00.000Z');
+      let sequence = 0;
+      const gateway = new DeferredChapterGateway();
+      gateway.draftReviews.set(projectRoot, draftReview);
+      const workingCopies = new DraftWorkingCopyStore(userDataRoot);
+      const service = new ProjectChapterService({
+        gateway,
+        projects: new MemoryProjectResolver(),
+        workingCopies,
+        clock: () => new Date(now),
+        randomBytes: (size) => {
+          const bytes = new Uint8Array(size);
+          new DataView(bytes.buffer).setUint32(0, ++sequence);
+          return bytes;
+        }
+      });
+      const saved = await service.saveDraftWorkingCopy({
+        projectKey,
+        markdown: '# The Radio Wakes\n\nRecoverable after expiry.\n'
+      });
+      now += 30 * 60 * 1_000;
+
+      await expect(service.adoptDraftRevision({
+        projectKey,
+        revisionToken: saved.revisionToken,
+        confirmAdoption: true
+      })).rejects.toMatchObject({ code: 'DRAFT_ADOPTION_STALE' });
+      await expect(workingCopies.read(
+        projectKey,
+        1,
+        sha256(draftReview.markdown)
+      )).resolves.toMatchObject({ recoveryAvailable: true });
+      expect(gateway.draftAdoptions).toHaveLength(0);
+    } finally {
+      await rm(userDataRoot, { recursive: true, force: true });
+    }
+  });
+
   test('returns the same active task for repeated starts of the same kind', async () => {
     const { gateway, service } = createService();
 
@@ -2252,6 +2467,7 @@ function createService(overrides: {
   gateway?: DeferredChapterGateway;
   resolver?: MemoryProjectResolver;
   tokenStore?: ChapterReviewTokenStore;
+  workingCopies?: DraftWorkingCopyStore;
 } = {}) {
   const gateway = overrides.gateway ?? new DeferredChapterGateway();
   const resolver = overrides.resolver ?? new MemoryProjectResolver();
@@ -2260,6 +2476,9 @@ function createService(overrides: {
     gateway,
     projects: resolver,
     tokenStore: overrides.tokenStore ?? createTokenStore().store,
+    ...(overrides.workingCopies === undefined
+      ? {}
+      : { workingCopies: overrides.workingCopies }),
     clock: () => new Date(Date.UTC(2026, 6, 30, 1, 0, tick++)),
     randomBytes: (size) => new Uint8Array(size).fill(tick % 255)
   });

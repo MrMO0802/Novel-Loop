@@ -491,6 +491,7 @@ describe('chapter planning generation', () => {
       chapterNumber: 1,
       title: '凌晨三点十七分',
       markdown: '# 第 1 章 凌晨三点十七分\n\n正文',
+      versionKind: 'generated',
       scenes: [{ summary: '发现异常报告。' }]
     });
     api.chapter.startDrafting.mockResolvedValue(chapterTask({

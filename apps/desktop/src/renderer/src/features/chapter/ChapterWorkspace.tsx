@@ -133,9 +133,13 @@ export function ChapterWorkspace({
             {workingCopy && (
               <ChapterDraftEditor
                 draft={availableDraft}
-                onAdopted={() => {
-                  void window.novelLoop.chapter.readDraft({ projectKey: project.projectKey })
-                    .then((result) => setDraft(result));
+                onAdopted={async () => {
+                  const [draftResult, copyResult] = await Promise.all([
+                    window.novelLoop.chapter.readDraft({ projectKey: project.projectKey }),
+                    window.novelLoop.chapter.readDraftWorkingCopy({ projectKey: project.projectKey })
+                  ]);
+                  setDraft(draftResult);
+                  setWorkingCopy(copyResult);
                 }}
                 projectKey={project.projectKey}
                 workingCopy={workingCopy}

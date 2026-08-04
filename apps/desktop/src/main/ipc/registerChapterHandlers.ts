@@ -124,33 +124,33 @@ export function registerChapterHandlers(
   registrar.handle(IPC_CHANNELS.chapterReadDraftWorkingCopy, async (event, request) => {
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterReadDraftWorkingCopyRequestSchema.parse(request);
-    return ChapterDraftWorkingCopyResultSchema.parse(
+    return safeDraftIpc(async () => ChapterDraftWorkingCopyResultSchema.parse(
       await service.readDraftWorkingCopy(parsedRequest)
-    );
+    ));
   });
 
   registrar.handle(IPC_CHANNELS.chapterSaveDraftWorkingCopy, async (event, request) => {
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterSaveDraftWorkingCopyRequestSchema.parse(request);
-    return ChapterDraftWorkingCopySaveResultSchema.parse(
+    return safeDraftIpc(async () => ChapterDraftWorkingCopySaveResultSchema.parse(
       await service.saveDraftWorkingCopy(parsedRequest)
-    );
+    ));
   });
 
   registrar.handle(IPC_CHANNELS.chapterDiscardDraftWorkingCopy, async (event, request) => {
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterDiscardDraftWorkingCopyRequestSchema.parse(request);
-    return ChapterDiscardDraftWorkingCopyResultSchema.parse(
+    return safeDraftIpc(async () => ChapterDiscardDraftWorkingCopyResultSchema.parse(
       await service.discardDraftWorkingCopy(parsedRequest)
-    );
+    ));
   });
 
   registrar.handle(IPC_CHANNELS.chapterAdoptDraftRevision, async (event, request) => {
     assertTrustedIpcSender(event.senderFrame.url, trustedRendererUrl);
     const parsedRequest = ChapterAdoptDraftRevisionRequestSchema.parse(request);
-    return ChapterDraftAdoptionResultSchema.parse(
+    return safeDraftIpc(async () => ChapterDraftAdoptionResultSchema.parse(
       await service.adoptDraftRevision(parsedRequest)
-    );
+    ));
   });
 
   registrar.handle(IPC_CHANNELS.chapterSelectDirection, async (event, request) => {
@@ -192,4 +192,15 @@ export function registerChapterHandlers(
       await service.adoptRevision(parsedRequest)
     );
   });
+}
+
+async function safeDraftIpc<T>(operation: () => Promise<T>): Promise<T> {
+  try {
+    return await operation();
+  } catch {
+    throw Object.assign(
+      new Error('The local chapter draft operation could not be completed.'),
+      { code: 'CHAPTER_DRAFT_OPERATION_FAILED' }
+    );
+  }
 }

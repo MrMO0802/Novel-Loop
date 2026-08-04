@@ -331,19 +331,6 @@ export async function adoptAuthorRevision(
     await readVerifiedSourceArtifact(projectRoot, store, sourceRecord);
     await readVerifiedWorkingCopy(projectRoot, store, target.record);
 
-    for (const entry of revisions) {
-      if (
-        entry.record.revisionId !== target.record.revisionId
-        && entry.record.artifactKind === target.record.artifactKind
-        && entry.record.state === 'adopted'
-      ) {
-        await store.writeJson(entry.absoluteRecordPath, {
-          ...entry.record,
-          state: 'superseded'
-        }, AuthorRevisionRecordSchema);
-      }
-    }
-
     if (target.record.state === 'adopted') return target.record;
     const adopted = AuthorRevisionRecordSchema.parse({
       ...sourceRecord,
@@ -352,7 +339,49 @@ export async function adoptAuthorRevision(
       invalidationReportPath: input.invalidationReportPath
         ?? target.record.invalidationReportPath
     });
-    await store.writeJson(target.absoluteRecordPath, adopted, AuthorRevisionRecordSchema);
+    const written: RevisionEntry[] = [];
+    try {
+      for (const entry of revisions) {
+        if (
+          entry.record.revisionId !== target.record.revisionId
+          && entry.record.artifactKind === target.record.artifactKind
+          && entry.record.state === 'adopted'
+        ) {
+          await store.writeJson(entry.absoluteRecordPath, {
+            ...entry.record,
+            state: 'superseded'
+          }, AuthorRevisionRecordSchema);
+          written.push(entry);
+        }
+      }
+      await store.writeJson(target.absoluteRecordPath, adopted, AuthorRevisionRecordSchema);
+    } catch (error) {
+      let rollbackFailed = false;
+      await store.writeJson(
+        target.absoluteRecordPath,
+        target.record,
+        AuthorRevisionRecordSchema
+      ).catch(() => {
+        rollbackFailed = true;
+      });
+      for (const entry of written.reverse()) {
+        await store.writeJson(
+          entry.absoluteRecordPath,
+          entry.record,
+          AuthorRevisionRecordSchema
+        ).catch(() => {
+          rollbackFailed = true;
+        });
+      }
+      if (rollbackFailed) {
+        throw new AppError(
+          'AUTHOR_REVISION_ROLLBACK_FAILED',
+          'Author revision adoption failed and its prior state could not be fully restored.',
+          2
+        );
+      }
+      throw error;
+    }
     return adopted;
   });
 }

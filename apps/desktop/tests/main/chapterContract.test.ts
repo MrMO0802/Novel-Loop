@@ -112,6 +112,7 @@ const validDraftReview = {
   chapterNumber: 1,
   title: 'The Radio Wakes',
   markdown: '# The Radio Wakes\n\nThe powerless radio clicked once.\n',
+  versionKind: 'generated',
   scenes: [
     { summary: 'Lin Cheng hears the radio.' },
     { summary: 'The signal names an address.' }
@@ -196,6 +197,13 @@ describe('chapter workspace contract', () => {
   test('parses valid plan and draft reviews', () => {
     expect(ChapterPlanReviewResultSchema.parse(validPlanReview)).toEqual(validPlanReview);
     expect(ChapterDraftReviewResultSchema.parse(validDraftReview)).toEqual(validDraftReview);
+  });
+
+  test('requires every available draft to identify its author-facing version kind', () => {
+    const { versionKind: _versionKind, ...missingVersionKind } = validDraftReview;
+
+    expect(ChapterDraftReviewResultSchema.safeParse(missingVersionKind).success)
+      .toBe(false);
   });
 
   test('accepts only opaque authoring request fields', () => {

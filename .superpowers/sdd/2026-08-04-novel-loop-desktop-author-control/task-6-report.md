@@ -2,33 +2,42 @@
 
 ## Status
 
-Fix round 2 is implemented on top of `30c8f895`. The renderer now presents
-token-bound narrative debts as canonical read-only story state, compares the
-exact mission content submitted through the Task 5 contract, uses
-artifact-specific revision language, and restores direct-adoption focus to the
-original mounted editor control.
+Fix round 3 is implemented on top of `a5470c7`. The renderer now resolves
+submitted character-change bindings to canonical author-facing participant
+labels in mission comparison, and asynchronous review loading can no longer
+steal focus from a participant-repair editor.
 
 ## RED
 
-The focused behavior command was run after adding the round-2 regression tests
-and before changing renderer implementation:
+The two focused renderer files were run after adding round-3 regressions and
+before changing renderer implementation:
 
 ```bash
 corepack pnpm --dir apps/desktop exec vitest run \
-  tests/renderer/chapterPlanReview.test.tsx
+  tests/renderer/chapterPlanReview.test.tsx \
+  tests/renderer/chapterParticipantRepair.test.tsx
 ```
 
-Result: 1 file failed, 5 tests failed, 18 tests passed, exit 1. The failures
-reproduced editable token-bound debt wording, a comparison based on unsent
-wording, generic mission/plan labels and confirmation copy, replacement-button
-focus after direct mission confirmation cancellation, and a recommendation
-badge missing from the radio's accessible description.
+Result: 2 files failed, 2 tests failed, 27 tests passed, exit 1.
 
-The existing authoring outcome table was also extended to cover
-`project_unavailable`; the fixture uses the public contract's `invalid`
-outcome and verifies that the raw key is never rendered.
+- The character-binding test proved that selecting a different participant
+  transmitted the correct opaque token while the comparison still omitted the
+  selected character name and role.
+- The deferred repair-read test reproduced the focus race: after the mission
+  editor received focus, the parent review effect ran again and moved focus to
+  `审阅第 1 章方向`.
 
 ## GREEN
+
+Focused round-3 renderer tests:
+
+```bash
+corepack pnpm --dir apps/desktop exec vitest run \
+  tests/renderer/chapterPlanReview.test.tsx \
+  tests/renderer/chapterParticipantRepair.test.tsx
+```
+
+Result: 2 files passed, 29 tests passed, exit 0.
 
 Exact required four-file renderer command:
 
@@ -40,15 +49,17 @@ corepack pnpm --dir apps/desktop exec vitest run \
   tests/renderer/chapterWorkspace.test.tsx
 ```
 
-Result: 4 files passed, 38 tests passed, exit 0.
+Result: 4 files passed, 40 tests passed, exit 0.
 
-Complete renderer regression:
+Complete renderer regression, run twice to detect focus flakiness:
 
 ```bash
 corepack pnpm --dir apps/desktop exec vitest run tests/renderer
+corepack pnpm --dir apps/desktop exec vitest run tests/renderer
 ```
 
-Result: 11 files passed, 142 tests passed, exit 0.
+Result: both runs passed independently; each run passed 11 files and 144
+tests, exit 0.
 
 Desktop type check:
 
@@ -60,50 +71,46 @@ Result: node, web, and end-to-end TypeScript checks passed, exit 0.
 
 ## Fix Behavior
 
-- Bound narrative debts render as canonical text with a Chinese explanation;
-  they have no editable or removable control. Only introduced debts expose
-  wording fields.
-- Mission save requests preserve every bound `itemToken` and send introduced
-  wording separately. The comparison resolves bound tokens back to canonical
-  review text and uses only the captured submitted draft for all other values.
-- Mission comparison uses `本章任务` and `修订后的任务`; its confirmation
-  explains the revised task rebuild and names `方案候选、方向排序、选定方案、场景规划、场景草稿、章节初稿`.
-- Plan comparison uses `当前方向` and `修订后的方向`, with plan-specific
-  confirmation copy and only `场景规划、场景草稿、章节初稿` invalidated.
-- Direct mission adoption keeps the editor mounted while confirmation is open.
-  Cancelling restores focus to the exact original `采用此版` trigger.
-- AI recommendation and active-state badges are associated with each radio via
-  its accessible description, independent of color.
-- `project_unavailable` maps to bounded Chinese recovery copy and never exposes
-  the internal message key.
+- Every submitted character-change `participantToken` is resolved through the
+  canonical participant option map before mission comparison is built.
+- Candidate character changes now render as
+  `姓名（角色）：原状态 → 新状态；所需证据`, allowing the author to verify
+  the material binding before adoption.
+- The regression changes the character selector, asserts the exact transmitted
+  opaque token, asserts the canonical candidate label, and confirms the token
+  itself is not rendered.
+- `ChapterPlanReview` now owns route-heading focus in a mount-only effect.
+  Review loading and refresh remain in their request effect without any parent
+  focus side effect, so a mounted `ChapterMissionEditor` retains focus.
+- The deferred repair regression forces the former effect-order race and
+  verifies that `编辑本章任务`, not the parent review heading, remains focused.
 
 ## Preserved Behavior
 
-- Saving remains pending and unadopted until the separate confirmation calls
-  `adoptRevision`.
-- Deferred-save generation guards, refresh reset/order handling, participant
-  fail-closed preflight, character-row validation, keyboard radio behavior,
-  mounted preview textareas, and sanitized direction titles remain covered.
-- Opaque tokens remain request-only values and are never displayed to authors.
+- Saving remains unadopted until explicit revision confirmation.
+- Mission comparison remains based on the exact submitted draft and canonical
+  token-bound story data.
+- Existing refresh ordering, participant fail-closed preflight, keyboard
+  behavior, live regions, Chinese copy, and internal-identifier protections
+  remain covered.
 
 ## Renderer Boundary
 
 - No main, preload, shared contract, engine, provider, `.playwright-mcp/`, or
   PNG file changed.
-- All new visible copy is Chinese and focus/live-region behavior remains
-  accessible.
+- The implementation is limited to two renderer components, two renderer test
+  files, and this report.
 
 ## Files
 
-- `apps/desktop/src/renderer/src/features/chapter/ChapterDirectionChooser.tsx`
 - `apps/desktop/src/renderer/src/features/chapter/ChapterMissionEditor.tsx`
-- `apps/desktop/src/renderer/src/features/chapter/ChapterRevisionCompare.tsx`
-- `apps/desktop/src/renderer/src/i18n/messages.zh-CN.ts`
-- `apps/desktop/src/renderer/src/styles/chapter.css`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterPlanReview.tsx`
+- `apps/desktop/tests/renderer/chapterParticipantRepair.test.tsx`
 - `apps/desktop/tests/renderer/chapterPlanReview.test.tsx`
 - `.superpowers/sdd/2026-08-04-novel-loop-desktop-author-control/task-6-report.md`
 
 ## Concerns
 
-None. The renderer now reflects the existing token-only bound-debt contract
-without implying that canonical wording can be edited.
+None. Character changes can only select canonical participant options, and an
+unexpected unresolved binding is represented with bounded Chinese copy rather
+than an opaque token.

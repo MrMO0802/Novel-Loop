@@ -3,15 +3,20 @@
 import '@testing-library/jest-dom/vitest';
 
 import {
+  act,
   cleanup,
   fireEvent,
   render,
   screen,
+  waitFor,
   within
 } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { App } from '../../src/renderer/src/App';
+import {
+  ChapterPlanReview
+} from '../../src/renderer/src/features/chapter/ChapterPlanReview';
 import type { ChapterPlanReviewResult } from '../../src/shared/chapterContract';
 import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import type { ProjectSummary } from '../../src/shared/projectContract';
@@ -19,6 +24,7 @@ import type { SystemReadiness } from '../../src/shared/systemContract';
 import {
   completeChapterPlan,
   createInertChapterApi,
+  deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
 
@@ -145,6 +151,37 @@ describe('chapter participant repair', () => {
       name: '编辑本章任务'
     })).toHaveFocus();
     expect(screen.getByRole('button', { name: '添加人物' })).toBeVisible();
+  });
+
+  test('keeps deferred participant repair focus in the mission editor', async () => {
+    const api = installApi(noParticipantsPlan);
+    const repairRead = deferred<ChapterPlanReviewResult>();
+    api.chapter.readPlan.mockReturnValueOnce(repairRead.promise);
+    const props = {
+      onBack: vi.fn(),
+      onGenerateDraft: vi.fn(),
+      project
+    };
+    const { rerender } = render(
+      <ChapterPlanReview initialEditor="mission" {...props} />
+    );
+
+    expect(screen.getByRole('heading', {
+      name: '审阅第 1 章方向'
+    })).toHaveFocus();
+    await act(async () => repairRead.resolve(noParticipantsPlan));
+    const editorHeading = await screen.findByRole('heading', {
+      name: '编辑本章任务'
+    });
+    expect(editorHeading).toHaveFocus();
+
+    rerender(<ChapterPlanReview {...props} />);
+    await waitFor(() => expect(api.chapter.readPlan).toHaveBeenCalledTimes(2));
+
+    expect(editorHeading).toHaveFocus();
+    expect(screen.getByRole('heading', {
+      name: '审阅第 1 章方向'
+    })).not.toHaveFocus();
   });
 
   test('offers participant repair when an authoring outcome reports the missing roster', async () => {

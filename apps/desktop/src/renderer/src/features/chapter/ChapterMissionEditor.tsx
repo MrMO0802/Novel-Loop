@@ -875,13 +875,21 @@ function missionDraftSummary({
     }),
     ...draft.debtsToIntroduce.map(({ promise }) => promise)
   ];
+  const characterDeltaLabels = draft.characterDeltas.map(({
+    participantToken,
+    from,
+    to,
+    evidenceRequired
+  }) => {
+    const participantLabel = participantByToken.get(participantToken)
+      ?? '人物信息无法确认';
+    return `${participantLabel}：${from} → ${to}；${evidenceRequired}`;
+  });
   const sections = [
     ['本章目的', [draft.chapterFunction]],
     ['必须完成', draft.requiredObjectives.map(({ text }) => text)],
     ['推进的悬念与承诺', narrativePromises],
-    ['人物变化', draft.characterDeltas.map(({ from, to, evidenceRequired }) => (
-      `${from} → ${to}；${evidenceRequired}`
-    ))],
+    ['人物变化', characterDeltaLabels],
     ['本章人物', participantLabels],
     ['读者会知道', draft.readerInformation.newKnowledge],
     ['读者会产生的猜测', draft.readerInformation.newSuspicions],

@@ -670,6 +670,58 @@ describe('chapter plan review', () => {
     }));
   });
 
+  test('shows the canonical character binding submitted with a mission change', async () => {
+    const api = installApi();
+    const alternateParticipantToken = `chapter_option_${'6'.repeat(48)}`;
+    api.chapter.readPlan.mockResolvedValue({
+      ...availablePlan,
+      mission: {
+        ...availablePlan.mission,
+        participantOptions: [
+          ...availablePlan.mission.participantOptions,
+          {
+            name: '周岚',
+            participantToken: alternateParticipantToken,
+            role: '事故目击者',
+            selected: true
+          }
+        ]
+      }
+    });
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    fireEvent.change(screen.getByRole('combobox', {
+      name: '人物变化 1 人物'
+    }), {
+      target: { value: '1' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+
+    await waitFor(() => expect(api.chapter.saveMissionWorkingCopy)
+      .toHaveBeenCalledWith(expect.objectContaining({
+        mission: expect.objectContaining({
+          characterDeltas: [{
+            evidenceRequired: '亲手记下报告消失前的最后一行',
+            from: '逃避妹妹失踪',
+            participantToken: alternateParticipantToken,
+            to: '主动追查循环'
+          }]
+        })
+      })));
+
+    fireEvent.click(screen.getByRole('button', { name: '对比修改' }));
+    const comparison = screen.getByRole('region', { name: '对比修改' });
+    const candidate = within(comparison).getByRole('region', {
+      name: '修订后的任务'
+    });
+    expect(candidate).toHaveTextContent(
+      '周岚（事故目击者）：逃避妹妹失踪 → 主动追查循环；亲手记下报告消失前的最后一行'
+    );
+    expect(document.body).not.toHaveTextContent(alternateParticipantToken);
+  });
+
   test('restores direct mission adoption cancel to the original editor trigger', async () => {
     const api = installApi();
     render(<App />);

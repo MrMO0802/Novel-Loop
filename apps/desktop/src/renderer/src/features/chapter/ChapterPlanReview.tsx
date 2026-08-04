@@ -97,6 +97,9 @@ export function ChapterPlanReview({
 
   useEffect(() => {
     headingRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
     void loadReview();
     return () => {
       requestToken.current += 1;

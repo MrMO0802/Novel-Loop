@@ -171,22 +171,23 @@ export async function withProjectChapterOperationLease<T>(
       chapter
     }, callback);
   } finally {
-    await retainAndReleaseProjectLease(projectRoot, lease);
+    await releaseManagedProjectOperationLease(projectRoot, lease);
   }
 }
 
-async function retainAndReleaseProjectLease(
+export async function releaseManagedProjectOperationLease(
   projectRoot: string,
   lease: ProjectOperationLease
 ): Promise<void> {
-  const retained = retainedProjectLeaseReleases.get(projectRoot);
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  const retained = retainedProjectLeaseReleases.get(resolvedProjectRoot);
   if (retained !== undefined && retained.lease !== lease) {
     throw new Error('Project lease recovery registry already retains another lease.');
   }
   if (retained === undefined) {
-    retainedProjectLeaseReleases.set(projectRoot, { lease, attempt: null });
+    retainedProjectLeaseReleases.set(resolvedProjectRoot, { lease, attempt: null });
   }
-  await recoverRetainedProjectLeaseRelease(projectRoot);
+  await recoverRetainedProjectLeaseRelease(resolvedProjectRoot);
 }
 
 async function recoverRetainedProjectLeaseRelease(projectRoot: string): Promise<void> {

@@ -160,7 +160,11 @@ import {
   PROJECT_OPERATION_LOCK_NAME,
   withProjectChapterOperationLease
 } from '../../src/app/projectOperationLease.js';
-import { createInitialStoryState } from '../../src/app/initProject.js';
+import { buildBible } from '../../src/app/buildBible.js';
+import {
+  createInitialStoryState,
+  initProjectFromBriefText
+} from '../../src/app/initProject.js';
 
 let root: string | undefined;
 
@@ -296,6 +300,102 @@ describe('project operation lease fault recovery', () => {
       }
     }
   );
+
+  test('retries a transient release failure through the real buildBible path', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-build-release-fault-'));
+    const fixture = await createBuildReleaseFixture(root, 'transient-build-release');
+    faults.canonicalPath = path.resolve(
+      fixture.projectRoot,
+      PROJECT_OPERATION_LOCK_NAME
+    );
+    faults.releaseRenameFailures = 1;
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+
+    try {
+      await expect(buildBible({
+        projectId: fixture.projectId,
+        projectsRoot: root,
+        provider: 'mock',
+        runId: 'run_transient_build_release'
+      })).resolves.toMatchObject({
+        projectId: fixture.projectId,
+        runId: 'run_transient_build_release'
+      });
+
+      expect(faults.releaseRenameFailures).toBe(0);
+      await expectProjectLeaseArtifactsClean(fixture.projectRoot);
+      expect(await readFile(fixture.statePath)).toEqual(fixture.storyStateBytes);
+      expect(await readFile(fixture.queuePath)).toEqual(fixture.queueBytes);
+      expectAllCreatedIntervalsCleared(intervalSpy, clearIntervalSpy);
+    } finally {
+      intervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
+  test('retains an exhausted buildBible release for a later same-process chapter operation', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-build-release-fault-'));
+    const fixture = await createBuildReleaseFixture(root, 'retained-build-release');
+    faults.canonicalPath = path.resolve(
+      fixture.projectRoot,
+      PROJECT_OPERATION_LOCK_NAME
+    );
+    faults.releaseRenameFailures = 32;
+
+    await expect(buildBible({
+      projectId: fixture.projectId,
+      projectsRoot: root,
+      provider: 'mock',
+      runId: 'run_retained_build_release'
+    })).rejects.toThrow('forced release rename failure');
+    expect((await lstat(faults.canonicalPath)).isFile()).toBe(true);
+
+    faults.releaseRenameFailures = 0;
+    await expect(runChapterLease(fixture.projectRoot, 'recovered-after-build'))
+      .resolves.toBe('recovered-after-build');
+
+    await expectProjectLeaseArtifactsClean(fixture.projectRoot);
+    expect(await readFile(fixture.statePath)).toEqual(fixture.storyStateBytes);
+    expect(await readFile(fixture.queuePath)).toEqual(fixture.queueBytes);
+  });
+
+  test('keeps persistent direct release failure explicit without starting a later callback', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-build-release-fault-'));
+    const fixture = await createBuildReleaseFixture(root, 'persistent-build-release');
+    faults.canonicalPath = path.resolve(
+      fixture.projectRoot,
+      PROJECT_OPERATION_LOCK_NAME
+    );
+    faults.releaseRenameFailures = 32;
+
+    await expect(buildBible({
+      projectId: fixture.projectId,
+      projectsRoot: root,
+      provider: 'mock',
+      runId: 'run_persistent_build_release'
+    })).rejects.toThrow('forced release rename failure');
+
+    let laterCallbackCount = 0;
+    await expect(withProjectChapterOperationLease({
+      projectRoot: fixture.projectRoot,
+      chapterNumber: 1,
+      operation: 'blocked-by-persistent-build-release',
+      allowStoryStateWrite: false
+    }, async () => {
+      laterCallbackCount += 1;
+      return 'must-not-run';
+    })).rejects.toThrow('forced release rename failure');
+    expect(laterCallbackCount).toBe(0);
+    expect((await lstat(faults.canonicalPath)).isFile()).toBe(true);
+    expect(await readFile(fixture.statePath)).toEqual(fixture.storyStateBytes);
+    expect(await readFile(fixture.queuePath)).toEqual(fixture.queueBytes);
+
+    faults.releaseRenameFailures = 0;
+    await expect(runChapterLease(fixture.projectRoot, 'recovered-after-persistent-fault'))
+      .resolves.toBe('recovered-after-persistent-fault');
+    await expectProjectLeaseArtifactsClean(fixture.projectRoot);
+  });
 
   test('retains an exhausted wrapper release so a later same-process operation can recover it', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-lease-fault-'));
@@ -448,6 +548,70 @@ async function createChapterOperationFixture(projectRoot: string): Promise<{
     writeFile(queuePath, queueBytes)
   ]);
   return { statePath, queuePath, storyStateBytes, queueBytes };
+}
+
+async function createBuildReleaseFixture(
+  projectsRoot: string,
+  projectId: string
+): Promise<{
+  projectId: string;
+  projectRoot: string;
+  statePath: string;
+  queuePath: string;
+  storyStateBytes: Buffer;
+  queueBytes: Buffer;
+}> {
+  await initProjectFromBriefText({
+    projectId,
+    projectsRoot,
+    brief: '# Managed build release\n\nA lease recovery fixture.\n'
+  });
+  const projectRoot = path.join(projectsRoot, projectId);
+  const statePath = path.join(projectRoot, 'state', 'story_state.json');
+  const queuePath = path.join(projectRoot, 'planning', 'chapter_queue.json');
+  const queueBytes = Buffer.from(`${JSON.stringify({
+    schemaVersion: '1.0',
+    projectId,
+    chapters: [{
+      chapterNumber: 1,
+      title: 'Managed build release',
+      status: 'draft_ready',
+      currentStage: 'draft_assembly'
+    }]
+  })}\n`, 'utf8');
+  await writeFile(queuePath, queueBytes);
+  return {
+    projectId,
+    projectRoot,
+    statePath,
+    queuePath,
+    storyStateBytes: await readFile(statePath),
+    queueBytes
+  };
+}
+
+async function expectProjectLeaseArtifactsClean(projectRoot: string): Promise<void> {
+  const lockPath = path.join(projectRoot, PROJECT_OPERATION_LOCK_NAME);
+  await expect(lstat(lockPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  await expect(lstat(`${lockPath}.transition-claim`))
+    .rejects.toMatchObject({ code: 'ENOENT' });
+  expect((await readdir(projectRoot)).filter((entry) => (
+    entry.includes('.released-')
+    || entry.includes('.transition-claim')
+  ))).toEqual([]);
+}
+
+function expectAllCreatedIntervalsCleared(
+  intervalSpy: ReturnType<typeof vi.spyOn>,
+  clearIntervalSpy: ReturnType<typeof vi.spyOn>
+): void {
+  const createdTimers = intervalSpy.mock.results
+    .filter((result) => result.type === 'return')
+    .map((result) => result.value);
+  expect(createdTimers.length).toBeGreaterThan(0);
+  for (const timer of createdTimers) {
+    expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+  }
 }
 
 async function runChapterLease(projectRoot: string, result: string): Promise<string> {

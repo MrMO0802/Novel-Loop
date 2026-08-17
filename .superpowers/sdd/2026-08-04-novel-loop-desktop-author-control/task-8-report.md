@@ -2,7 +2,7 @@
 
 ## Scope
 
-Completed Task 8 and reviewer fix rounds 1-7 for recoverable Chapter Draft
+Completed Task 8 and reviewer fix rounds 1-9 for recoverable Chapter Draft
 editing on `codex/novel-loop-desktop-prototype`.
 
 - Base implementation: `4763142de0844979bfcde85271271bd6a2ce0b46`
@@ -12,6 +12,8 @@ editing on `codex/novel-loop-desktop-prototype`.
 - Fix round 5 base: `b5ea893f8055c22f29272238216d0ce0cf8922f2`
 - Fix round 6 base: `fd1e379ea7678875117d5278204f523fcab027ae`
 - Fix round 7 base: `136e5499dc010d65922ac048950048f2301867d1`
+- Fix round 8 base: `01d3a8d651da5d8ecf456dfb42226afc3971baec`
+- Fix round 9 base: `ea5b391ccefbecf352d552743231343e83feeb7d`
 
 The implementation remains inside the approved desktop boundary: no Story
 State or chapter-queue mutation, no diagnostics/final/canon-patch/commit work,
@@ -368,6 +370,40 @@ it cannot bypass or expire a proven-live claim. The new fault cases then passed
 all `11` tests, including byte-identical Story State and chapter queue checks,
 terminal path cleanup, heartbeat cleanup, and a later same-process acquisition.
 
+## Round 9 TDD Evidence
+
+The round-9 production-path regressions were added before production changes
+and observed RED:
+
+- A real `buildBible()` call whose first canonical release rename failed
+  rejected its completed business result because `ProjectBuildLock.release()`
+  made only one raw release attempt.
+- After a real build exhausted release, a later same-process chapter operation
+  received `PROJECT_OPERATION_LOCKED`: the build path had discarded the only
+  lease handle capable of safely completing the exact live transition.
+- While that direct-release fault remained persistent, a later chapter
+  acquisition reported the generic busy error instead of the retained release
+  failure. Its callback did not run, but no in-process recovery route remained.
+
+`ProjectBuildLock` now delegates release to the same resolved-root managed
+release registry used by the chapter wrapper. A transient failure receives the
+same two bounded attempts and preserves the completed build result. Exhaustion
+retains the original raw handle, and every later build, planning, or chapter
+acquisition must help that exact release before publishing a new owner. The
+bottom-level raw lease API keeps its existing retryable fault semantics and no
+second registry or owner exists.
+
+The real build fault tests then passed with byte-identical Story State and
+chapter queue data, no callback under persistent failure, and no remaining
+owner, claim, released path, or heartbeat after recovery.
+
+## Round 9 Changed Files
+
+- `src/app/projectOperationLease.ts`
+- `src/app/projectBuildLock.ts`
+- `tests/integration/projectOperationLeaseFaults.test.ts`
+- This Task 8 implementation report.
+
 ## Round 8 Changed Files
 
 - `src/app/projectOperationLease.ts`
@@ -590,6 +626,23 @@ Final round-8 verification on 2026-08-17:
 - `corepack pnpm check:diff` and `git diff --check` passed after the report
   update.
 
+Final round-9 verification on 2026-08-17:
+
+- Lease publication, race, safety, fault, and real build/planning lifecycle
+  matrix: `7` files, `59` tests passed, `0` failed.
+- Root Task 8 revision, invalidation, draft, adoption, adjustment, participant,
+  lease, race, safety, and fault matrix: `12` files, `134` tests passed, `0`
+  failed.
+- Desktop service, contract, IPC, preload, working-copy, editor, and workspace
+  focused matrix: `7` files, `240` tests passed, `0` failed.
+- Complete desktop suite with two workers: `36` files, `580` tests passed, `0`
+  failed.
+- `corepack pnpm build` passed.
+- `corepack pnpm --dir apps/desktop check` passed.
+- `corepack pnpm --dir apps/desktop build` passed.
+- `corepack pnpm check:diff` and `git diff --check` passed before the report
+  update and are rerun after it.
+
 ## Safety Evidence
 
 - Draft adoption runs under a no-Story-State-write project/chapter lease.
@@ -610,9 +663,10 @@ Final round-8 verification on 2026-08-17:
   process-start-bound, exclusive, heartbeat-recoverable, and
   directory/inode-identity-checked. Exact cleanup never overwrites a newer
   canonical claimant.
-- Wrapper-owned leases survive transient release failures and retry exhaustion;
-  later same-process acquisition first resumes the retained exact owner instead
-  of stealing, aging out, or forgetting it.
+- Managed production leases, including chapter and build/planning operations,
+  survive transient release failures and retry exhaustion. Later same-process
+  acquisition first resumes the retained exact owner instead of stealing,
+  aging out, or forgetting it.
 - Electron sandboxing remains enabled before the single-instance policy runs.
 - `.playwright-mcp/` and the two unrelated readiness PNG files were neither
   modified nor staged.

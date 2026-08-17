@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -20,6 +21,7 @@ interface ChapterDraftEditorProps {
 
 type DialogKind = 'adopt' | 'compare' | 'discard' | null;
 type ActionState = 'idle' | 'adopting' | 'discarding';
+type FocusIntent = 'dialog_opener' | 'textarea' | null;
 
 export function ChapterDraftEditor({
   projectKey,
@@ -49,6 +51,7 @@ export function ChapterDraftEditor({
   const [actionState, setActionState] = useState<ActionState>('idle');
   const [actionError, setActionError] = useState<string | null>(null);
   const [adoptionRecoveryRequired, setAdoptionRecoveryRequired] = useState(false);
+  const [focusIntent, setFocusIntent] = useState<FocusIntent>(null);
 
   useEffect(() => {
     if (
@@ -71,6 +74,35 @@ export function ChapterDraftEditor({
   useEffect(() => {
     if (adoptionRecoveryRequired) recoveryActionRef.current?.focus();
   }, [adoptionRecoveryRequired]);
+
+  useLayoutEffect(() => {
+    if (focusIntent === 'textarea') {
+      if (
+        recoveryPending
+        || discardingRecovery
+        || adoptionRecoveryRequired
+        || actionState !== 'idle'
+        || dialog !== null
+        || preview
+      ) return;
+      textareaRef.current?.focus();
+      setFocusIntent(null);
+      return;
+    }
+    if (focusIntent === 'dialog_opener') {
+      if (dialog !== null || actionState !== 'idle') return;
+      openerRef.current?.focus();
+      setFocusIntent(null);
+    }
+  }, [
+    actionState,
+    adoptionRecoveryRequired,
+    dialog,
+    discardingRecovery,
+    focusIntent,
+    preview,
+    recoveryPending
+  ]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -163,7 +195,7 @@ export function ChapterDraftEditor({
       updateRevisionToken(null);
       setRecoveryPending(false);
       setSaveState('saved');
-      textareaRef.current?.focus();
+      setFocusIntent('textarea');
     } catch {
       setActionError('上次编辑草稿暂时无法丢弃，请重试。');
     } finally {
@@ -178,7 +210,7 @@ export function ChapterDraftEditor({
     setRecoveryPending(false);
     setSaveState('saved');
     setActionError(null);
-    textareaRef.current?.focus();
+    setFocusIntent('textarea');
   }
 
   async function discard(): Promise<void> {
@@ -193,7 +225,7 @@ export function ChapterDraftEditor({
       updateRevisionToken(null);
       setSaveState('saved');
       setDialog(null);
-      openerRef.current?.focus();
+      setFocusIntent('dialog_opener');
     } catch {
       setActionError('编辑草稿暂时无法丢弃，请重试。');
     } finally {
@@ -262,7 +294,7 @@ export function ChapterDraftEditor({
   function closeDialog(): void {
     if (actionState !== 'idle') return;
     setDialog(null);
-    openerRef.current?.focus();
+    setFocusIntent('dialog_opener');
   }
 
   const status = saveState === 'saved'
@@ -340,22 +372,20 @@ export function ChapterDraftEditor({
         </div>
         <p aria-live="polite" role="status">{status}</p>
       </div>
-      {preview ? (
-        <SafeDraftBlocks markdown={markdown} />
-      ) : (
-        <textarea
-          aria-label="章节正文"
-          disabled={editingDisabled}
-          onChange={(event) => {
-            editVersion.current += 1;
-            setMarkdown(event.target.value);
-            setSaveState('unsaved');
-            setActionError(null);
-          }}
-          ref={textareaRef}
-          value={markdown}
-        />
-      )}
+      <textarea
+        aria-label="章节正文"
+        disabled={editingDisabled}
+        hidden={preview}
+        onChange={(event) => {
+          editVersion.current += 1;
+          setMarkdown(event.target.value);
+          setSaveState('unsaved');
+          setActionError(null);
+        }}
+        ref={textareaRef}
+        value={markdown}
+      />
+      {preview && <SafeDraftBlocks markdown={markdown} />}
       <footer className="nl-draft-editor__footer">
         <p>{countWords(markdown)} 字</p>
         <div>

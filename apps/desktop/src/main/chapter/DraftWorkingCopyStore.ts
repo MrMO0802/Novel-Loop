@@ -427,8 +427,14 @@ function errorCode(error: unknown): string {
 }
 
 async function readBoundedText(target: string): Promise<string> {
-  if (typeof constants.O_NOFOLLOW !== 'number') throw draftStoreError();
-  const handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+  if (
+    typeof constants.O_NOFOLLOW !== 'number'
+    || typeof constants.O_NONBLOCK !== 'number'
+  ) throw draftStoreError();
+  const handle = await open(
+    target,
+    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+  );
   try {
     const metadata = await handle.stat();
     if (!metadata.isFile() || metadata.size > MAX_RECORD_BYTES) {

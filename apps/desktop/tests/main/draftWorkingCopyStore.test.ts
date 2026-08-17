@@ -1,7 +1,10 @@
-import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { constants } from 'node:fs';
+import { lstat, mkdir, mkdtemp, open, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import {
@@ -12,6 +15,7 @@ import {
 const roots: string[] = [];
 const projectKey = 'project_author_draft';
 const sourceHash = 'a'.repeat(64);
+const execFileAsync = promisify(execFile);
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -231,6 +235,42 @@ describe('DraftWorkingCopyStore', () => {
     await expect(store.read(projectKey, 1)).resolves.toMatchObject({ recoveryAvailable: false });
     expect(await readFile(outside, 'utf8')).toContain('外部草稿');
   });
+
+  test.skipIf(process.platform !== 'linux')(
+    'rejects a FIFO working-copy record without waiting for a writer',
+    async () => {
+      const root = await makeRoot();
+      const store = new DraftWorkingCopyStore(root);
+      const directory = path.join(root, 'working-copies', projectKey, 'chapter_001');
+      const target = path.join(directory, 'draft.json');
+      await mkdir(directory, { recursive: true, mode: 0o700 });
+      await execFileAsync('mkfifo', [target]);
+
+      const read = store.read(projectKey, 1, sourceHash);
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const outcome = await Promise.race([
+        read.then(() => 'completed' as const),
+        new Promise<'timed_out'>((resolve) => {
+          timer = setTimeout(() => {
+            void open(target, constants.O_WRONLY | constants.O_NONBLOCK)
+              .then(async (writer) => writer.close())
+              .catch(() => undefined)
+              .finally(() => resolve('timed_out'));
+          }, 500);
+        })
+      ]);
+      if (timer !== undefined) clearTimeout(timer);
+      await read;
+
+      expect(outcome).toBe('completed');
+      await expect(read).resolves.toEqual({
+        recoveryAvailable: false,
+        stale: false,
+        markdown: null,
+        savedAt: null
+      });
+    }
+  );
 
   test('rejects a symlinked working-copy directory before reading or writing outside user data', async () => {
     const root = await makeRoot();

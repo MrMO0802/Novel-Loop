@@ -2,7 +2,7 @@
 
 ## Scope
 
-Completed Task 8 and reviewer fix rounds 1-5 for recoverable Chapter Draft
+Completed Task 8 and reviewer fix rounds 1-6 for recoverable Chapter Draft
 editing on `codex/novel-loop-desktop-prototype`.
 
 - Base implementation: `4763142de0844979bfcde85271271bd6a2ce0b46`
@@ -10,6 +10,7 @@ editing on `codex/novel-loop-desktop-prototype`.
 - Fix round 2: `07cad6426fcb97c3a9867ad4f30f25f741061988`
 - Fix round 3: `4806191b669e351c56952e4af107c4d899efd1d0`
 - Fix round 5 base: `b5ea893f8055c22f29272238216d0ce0cf8922f2`
+- Fix round 6 base: `fd1e379ea7678875117d5278204f523fcab027ae`
 
 The implementation remains inside the approved desktop boundary: no Story
 State or chapter-queue mutation, no diagnostics/final/canon-patch/commit work,
@@ -130,6 +131,31 @@ and no provider or renderer filesystem expansion.
   exhausted future versions are ignored or rejected without collision.
 - Recovery-required mode moves focus to the recovery action while preserving
   the existing modal keyboard and focus-restoration behavior.
+
+### Round 6 Transition Recovery And Editor Continuity
+
+- Acquisition now inspects the transition-claim path before publishing a new
+  owner. A claim whose observed canonical lock is absent or has changed is
+  removed by exact inode identity before publication, so a live-PID orphan
+  left after a completed rename cannot block the next lease.
+- Active claims refresh their inode-bound mtime every five seconds. A valid
+  claim whose owner remains alive but makes no heartbeat progress for two
+  minutes is recoverable; dead owners remain immediately recoverable. A retry
+  by the same lease can resume its exact matching claim after release and claim
+  cleanup fail together.
+- Exact cleanup first pins the expected inode with a private hard link. It then
+  quarantines the canonical path and validates the moved identity. If an ABA
+  replacement was moved, restoration uses a no-replace hard link only; it
+  never renames over a newer canonical claimant. The same no-overwrite helper
+  replaces the old release and stale-takeover restoration branches.
+- Working-copy record reads combine `O_NOFOLLOW` and `O_NONBLOCK`, then require
+  a regular file and enforce the existing bounded fatal UTF-8 read. A FIFO is
+  rejected and quarantined without waiting for a writer.
+- Edit and preview modes retain one textarea DOM node. Preview hides the node
+  instead of unmounting it, preserving native undo/redo state and selection.
+- Continue-recovery, discard-recovery, normal discard, and dialog close set an
+  explicit focus intent. A layout effect fulfills the intent only after React
+  has removed the gate/dialog and re-enabled the destination control.
 
 ### Working-Copy Storage
 
@@ -260,6 +286,35 @@ affected code:
 
 The final generation queue, regular-file publication protocol, exact-inode
 cleanup, and fail-closed journal/version validation make the same cases GREEN.
+
+## Round 6 TDD Evidence
+
+The round-6 regressions were added before production changes and observed RED:
+
+- The lease fault/safety matrix failed four cases: an expired live-identity
+  claim remained permanently live, an absent-lock orphan blocked the next
+  release, a claim-cleanup failure poisoned the replacement lease, and the
+  old quarantine restoration overwrote the newest deterministic ABA claimant.
+- The FIFO working-copy read reached the 500 ms escape writer instead of
+  completing independently.
+- Preview disconnected the original textarea node, and post-recovery plus
+  post-discard focus remained on the document body.
+- A release-rename plus claim-cleanup fault also proved that retry could not
+  resume the same lease's exact live claim.
+
+The claim lifecycle, no-overwrite quarantine protocol, nonblocking read, stable
+textarea, and post-render focus intent made those same cases GREEN.
+
+## Round 6 Changed Files
+
+- `src/app/projectOperationLease.ts`
+- `tests/integration/projectOperationLeaseFaults.test.ts`
+- `tests/integration/projectOperationLeaseSafety.test.ts`
+- `apps/desktop/src/main/chapter/DraftWorkingCopyStore.ts`
+- `apps/desktop/tests/main/draftWorkingCopyStore.test.ts`
+- `apps/desktop/src/renderer/src/features/chapter/ChapterDraftEditor.tsx`
+- `apps/desktop/tests/renderer/chapterDraftEditor.test.tsx`
+- This Task 8 implementation report and progress record.
 
 ## Round 5 Changed Files
 
@@ -411,6 +466,20 @@ Final round-5 verification on 2026-08-05:
 - `corepack pnpm check:diff` and `git diff --check` passed after the report
   update.
 
+Final round-6 verification on 2026-08-17:
+
+- Root revision, invalidation, draft, adoption, adjustment, lease, race,
+  safety, and fault matrix: `12` files, `128` tests passed, `0` failed.
+- Desktop service, contract, IPC, preload, working-copy, editor, and workspace
+  focused matrix: `7` files, `240` tests passed, `0` failed.
+- Complete desktop suite with two workers: `36` files, `580` tests passed,
+  `0` failed.
+- `corepack pnpm build` passed.
+- `corepack pnpm --dir apps/desktop check` passed.
+- `corepack pnpm --dir apps/desktop build` passed.
+- `corepack pnpm check:diff` and `git diff --check` passed after the report
+  update.
+
 ## Safety Evidence
 
 - Draft adoption runs under a no-Story-State-write project/chapter lease.
@@ -428,7 +497,9 @@ Final round-5 verification on 2026-08-05:
 - A persisted committed marker is never compensated; the renderer is locked
   until a fresh read resolves the durability-uncertain result.
 - Project lock publication and stale takeover are owner-complete,
-  process-start-bound, exclusive, and directory-identity-checked.
+  process-start-bound, exclusive, heartbeat-recoverable, and
+  directory/inode-identity-checked. Exact cleanup never overwrites a newer
+  canonical claimant.
 - Electron sandboxing remains enabled before the single-instance policy runs.
 - `.playwright-mcp/` and the two unrelated readiness PNG files were neither
   modified nor staged.

@@ -8,6 +8,7 @@ import {
   fireEvent,
   render,
   screen,
+  waitFor,
   within
 } from '@testing-library/react';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -228,6 +229,70 @@ describe('ChapterDraftEditor', () => {
 
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(screen.queryByRole('dialog', { name: '草稿对比' })).not.toBeInTheDocument();
+    expect(opener).toHaveFocus();
+  });
+
+  test('keeps one textarea node and its selection across preview toggles', () => {
+    installApi();
+    render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{ recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null }} onAdopted={vi.fn()} />);
+
+    const textarea = screen.getByRole('textbox', { name: '章节正文' }) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: '# 第一章\n\n保留撤销历史的正文。' } });
+    textarea.focus();
+    textarea.setSelectionRange(8, 12);
+
+    fireEvent.click(screen.getByRole('tab', { name: '预览' }));
+    expect(textarea.isConnected).toBe(true);
+    expect(document.querySelector('textarea')).toBe(textarea);
+    expect(textarea).not.toBeVisible();
+
+    fireEvent.keyDown(window, { key: 'p', ctrlKey: true, shiftKey: true });
+    expect(screen.getByRole('textbox', { name: '章节正文' })).toBe(textarea);
+    expect(textarea).toHaveValue('# 第一章\n\n保留撤销历史的正文。');
+    expect(textarea.selectionStart).toBe(8);
+    expect(textarea.selectionEnd).toBe(12);
+  });
+
+  test('focuses the enabled textarea after continuing or discarding recovery', async () => {
+    const api = installApi();
+    const { unmount } = render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{
+        recoveryAvailable: true,
+        stale: false,
+        markdown: '# 第一章\n\n恢复的正文。',
+        savedAt: '2026-08-04T01:00:00.000Z',
+        revisionToken: `chapter_revision_${'d'.repeat(48)}`
+      }} onAdopted={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '继续编辑' }));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '章节正文' })).toHaveFocus());
+
+    unmount();
+    render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{
+        recoveryAvailable: true,
+        stale: true,
+        markdown: null,
+        savedAt: '2026-08-04T01:00:00.000Z',
+        revisionToken: null
+      }} onAdopted={vi.fn()} />);
+    fireEvent.click(screen.getByRole('button', { name: '放弃恢复' }));
+    await waitFor(() => expect(api.discardDraftWorkingCopy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByRole('textbox', { name: '章节正文' })).toHaveFocus());
+  });
+
+  test('restores focus to the discard opener only after the dialog closes and controls re-enable', async () => {
+    installApi();
+    render(<ChapterDraftEditor projectKey="project_author_draft" draft={draft}
+      workingCopy={{ recoveryAvailable: false, stale: false, markdown: null, savedAt: null, revisionToken: null }} onAdopted={vi.fn()} />);
+
+    const opener = screen.getByRole('button', { name: '放弃草稿' });
+    fireEvent.click(opener);
+    fireEvent.click(screen.getByRole('button', { name: '确认放弃' }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '放弃草稿确认' })).not.toBeInTheDocument());
+    await waitFor(() => expect(opener).toBeEnabled());
     expect(opener).toHaveFocus();
   });
 

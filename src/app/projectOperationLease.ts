@@ -21,6 +21,8 @@ export const PROJECT_OPERATION_LOCK_NAME = '.novel-loop-build-bible.lock';
 const PROJECT_OPERATION_LOCK_STALE_MS = 10 * 60 * 1000;
 const PROJECT_OPERATION_OWNERLESS_GRACE_MS = 5 * 1000;
 const PROJECT_OPERATION_HEARTBEAT_MS = 30 * 1000;
+const PROJECT_OPERATION_CLAIM_HEARTBEAT_MS = 5 * 1000;
+const PROJECT_OPERATION_CLAIM_STALE_MS = 2 * 60 * 1000;
 const STALE_RECOVERY_ATTEMPTS = 4;
 const LOCK_OWNER_FILE = 'owner.json';
 const LOCK_TRANSITION_CLAIM_SUFFIX = '.transition-claim';
@@ -117,6 +119,7 @@ export async function acquireProjectOperationLease(
   const owner = await createLeaseOwner(token);
 
   for (let attempt = 0; attempt < STALE_RECOVERY_ATTEMPTS; attempt += 1) {
+    await prepareTransitionClaimForAcquire(lockPath);
     try {
       return await publishOwnedLock(lockPath, owner);
     } catch (error) {
@@ -384,7 +387,7 @@ async function ownLock(
           await syncParentDirectory(lockPath);
           const moved = await observeLock(releasedPath);
           if (moved.lockIdentity !== lockIdentity) {
-            await rename(releasedPath, lockPath).catch(() => undefined);
+            await restoreQuarantinedPathNoReplace(releasedPath, lockPath);
             throw new Error('Released project lease identity changed during transition.');
           }
           await claim.release();
@@ -417,7 +420,7 @@ async function recoverStaleLock(
       await rename(lockPath, stalePath);
       await syncParentDirectory(lockPath);
       if ((await observeLock(stalePath)).lockIdentity !== observation.lockIdentity) {
-        await rename(stalePath, lockPath).catch(() => undefined);
+        await restoreQuarantinedPathNoReplace(stalePath, lockPath);
         return false;
       }
       await rm(stalePath, { recursive: true, force: true });
@@ -633,8 +636,13 @@ async function claimLockTransition(
       handle = await publishTransitionClaim(claimPath, claim);
     } catch (error) {
       if (!isLockExistsError(error)) throw error;
-      if (await recoverStaleTransitionClaim(claimPath)) continue;
-      return null;
+      const resumed = await resumeOwnedTransitionClaim(claimPath, claim);
+      if (resumed !== null) {
+        handle = resumed;
+      } else {
+        if (await recoverStaleTransitionClaim(claimPath)) continue;
+        return null;
+      }
     }
     try {
       const [afterClaim, observedClaim] = await Promise.all([
@@ -646,7 +654,7 @@ async function claimLockTransition(
         || afterClaim.ownerText !== observation.ownerText
         || observedClaim === null
         || observedClaim.claimIdentity !== handle.claimIdentity
-        || !isDeepStrictEqual(observedClaim.claim, claim)
+        || !isDeepStrictEqual(observedClaim.claim, handle.claim)
       ) {
         await handle.release();
         return null;
@@ -681,18 +689,7 @@ async function publishTransitionClaim(
     }
     await rm(candidatePath, { force: true });
     const publishedIdentity = candidateIdentity;
-    return {
-      claimPath,
-      claimIdentity: publishedIdentity,
-      claim,
-      async release(): Promise<void> {
-        await removeExactPath(
-          claimPath,
-          publishedIdentity,
-          `claim-finished-${claim.claimant.token}`
-        );
-      }
-    };
+    return ownTransitionClaim(claimPath, publishedIdentity, claim);
   } catch (error) {
     if (candidateIdentity !== null) {
       const removed = await removeExactPath(
@@ -716,20 +713,127 @@ async function publishTransitionClaim(
   }
 }
 
+async function resumeOwnedTransitionClaim(
+  claimPath: string,
+  expected: ProjectOperationLeaseClaim
+): Promise<TransitionClaimHandle | null> {
+  const observed = await observeTransitionClaim(claimPath);
+  if (
+    observed === null
+    || observed.claim === null
+    || !isDeepStrictEqual(observed.claim.claimant, expected.claimant)
+    || observed.claim.observedOwnerToken !== expected.observedOwnerToken
+    || observed.claim.observedLockIdentity !== expected.observedLockIdentity
+  ) return null;
+  return ownTransitionClaim(claimPath, observed.claimIdentity, observed.claim);
+}
+
+function ownTransitionClaim(
+  claimPath: string,
+  claimIdentity: string,
+  claim: ProjectOperationLeaseClaim
+): TransitionClaimHandle {
+  const heartbeat = setInterval(() => {
+    void heartbeatTransitionClaim(claimPath, claimIdentity, claim);
+  }, PROJECT_OPERATION_CLAIM_HEARTBEAT_MS);
+  heartbeat.unref();
+  let released = false;
+  let releaseAttempt: Promise<void> | null = null;
+
+  return {
+    claimPath,
+    claimIdentity,
+    claim,
+    async release(): Promise<void> {
+      if (released) return;
+      if (releaseAttempt !== null) return releaseAttempt;
+      clearInterval(heartbeat);
+      releaseAttempt = (async () => {
+        const removed = await removeExactPath(
+          claimPath,
+          claimIdentity,
+          `claim-finished-${claim.claimant.token}`
+        );
+        if (!removed && await pathHasIdentity(claimPath, claimIdentity)) {
+          throw new Error('Project lease transition claim cleanup did not make progress.');
+        }
+        released = true;
+      })().finally(() => {
+        releaseAttempt = null;
+      });
+      return releaseAttempt;
+    }
+  };
+}
+
+async function heartbeatTransitionClaim(
+  claimPath: string,
+  claimIdentity: string,
+  claim: ProjectOperationLeaseClaim
+): Promise<void> {
+  let handle: Awaited<ReturnType<typeof open>> | null = null;
+  try {
+    handle = await open(
+      claimPath,
+      constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    );
+    const metadata = await handle.stat();
+    if (!metadata.isFile() || nodeIdentity(metadata) !== claimIdentity) return;
+    const parsed = await readMetadataFromHandle(handle, ProjectOperationLeaseClaimSchema);
+    if (parsed.value === null || !isDeepStrictEqual(parsed.value, claim)) return;
+    await handle.utimes(new Date(), new Date());
+  } catch {
+    // A failed transition stops refreshing and becomes recoverable after the bounded claim TTL.
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+}
+
+async function prepareTransitionClaimForAcquire(lockPath: string): Promise<void> {
+  const claimPath = `${lockPath}${LOCK_TRANSITION_CLAIM_SUFFIX}`;
+  for (let attempt = 0; attempt < STALE_RECOVERY_ATTEMPTS; attempt += 1) {
+    const claim = await observeTransitionClaim(claimPath);
+    if (claim === null) return;
+    const lock = await observeOptionalLock(lockPath);
+    if (
+      lock === null
+      || claim.claim === null
+      || claim.claim.observedLockIdentity !== lock.lockIdentity
+    ) {
+      const removed = await removeExactPath(
+        claimPath,
+        claim.claimIdentity,
+        `orphaned-claim-${randomUUID()}`
+      );
+      if (removed) continue;
+      const current = await observeTransitionClaim(claimPath);
+      if (current === null || current.claimIdentity !== claim.claimIdentity) continue;
+      return;
+    }
+    if (await recoverStaleTransitionClaim(claimPath)) continue;
+    return;
+  }
+}
+
+async function observeOptionalLock(lockPath: string): Promise<LockObservation | null> {
+  try {
+    return await observeLock(lockPath);
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return null;
+    throw error;
+  }
+}
+
 async function recoverStaleTransitionClaim(claimPath: string): Promise<boolean> {
   const observation = await observeTransitionClaim(claimPath).catch((error: unknown) => {
     if (hasCode(error, 'ENOENT')) return null;
     throw error;
   });
   if (observation === null) return true;
-  const ageMs = Date.now() - (
-    observation.claim === null
-      ? observation.mtimeMs
-      : Date.parse(observation.claim.claimedAt)
-  );
+  const ageMs = Date.now() - observation.mtimeMs;
   if (observation.claim !== null) {
     const alive = await isLockOwnerAlive(observation.claim.claimant);
-    if (alive === true) return false;
+    if (alive === true && ageMs <= PROJECT_OPERATION_CLAIM_STALE_MS) return false;
     if (alive === null && ageMs <= PROJECT_OPERATION_LOCK_STALE_MS) return false;
   } else if (ageMs <= PROJECT_OPERATION_OWNERLESS_GRACE_MS) {
     return false;
@@ -842,14 +946,81 @@ async function removeExactPath(
     throw error;
   }
   if (nodeIdentity(metadata) !== expectedIdentity) return false;
+  const pinPath = `${sourcePath}.${reason}-pin-${randomUUID()}`;
+  let pinned = false;
+  try {
+    try {
+      await link(sourcePath, pinPath);
+      pinned = true;
+    } catch (error) {
+      if (hasCode(error, 'ENOENT')) return false;
+      if (
+        metadata.isDirectory()
+        && (
+          hasCode(error, 'EPERM')
+          || hasCode(error, 'EISDIR')
+          || hasCode(error, 'EACCES')
+        )
+      ) {
+        return removeExactPathWithoutPin(sourcePath, expectedIdentity, reason);
+      }
+      throw error;
+    }
+    if (nodeIdentity(await lstat(pinPath)) !== expectedIdentity) return false;
+    return await quarantineExactPath(sourcePath, expectedIdentity, reason);
+  } finally {
+    if (pinned) await rm(pinPath, { force: true }).catch(() => undefined);
+  }
+}
+
+async function removeExactPathWithoutPin(
+  sourcePath: string,
+  expectedIdentity: string,
+  reason: string
+): Promise<boolean> {
+  return quarantineExactPath(sourcePath, expectedIdentity, reason);
+}
+
+async function quarantineExactPath(
+  sourcePath: string,
+  expectedIdentity: string,
+  reason: string
+): Promise<boolean> {
   const quarantinedPath = `${sourcePath}.${reason}-${randomUUID()}`;
-  await rename(sourcePath, quarantinedPath);
+  try {
+    await rename(sourcePath, quarantinedPath);
+  } catch (error) {
+    if (hasCode(error, 'ENOENT')) return false;
+    throw error;
+  }
   await syncParentDirectory(sourcePath);
   const moved = await lstat(quarantinedPath);
   if (nodeIdentity(moved) !== expectedIdentity) {
-    await rename(quarantinedPath, sourcePath).catch(() => undefined);
+    await restoreQuarantinedPathNoReplace(quarantinedPath, sourcePath);
     return false;
   }
+  await rm(quarantinedPath, { recursive: true, force: true });
+  await syncParentDirectory(quarantinedPath);
+  return true;
+}
+
+async function restoreQuarantinedPathNoReplace(
+  quarantinedPath: string,
+  canonicalPath: string
+): Promise<boolean> {
+  try {
+    await link(quarantinedPath, canonicalPath);
+  } catch (error) {
+    if (
+      isLockExistsError(error)
+      || hasCode(error, 'ENOENT')
+      || hasCode(error, 'EPERM')
+      || hasCode(error, 'EISDIR')
+      || hasCode(error, 'EACCES')
+    ) return false;
+    throw error;
+  }
+  await syncParentDirectory(canonicalPath);
   await rm(quarantinedPath, { recursive: true, force: true });
   await syncParentDirectory(quarantinedPath);
   return true;

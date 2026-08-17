@@ -98,7 +98,6 @@ describe('project operation lease publication and transition safety', () => {
       });
       const claimPath = `${lockPath}${CLAIM_SUFFIX}`;
       await writeFile(claimPath, `${JSON.stringify(liveClaim)}\n`, { mode: 0o600 });
-      await utimes(claimPath, OLD_DATE, OLD_DATE);
 
       await expect(acquireProjectOperationLease(root))
         .rejects.toMatchObject({ code: 'PROJECT_OPERATION_LOCKED' });
@@ -111,6 +110,47 @@ describe('project operation lease publication and transition safety', () => {
       await utimes(claimPath, OLD_DATE, OLD_DATE);
       const lease = await acquireProjectOperationLease(root);
       await lease.release();
+    }
+  );
+
+  test.skipIf(process.platform !== 'linux')(
+    'recovers an expired live-identity claim whose transition stopped making progress',
+    async () => {
+      const lockPath = projectLockPath();
+      const owner = await deadOwner('12121212-1212-4212-8212-121212121212');
+      await writeFile(lockPath, `${JSON.stringify(owner)}\n`, { mode: 0o600 });
+      await utimes(lockPath, OLD_DATE, OLD_DATE);
+      const lockStat = await lstat(lockPath);
+      const orphan = await transitionClaim({
+        token: '23232323-2323-4232-8232-232323232323',
+        observedOwnerToken: owner.token,
+        observedLockIdentity: `${lockStat.dev}:${lockStat.ino}`
+      });
+      const claimPath = `${lockPath}${CLAIM_SUFFIX}`;
+      await writeFile(claimPath, `${JSON.stringify(orphan)}\n`, { mode: 0o600 });
+      await utimes(claimPath, OLD_DATE, OLD_DATE);
+
+      const lease = await withTimeout(acquireProjectOperationLease(root), 2_000);
+      await lease.release();
+      await expect(lstat(claimPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    }
+  );
+
+  test.skipIf(process.platform !== 'linux')(
+    'cleans a live orphan claim when its observed lock no longer exists',
+    async () => {
+      const lockPath = projectLockPath();
+      const claimPath = `${lockPath}${CLAIM_SUFFIX}`;
+      const orphan = await transitionClaim({
+        token: '34343434-3434-4434-8434-343434343434',
+        observedOwnerToken: '45454545-4545-4454-8454-454545454545',
+        observedLockIdentity: '1:1'
+      });
+      await writeFile(claimPath, `${JSON.stringify(orphan)}\n`, { mode: 0o600 });
+
+      const lease = await withTimeout(acquireProjectOperationLease(root), 2_000);
+      await expect(lease.release()).resolves.toBeUndefined();
+      await expect(lstat(claimPath)).rejects.toMatchObject({ code: 'ENOENT' });
     }
   );
 

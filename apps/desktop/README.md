@@ -291,8 +291,9 @@ corepack pnpm --dir apps/desktop test:e2e:required
 - Generated draft editing through an Electron application-data working copy,
   autosave, restart recovery, comparison, discard, and versioned author
   adoption.
-- Generated `draft_v1.md`, Story State, chapter queue, and
-  `latestCommittedChapter` remain protected throughout Phase A authoring.
+- Generated `draft_v1.md`, Story State, and `latestCommittedChapter` remain
+  protected; after generation reaches `draft_ready`, editing, recovery, and
+  adoption leave the chapter queue unchanged.
 - Read-only mapping to the existing Codex execution boundary for readiness.
 - First-launch states for ready, missing, logged out, warning, and unavailable.
 - Unit tests for window policy, navigation, IPC, preload, engine mapping, and UI.

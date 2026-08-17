@@ -11,8 +11,9 @@
 - Documented participant repair as a pre-draft recovery path that retains the
   existing character-reference validation boundary.
 - Documented chapter-draft autosave and restart recovery in Electron application
-  data, while generated `draft_v1.md`, Story State, chapter queue, and
-  `latestCommittedChapter` remain unchanged.
+  data. These editing, recovery, and adoption steps preserve generated
+  `draft_v1.md` and the `draft_ready` queue state; Story State and
+  `latestCommittedChapter` remain unchanged across the complete Phase A flow.
 - Clarified the Phase A stop point and unsupported desktop scope: no Story
   Foundation/global-planning editing, diagnostics, canonical final/canon patch,
   Story State commit, snapshots, DeepSeek, OpenAI API, Web UI,
@@ -25,8 +26,9 @@
   retry for failed or cancelled incomplete work, and read-only review of four
   strategy documents.
 - Extended the desktop milestone through author adoption of a chapter draft.
-  Generated Story Foundation and global planning remain review-only, and no
-  desktop authoring action commits Story State or advances the chapter queue.
+  Generated Story Foundation and global planning remain review-only. Planning
+  and drafting can update the non-canonical chapter lifecycle, but no desktop
+  authoring action commits Story State or advances `latestCommittedChapter`.
 
 ## v2.5.0-rc.1
 

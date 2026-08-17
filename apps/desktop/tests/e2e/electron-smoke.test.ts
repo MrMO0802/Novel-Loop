@@ -169,6 +169,7 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
         `--user-data-dir=${temporaryUserDataDirectory}`,
         desktopRoot
       ],
+      chromiumSandbox: true,
       cwd: desktopRoot,
       env: electronEnvironment
     });
@@ -177,60 +178,16 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
       const page = await application.firstWindow();
       await expect(page.getByText('Novel Loop').first()).toBeVisible();
 
-      const evaluateMainBoundary = () => application.evaluate(
-        ({ app, BrowserWindow }) => {
-          const window = BrowserWindow.getAllWindows()[0];
-          if (window === undefined) {
-            throw new Error('Novel Loop BrowserWindow is missing.');
-          }
-          const preferences = (
-            window.webContents as unknown as {
-              getLastWebPreferences: () => {
-                contextIsolation?: boolean;
-                nodeIntegration?: boolean;
-                sandbox?: boolean;
-              };
-            }
-          ).getLastWebPreferences();
-          return {
-            commandLine: {
-              disableSetuidSandbox: app.commandLine.hasSwitch(
-                'disable-setuid-sandbox'
-              ),
-              noSandbox: app.commandLine.hasSwitch('no-sandbox')
-            },
-            webPreferences: {
-              contextIsolation: preferences.contextIsolation,
-              nodeIntegration: preferences.nodeIntegration,
-              sandbox: preferences.sandbox
-            }
-          };
-        }
+      const unsafeSandboxSwitches = application.process().spawnargs.filter(
+        (argument) => [
+          '--disable-setuid-sandbox',
+          '--no-sandbox'
+        ].some((unsafeSwitch) => (
+          argument === unsafeSwitch
+          || argument.startsWith(`${unsafeSwitch}=`)
+        ))
       );
-      let mainBoundary: Awaited<ReturnType<typeof evaluateMainBoundary>>;
-      try {
-        mainBoundary = await evaluateMainBoundary();
-      } catch (error) {
-        if (
-          !(error instanceof Error)
-          || !error.message.includes('Resulting promise was garbage collected')
-        ) {
-          throw error;
-        }
-        await page.waitForTimeout(100);
-        mainBoundary = await evaluateMainBoundary();
-      }
-      expect(mainBoundary).toEqual({
-        commandLine: {
-          disableSetuidSandbox: false,
-          noSandbox: false
-        },
-        webPreferences: {
-          contextIsolation: true,
-          nodeIntegration: false,
-          sandbox: true
-        }
-      });
+      expect(unsafeSandboxSwitches).toEqual([]);
 
       const boundary = await page.evaluate(async () => ({
         apiKeys: Object.keys(window.novelLoop),
@@ -369,6 +326,7 @@ test('authors can create chapter one through planning review and initial draft w
         `--user-data-dir=${userDataDirectory}`,
         desktopRoot
       ],
+      chromiumSandbox: true,
       cwd: desktopRoot,
       env: electronEnvironment({
         NLE_CODEX_BIN: fake.codexBin
@@ -1342,6 +1300,7 @@ async function launchDesktop(
       `--user-data-dir=${userDataDirectory}`,
       desktopRoot
     ],
+    chromiumSandbox: true,
     cwd: desktopRoot,
     env: electronEnvironment({
       NLE_CODEX_BIN: codexBin

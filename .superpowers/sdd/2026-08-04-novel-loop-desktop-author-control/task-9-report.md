@@ -79,6 +79,10 @@ project, run, raw Codex output, or hash fixture is retained in the repository.
   filesystem paths on POSIX, Windows, and UNC forms; hashes; raw candidate IDs;
   run/schema/provider/model/prompt/raw/auth metadata; JSONL; and secret fields.
 - Renderer `process` and `require` remain unavailable.
+- Every Playwright Electron launch explicitly sets `chromiumSandbox: true`.
+  The smoke reads the actual Electron child-process arguments and rejects
+  `--no-sandbox` and `--disable-setuid-sandbox`; exact secure BrowserWindow
+  preferences remain pinned by `windowPolicy.test.ts`.
 
 ## Verification
 
@@ -89,19 +93,26 @@ Release-quality matrix:
 - `corepack pnpm build`: passed.
 - `corepack pnpm check`: passed.
 - `corepack pnpm check:diff`: passed.
-- `corepack pnpm test`: **199 files, 655 tests passed** in `237.58s`.
+- `corepack pnpm test`: **199 files, 655 tests passed** in `230.10s`.
 - `corepack pnpm --dir apps/desktop check`: passed all Node, renderer, and E2E
   TypeScript configurations.
 - `corepack pnpm --dir apps/desktop test`: **36 files, 584 tests passed** in
-  `39.68s`.
+  `43.59s`.
 - `corepack pnpm desktop:build`: passed; Electron main, preload, and renderer
   production bundles generated successfully.
-- `corepack pnpm --dir apps/desktop test:e2e`: **9 tests passed** in `41.2s`.
+- `corepack pnpm --dir apps/desktop test:e2e`: **9 tests passed** in `44.3s`
+  with the secure Chromium sandbox required for all three Electron launch
+  sites.
+- Focused security smoke stability loop: **20/20 passed** after the launch and
+  assertion hardening. Before the fix, the old
+  `ElectronApplication.evaluate()` bridge reproduced the Playwright
+  `Resulting promise was garbage collected` failure in **2/5 runs**.
 
 The focused author-control acceptance also passed independently before the full
-suite. An earlier CommonJS `ERR_PACKAGE_PATH_NOT_EXPORTED` startup failure and
-the chapter-read lease race were reproduced, fixed, and superseded by the
-passing results above.
+suite. Earlier CommonJS `ERR_PACKAGE_PATH_NOT_EXPORTED`, chapter-read lease
+race, and Electron main-evaluation bridge failures were reproduced, fixed, and
+superseded by the passing results above. The security smoke no longer depends
+on the nondeterministic Playwright main-process promise bridge.
 
 ## Review Round 1 Closure
 

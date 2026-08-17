@@ -114,7 +114,7 @@ describe('project operation lease publication and transition safety', () => {
   );
 
   test.skipIf(process.platform !== 'linux')(
-    'recovers an expired live-identity claim whose transition stopped making progress',
+    'does not expire an exact live transition claimant solely because its heartbeat is old',
     async () => {
       const lockPath = projectLockPath();
       const owner = await deadOwner('12121212-1212-4212-8212-121212121212');
@@ -130,9 +130,9 @@ describe('project operation lease publication and transition safety', () => {
       await writeFile(claimPath, `${JSON.stringify(orphan)}\n`, { mode: 0o600 });
       await utimes(claimPath, OLD_DATE, OLD_DATE);
 
-      const lease = await withTimeout(acquireProjectOperationLease(root), 2_000);
-      await lease.release();
-      await expect(lstat(claimPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      await expect(withTimeout(acquireProjectOperationLease(root), 2_000))
+        .rejects.toMatchObject({ code: 'PROJECT_OPERATION_LOCKED' });
+      expect(JSON.parse(await readFile(claimPath, 'utf8'))).toEqual(orphan);
     }
   );
 

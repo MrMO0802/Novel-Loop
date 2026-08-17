@@ -2,7 +2,7 @@
 
 ## Scope
 
-Completed Task 8 and reviewer fix rounds 1-6 for recoverable Chapter Draft
+Completed Task 8 and reviewer fix rounds 1-7 for recoverable Chapter Draft
 editing on `codex/novel-loop-desktop-prototype`.
 
 - Base implementation: `4763142de0844979bfcde85271271bd6a2ce0b46`
@@ -11,6 +11,7 @@ editing on `codex/novel-loop-desktop-prototype`.
 - Fix round 3: `4806191b669e351c56952e4af107c4d899efd1d0`
 - Fix round 5 base: `b5ea893f8055c22f29272238216d0ce0cf8922f2`
 - Fix round 6 base: `fd1e379ea7678875117d5278204f523fcab027ae`
+- Fix round 7 base: `136e5499dc010d65922ac048950048f2301867d1`
 
 The implementation remains inside the approved desktop boundary: no Story
 State or chapter-queue mutation, no diagnostics/final/canon-patch/commit work,
@@ -138,11 +139,11 @@ and no provider or renderer filesystem expansion.
   owner. A claim whose observed canonical lock is absent or has changed is
   removed by exact inode identity before publication, so a live-PID orphan
   left after a completed rename cannot block the next lease.
-- Active claims refresh their inode-bound mtime every five seconds. A valid
-  claim whose owner remains alive but makes no heartbeat progress for two
-  minutes is recoverable; dead owners remain immediately recoverable. A retry
-  by the same lease can resume its exact matching claim after release and claim
-  cleanup fail together.
+- Active claims refresh their inode-bound mtime every five seconds. Dead or
+  abandoned owners remain immediately recoverable, but an exact owner identity
+  proven alive is never reclaimed by elapsed time alone. A retry by the same
+  lease can resume its exact matching claim after release and claim cleanup
+  fail together.
 - Exact cleanup first pins the expected inode with a private hard link. It then
   quarantines the canonical path and validates the moved identity. If an ABA
   replacement was moved, restoration uses a no-replace hard link only; it
@@ -156,6 +157,27 @@ and no provider or renderer filesystem expansion.
 - Continue-recovery, discard-recovery, normal discard, and dialog close set an
   explicit focus intent. A layout effect fulfills the intent only after React
   has removed the gate/dialog and re-enabled the destination control.
+
+### Round 7 Live-Claim Fencing And Terminal Release
+
+- Transition-claim age is no longer a fencing substitute. A claimant whose
+  PID, process-start identity, and boot identity are still exact and live is
+  not reclaimable regardless of heartbeat age. Definitively dead, invalid,
+  abandoned, or safely owner-mismatched claims retain their bounded recovery
+  paths.
+- A deterministic three-participant regression pauses the first stale-lock
+  transition, ages its exact claim, attempts a second takeover, and then
+  resumes while a third participant competes. Only the first participant can
+  hold a valid lease; the protected Story State and queue bytes remain
+  unchanged and only its serialized business write occurs.
+- Lease release now has an explicit commit point after the canonical owner is
+  moved and its exact identity is verified. From that point, claim cleanup is
+  best-effort and cannot turn an already-completed business callback into a
+  failure.
+- Owner and claim heartbeat timers stop in the terminal release path. The
+  released owner path is removed there as well. A failed direct claim cleanup
+  intentionally leaves its exact orphan for the next acquisition preflight;
+  no deferred cleanup can remove a newer claimant.
 
 ### Working-Copy Storage
 
@@ -304,6 +326,33 @@ The round-6 regressions were added before production changes and observed RED:
 
 The claim lifecycle, no-overwrite quarantine protocol, nonblocking read, stable
 textarea, and post-render focus intent made those same cases GREEN.
+Round 7 supersedes only the elapsed-time recovery conclusion for a
+proven-live exact claimant after the three-participant counterexample exposed
+the missing fencing guarantee; the other round-6 closures remain unchanged.
+
+## Round 7 TDD Evidence
+
+The round-7 regressions were added before production changes and observed RED:
+
+- The exact live-claim safety test resolved with a new lease after its mtime
+  was aged, proving that claim TTL could override a still-live owner identity.
+- In the deterministic three-participant interleaving, the first claimant was
+  rejected after the second participant stole its aged claim and the third
+  participant entered the successor-lock transition window.
+- A schema-valid chapter callback returned `callback-result`, but the outer
+  operation rejected with the injected transition-claim cleanup error after
+  the canonical owner had already been moved and verified.
+
+The conservative live-owner rule and terminal post-commit cleanup path made
+the same lease safety/fault/race matrix pass all `29` tests.
+
+## Round 7 Changed Files
+
+- `src/app/projectOperationLease.ts`
+- `tests/integration/projectOperationLeaseFaults.test.ts`
+- `tests/integration/projectOperationLeaseRace.test.ts`
+- `tests/integration/projectOperationLeaseSafety.test.ts`
+- This Task 8 implementation report and progress record.
 
 ## Round 6 Changed Files
 
@@ -469,7 +518,23 @@ Final round-5 verification on 2026-08-05:
 Final round-6 verification on 2026-08-17:
 
 - Root revision, invalidation, draft, adoption, adjustment, lease, race,
-  safety, and fault matrix: `12` files, `128` tests passed, `0` failed.
+  safety, and fault matrix: `12` files, `124` tests passed, `0` failed.
+- Desktop service, contract, IPC, preload, working-copy, editor, and workspace
+  focused matrix: `7` files, `240` tests passed, `0` failed.
+- Complete desktop suite with two workers: `36` files, `580` tests passed,
+  `0` failed.
+- `corepack pnpm build` passed.
+- `corepack pnpm --dir apps/desktop check` passed.
+- `corepack pnpm --dir apps/desktop build` passed.
+- `corepack pnpm check:diff` and `git diff --check` passed after the report
+  update.
+
+Final round-7 verification on 2026-08-17:
+
+- Lease safety, race, and fault matrix: `3` files, `29` tests passed, `0`
+  failed.
+- Root revision, invalidation, draft, adoption, adjustment, lease, race,
+  safety, and fault matrix: `12` files, `125` tests passed, `0` failed.
 - Desktop service, contract, IPC, preload, working-copy, editor, and workspace
   focused matrix: `7` files, `240` tests passed, `0` failed.
 - Complete desktop suite with two workers: `36` files, `580` tests passed,

@@ -1,4 +1,13 @@
-import { lstat, mkdtemp, readFile, rm, utimes, writeFile } from 'node:fs/promises';
+import {
+  lstat,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  utimes,
+  writeFile
+} from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
@@ -10,6 +19,7 @@ const faults = vi.hoisted(() => ({
   linkPublished: false,
   publicationCleanupRenameFailures: 0,
   claimCleanupRenameFailures: 0,
+  claimCleanupRenameAttempts: 0,
   injectClaimAba: false,
   claimAbaInjected: false,
   latestClaimText: '',
@@ -52,16 +62,18 @@ vi.mock('node:fs/promises', async (importOriginal) => {
       const [oldPath, newPath] = args;
       const claimPath = `${faults.canonicalPath}.transition-claim`;
       if (
-        faults.claimCleanupRenameFailures > 0
-        && typeof oldPath === 'string'
+        typeof oldPath === 'string'
         && path.resolve(oldPath) === claimPath
         && typeof newPath === 'string'
         && newPath.includes('.claim-finished-')
       ) {
-        faults.claimCleanupRenameFailures -= 1;
-        const error = new Error('forced transition claim cleanup failure');
-        Object.assign(error, { code: 'EIO' });
-        throw error;
+        faults.claimCleanupRenameAttempts += 1;
+        if (faults.claimCleanupRenameFailures > 0) {
+          faults.claimCleanupRenameFailures -= 1;
+          const error = new Error('forced transition claim cleanup failure');
+          Object.assign(error, { code: 'EIO' });
+          throw error;
+        }
       }
       if (
         faults.injectClaimAba
@@ -145,8 +157,10 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 
 import {
   acquireProjectOperationLease,
-  PROJECT_OPERATION_LOCK_NAME
+  PROJECT_OPERATION_LOCK_NAME,
+  withProjectChapterOperationLease
 } from '../../src/app/projectOperationLease.js';
+import { createInitialStoryState } from '../../src/app/initProject.js';
 
 let root: string | undefined;
 
@@ -157,6 +171,7 @@ afterEach(async () => {
   faults.linkPublished = false;
   faults.publicationCleanupRenameFailures = 0;
   faults.claimCleanupRenameFailures = 0;
+  faults.claimCleanupRenameAttempts = 0;
   faults.injectClaimAba = false;
   faults.claimAbaInjected = false;
   faults.latestClaimText = '';
@@ -253,18 +268,68 @@ describe('project operation lease fault recovery', () => {
     await replacement.release();
   });
 
-  test('recovers after claim cleanup fails while the owning process remains live', async () => {
+  test('commits business release and cleans terminal resources when claim cleanup fails', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-lease-fault-'));
     faults.canonicalPath = path.resolve(root, PROJECT_OPERATION_LOCK_NAME);
-    const lease = await acquireProjectOperationLease(root);
-    faults.claimCleanupRenameFailures = 2;
+    const statePath = path.join(root, 'state', 'story_state.json');
+    const queuePath = path.join(root, 'planning', 'chapter_queue.json');
+    await Promise.all([
+      mkdir(path.dirname(statePath), { recursive: true }),
+      mkdir(path.dirname(queuePath), { recursive: true })
+    ]);
+    const storyStateText = `${JSON.stringify(createInitialStoryState('release-fault'))}\n`;
+    const queueText = `${JSON.stringify({
+      schemaVersion: '1.0',
+      projectId: 'release-fault',
+      chapters: [{
+        chapterNumber: 1,
+        title: 'Lease release',
+        status: 'draft_ready',
+        currentStage: 'draft_assembly'
+      }]
+    })}\n`;
+    await Promise.all([
+      writeFile(statePath, storyStateText),
+      writeFile(queuePath, queueText)
+    ]);
+    faults.claimCleanupRenameFailures = 1;
+    const intervalSpy = vi.spyOn(globalThis, 'setInterval');
+    const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
 
-    await expect(lease.release())
-      .rejects.toThrow('forced transition claim cleanup failure');
-    expect((await lstat(`${faults.canonicalPath}.transition-claim`)).isFile()).toBe(true);
+    try {
+      await expect(withProjectChapterOperationLease({
+        projectRoot: root,
+        chapterNumber: 1,
+        operation: 'release-fault-business-callback',
+        allowStoryStateWrite: false
+      }, async () => 'callback-result')).resolves.toBe('callback-result');
 
-    const replacement = await acquireProjectOperationLease(root);
-    await expect(replacement.release()).resolves.toBeUndefined();
+      const createdTimers = intervalSpy.mock.results
+        .filter((result) => result.type === 'return')
+        .map((result) => result.value);
+      expect(createdTimers).toHaveLength(2);
+      for (const timer of createdTimers) {
+        expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+      }
+      expect(faults.claimCleanupRenameAttempts).toBe(1);
+      expect((await lstat(`${faults.canonicalPath}.transition-claim`)).isFile()).toBe(true);
+      expect((await readdir(root)).filter((entry) => entry.includes('.released-'))).toEqual([]);
+      expect(await readFile(statePath, 'utf8')).toBe(storyStateText);
+      expect(await readFile(queuePath, 'utf8')).toBe(queueText);
+
+      const replacement = await acquireProjectOperationLease(root);
+      await expect(lstat(`${faults.canonicalPath}.transition-claim`))
+        .rejects.toMatchObject({ code: 'ENOENT' });
+      expect(faults.claimCleanupRenameAttempts).toBe(1);
+      const replacementOwner = await readFile(faults.canonicalPath, 'utf8');
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(await readFile(faults.canonicalPath, 'utf8')).toBe(replacementOwner);
+      await expect(replacement.release()).resolves.toBeUndefined();
+      expect(faults.claimCleanupRenameAttempts).toBe(2);
+    } finally {
+      intervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
   });
 
   test('never restores a displaced claim over a newer claimant during exact cleanup', async () => {

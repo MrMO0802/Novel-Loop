@@ -22,7 +22,6 @@ const PROJECT_OPERATION_LOCK_STALE_MS = 10 * 60 * 1000;
 const PROJECT_OPERATION_OWNERLESS_GRACE_MS = 5 * 1000;
 const PROJECT_OPERATION_HEARTBEAT_MS = 30 * 1000;
 const PROJECT_OPERATION_CLAIM_HEARTBEAT_MS = 5 * 1000;
-const PROJECT_OPERATION_CLAIM_STALE_MS = 2 * 60 * 1000;
 const STALE_RECOVERY_ATTEMPTS = 4;
 const LOCK_OWNER_FILE = 'owner.json';
 const LOCK_TRANSITION_CLAIM_SUFFIX = '.transition-claim';
@@ -382,6 +381,7 @@ async function ownLock(
           );
         }
         const releasedPath = `${lockPath}.released-${owner.token}-${randomUUID()}`;
+        let releaseCommitted = false;
         try {
           await rename(lockPath, releasedPath);
           await syncParentDirectory(lockPath);
@@ -390,13 +390,19 @@ async function ownLock(
             await restoreQuarantinedPathNoReplace(releasedPath, lockPath);
             throw new Error('Released project lease identity changed during transition.');
           }
-          await claim.release();
-          finishRelease();
-          await rm(releasedPath, { recursive: true, force: true });
-          await syncParentDirectory(releasedPath);
-        } catch (error) {
+          releaseCommitted = true;
           await claim.release().catch(() => undefined);
+        } catch (error) {
+          if (!releaseCommitted) {
+            await claim.release().catch(() => undefined);
+          }
           throw error;
+        } finally {
+          if (releaseCommitted) {
+            finishRelease();
+            await rm(releasedPath, { recursive: true, force: true }).catch(() => undefined);
+            await syncParentDirectory(releasedPath).catch(() => undefined);
+          }
         }
       })().finally(() => {
         releaseAttempt = null;
@@ -783,7 +789,7 @@ async function heartbeatTransitionClaim(
     if (parsed.value === null || !isDeepStrictEqual(parsed.value, claim)) return;
     await handle.utimes(new Date(), new Date());
   } catch {
-    // A failed transition stops refreshing and becomes recoverable after the bounded claim TTL.
+    // Recovery remains conservative: a proven-live exact claimant is never expired by age alone.
   } finally {
     await handle?.close().catch(() => undefined);
   }
@@ -833,7 +839,7 @@ async function recoverStaleTransitionClaim(claimPath: string): Promise<boolean> 
   const ageMs = Date.now() - observation.mtimeMs;
   if (observation.claim !== null) {
     const alive = await isLockOwnerAlive(observation.claim.claimant);
-    if (alive === true && ageMs <= PROJECT_OPERATION_CLAIM_STALE_MS) return false;
+    if (alive === true) return false;
     if (alive === null && ageMs <= PROJECT_OPERATION_LOCK_STALE_MS) return false;
   } else if (ageMs <= PROJECT_OPERATION_OWNERLESS_GRACE_MS) {
     return false;

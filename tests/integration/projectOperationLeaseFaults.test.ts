@@ -251,6 +251,75 @@ describe('project operation lease fault recovery', () => {
     await expect(replacement.release()).resolves.toBeUndefined();
   });
 
+  test.each([
+    {
+      description: 'after a transient release rename failure',
+      claimCleanupRenameFailures: 0
+    },
+    {
+      description: 'after release rename and first claim cleanup both fail',
+      claimCleanupRenameFailures: 1
+    }
+  ])(
+    'retries wrapper release $description and preserves protected project bytes',
+    async ({ claimCleanupRenameFailures }) => {
+      root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-lease-fault-'));
+      faults.canonicalPath = path.resolve(root, PROJECT_OPERATION_LOCK_NAME);
+      const fixture = await createChapterOperationFixture(root);
+      faults.releaseRenameFailures = 1;
+      faults.claimCleanupRenameFailures = claimCleanupRenameFailures;
+      const intervalSpy = vi.spyOn(globalThis, 'setInterval');
+      const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
+
+      try {
+        await expect(runChapterLease(root, 'first-callback-result'))
+          .resolves.toBe('first-callback-result');
+        await expect(runChapterLease(root, 'later-callback-result'))
+          .resolves.toBe('later-callback-result');
+
+        const createdTimers = intervalSpy.mock.results
+          .filter((result) => result.type === 'return')
+          .map((result) => result.value);
+        expect(createdTimers.length).toBeGreaterThan(0);
+        for (const timer of createdTimers) {
+          expect(clearIntervalSpy).toHaveBeenCalledWith(timer);
+        }
+        await expect(lstat(faults.canonicalPath)).rejects.toMatchObject({ code: 'ENOENT' });
+        await expect(lstat(`${faults.canonicalPath}.transition-claim`))
+          .rejects.toMatchObject({ code: 'ENOENT' });
+        expect((await readdir(root)).filter((entry) => entry.includes('.released-'))).toEqual([]);
+        expect(await readFile(fixture.statePath)).toEqual(fixture.storyStateBytes);
+        expect(await readFile(fixture.queuePath)).toEqual(fixture.queueBytes);
+      } finally {
+        intervalSpy.mockRestore();
+        clearIntervalSpy.mockRestore();
+      }
+    }
+  );
+
+  test('retains an exhausted wrapper release so a later same-process operation can recover it', async () => {
+    root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-lease-fault-'));
+    faults.canonicalPath = path.resolve(root, PROJECT_OPERATION_LOCK_NAME);
+    const fixture = await createChapterOperationFixture(root);
+    faults.releaseRenameFailures = 32;
+
+    await expect(runChapterLease(root, 'unreachable-result'))
+      .rejects.toThrow('forced release rename failure');
+    expect((await lstat(faults.canonicalPath)).isFile()).toBe(true);
+    expect(await readFile(fixture.statePath)).toEqual(fixture.storyStateBytes);
+    expect(await readFile(fixture.queuePath)).toEqual(fixture.queueBytes);
+
+    faults.releaseRenameFailures = 0;
+    const recoveredLease = await acquireProjectOperationLease(root);
+    await expect(recoveredLease.release()).resolves.toBeUndefined();
+    await expect(lstat(faults.canonicalPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    await expect(lstat(`${faults.canonicalPath}.transition-claim`))
+      .rejects.toMatchObject({ code: 'ENOENT' });
+    expect((await readdir(root)).filter((entry) => entry.includes('.released-'))).toEqual([]);
+    expect(await readFile(fixture.statePath)).toEqual(fixture.storyStateBytes);
+    expect(await readFile(fixture.queuePath)).toEqual(fixture.queueBytes);
+  });
+
   test('cleans its claim after stale takeover rename fails so a new owner can retry', async () => {
     root = await mkdtemp(path.join(os.tmpdir(), 'novel-loop-lease-fault-'));
     faults.canonicalPath = path.resolve(root, PROJECT_OPERATION_LOCK_NAME);
@@ -347,3 +416,45 @@ describe('project operation lease fault recovery', () => {
     await expect(replacement.release()).resolves.toBeUndefined();
   });
 });
+
+async function createChapterOperationFixture(projectRoot: string): Promise<{
+  statePath: string;
+  queuePath: string;
+  storyStateBytes: Buffer;
+  queueBytes: Buffer;
+}> {
+  const statePath = path.join(projectRoot, 'state', 'story_state.json');
+  const queuePath = path.join(projectRoot, 'planning', 'chapter_queue.json');
+  await Promise.all([
+    mkdir(path.dirname(statePath), { recursive: true }),
+    mkdir(path.dirname(queuePath), { recursive: true })
+  ]);
+  const storyStateBytes = Buffer.from(
+    `${JSON.stringify(createInitialStoryState('wrapper-release-fault'))}\n`,
+    'utf8'
+  );
+  const queueBytes = Buffer.from(`${JSON.stringify({
+    schemaVersion: '1.0',
+    projectId: 'wrapper-release-fault',
+    chapters: [{
+      chapterNumber: 1,
+      title: 'Wrapper release recovery',
+      status: 'draft_ready',
+      currentStage: 'draft_assembly'
+    }]
+  })}\n`, 'utf8');
+  await Promise.all([
+    writeFile(statePath, storyStateBytes),
+    writeFile(queuePath, queueBytes)
+  ]);
+  return { statePath, queuePath, storyStateBytes, queueBytes };
+}
+
+async function runChapterLease(projectRoot: string, result: string): Promise<string> {
+  return withProjectChapterOperationLease({
+    projectRoot,
+    chapterNumber: 1,
+    operation: 'wrapper-release-recovery',
+    allowStoryStateWrite: false
+  }, async () => result);
+}

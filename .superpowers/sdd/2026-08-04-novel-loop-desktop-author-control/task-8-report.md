@@ -346,6 +346,34 @@ The round-7 regressions were added before production changes and observed RED:
 The conservative live-owner rule and terminal post-commit cleanup path made
 the same lease safety/fault/race matrix pass all `29` tests.
 
+## Round 8 TDD Evidence
+
+The round-8 wrapper regressions were added before production changes and
+observed RED:
+
+- A single injected canonical release-rename failure rejected the completed
+  chapter callback instead of returning its result.
+- The same wrapper remained broken when the first transition-claim cleanup
+  also failed, even though the private lease handle could resume that exact
+  claim when retained by a direct caller.
+- After the wrapper exhausted its only release attempt, a later same-process
+  acquisition reported the live project lock and had no way to recover the
+  discarded handle.
+
+The wrapper now retains its private lease before release, serializes recovery
+per resolved project root, and makes two bounded release attempts. If both
+attempts fail, the exact live handle remains in a process-local registry. A
+later acquisition must finish that release before it can publish a new owner;
+it cannot bypass or expire a proven-live claim. The new fault cases then passed
+all `11` tests, including byte-identical Story State and chapter queue checks,
+terminal path cleanup, heartbeat cleanup, and a later same-process acquisition.
+
+## Round 8 Changed Files
+
+- `src/app/projectOperationLease.ts`
+- `tests/integration/projectOperationLeaseFaults.test.ts`
+- This Task 8 implementation report.
+
 ## Round 7 Changed Files
 
 - `src/app/projectOperationLease.ts`
@@ -545,6 +573,23 @@ Final round-7 verification on 2026-08-17:
 - `corepack pnpm check:diff` and `git diff --check` passed after the report
   update.
 
+Final round-8 verification on 2026-08-17:
+
+- Lease publication, race, safety, and fault matrix: `4` files, `37` tests
+  passed, `0` failed.
+- Root Task 8 revision, invalidation, draft, adoption, adjustment, participant,
+  lease, race, safety, and fault matrix: `12` files, `131` tests passed, `0`
+  failed.
+- Desktop service, contract, IPC, preload, working-copy, editor, and workspace
+  focused matrix: `7` files, `240` tests passed, `0` failed.
+- Complete desktop suite with two workers: `36` files, `580` tests passed, `0`
+  failed.
+- `corepack pnpm build` passed.
+- `corepack pnpm --dir apps/desktop check` passed.
+- `corepack pnpm --dir apps/desktop build` passed.
+- `corepack pnpm check:diff` and `git diff --check` passed after the report
+  update.
+
 ## Safety Evidence
 
 - Draft adoption runs under a no-Story-State-write project/chapter lease.
@@ -565,6 +610,9 @@ Final round-7 verification on 2026-08-17:
   process-start-bound, exclusive, heartbeat-recoverable, and
   directory/inode-identity-checked. Exact cleanup never overwrites a newer
   canonical claimant.
+- Wrapper-owned leases survive transient release failures and retry exhaustion;
+  later same-process acquisition first resumes the retained exact owner instead
+  of stealing, aging out, or forgetting it.
 - Electron sandboxing remains enabled before the single-instance policy runs.
 - `.playwright-mcp/` and the two unrelated readiness PNG files were neither
   modified nor staged.

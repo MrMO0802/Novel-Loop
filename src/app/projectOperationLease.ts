@@ -23,6 +23,7 @@ const PROJECT_OPERATION_OWNERLESS_GRACE_MS = 5 * 1000;
 const PROJECT_OPERATION_HEARTBEAT_MS = 30 * 1000;
 const PROJECT_OPERATION_CLAIM_HEARTBEAT_MS = 5 * 1000;
 const STALE_RECOVERY_ATTEMPTS = 4;
+const PROJECT_OPERATION_RELEASE_ATTEMPTS = 2;
 const LOCK_OWNER_FILE = 'owner.json';
 const LOCK_TRANSITION_CLAIM_SUFFIX = '.transition-claim';
 const MAX_LOCK_METADATA_BYTES = 8 * 1024;
@@ -104,7 +105,13 @@ interface ProjectOperationContext {
   chapter?: ChapterOperationExpectation;
 }
 
+interface RetainedProjectLeaseRelease {
+  lease: ProjectOperationLease;
+  attempt: Promise<void> | null;
+}
+
 const operationContext = new AsyncLocalStorage<ProjectOperationContext>();
+const retainedProjectLeaseReleases = new Map<string, RetainedProjectLeaseRelease>();
 
 export async function acquireProjectOperationLease(
   projectRoot: string,
@@ -113,7 +120,9 @@ export async function acquireProjectOperationLease(
     message: 'Another project operation is already running.'
   }
 ): Promise<ProjectOperationLease> {
-  const lockPath = path.join(path.resolve(projectRoot), PROJECT_OPERATION_LOCK_NAME);
+  const resolvedProjectRoot = path.resolve(projectRoot);
+  await recoverRetainedProjectLeaseRelease(resolvedProjectRoot);
+  const lockPath = path.join(resolvedProjectRoot, PROJECT_OPERATION_LOCK_NAME);
   const token = randomUUID();
   const owner = await createLeaseOwner(token);
 
@@ -162,8 +171,54 @@ export async function withProjectChapterOperationLease<T>(
       chapter
     }, callback);
   } finally {
-    await lease.release();
+    await retainAndReleaseProjectLease(projectRoot, lease);
   }
+}
+
+async function retainAndReleaseProjectLease(
+  projectRoot: string,
+  lease: ProjectOperationLease
+): Promise<void> {
+  const retained = retainedProjectLeaseReleases.get(projectRoot);
+  if (retained !== undefined && retained.lease !== lease) {
+    throw new Error('Project lease recovery registry already retains another lease.');
+  }
+  if (retained === undefined) {
+    retainedProjectLeaseReleases.set(projectRoot, { lease, attempt: null });
+  }
+  await recoverRetainedProjectLeaseRelease(projectRoot);
+}
+
+async function recoverRetainedProjectLeaseRelease(projectRoot: string): Promise<void> {
+  const retained = retainedProjectLeaseReleases.get(projectRoot);
+  if (retained === undefined) return;
+  if (retained.attempt !== null) return retained.attempt;
+
+  let releaseAttempt: Promise<void>;
+  releaseAttempt = releaseProjectLeaseWithRetries(retained.lease)
+    .then(() => {
+      if (retainedProjectLeaseReleases.get(projectRoot) === retained) {
+        retainedProjectLeaseReleases.delete(projectRoot);
+      }
+    })
+    .finally(() => {
+      if (retained.attempt === releaseAttempt) retained.attempt = null;
+    });
+  retained.attempt = releaseAttempt;
+  return releaseAttempt;
+}
+
+async function releaseProjectLeaseWithRetries(lease: ProjectOperationLease): Promise<void> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < PROJECT_OPERATION_RELEASE_ATTEMPTS; attempt += 1) {
+    try {
+      await lease.release();
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError;
 }
 
 export async function beforeProjectOperationWrite(filePath: string): Promise<void> {

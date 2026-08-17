@@ -18,7 +18,10 @@ separately in the SDD ledger.
   `novel-loop-engine/author-facing` code is bundled into Electron main while
   `novel-loop-engine/desktop` remains an external dynamic import.
 - Fixed a real project-lease race by reading the generated draft before the
-  lease-backed working copy and plan, including the post-adoption refresh.
+  lease-backed working copy and plan, including the post-adoption refresh. The
+  refresh now stops after navigation/unmount and cannot continue companion reads.
+- Blocked draft confirmation while a mission or direction working copy remains
+  open, so an unadopted author edit cannot be silently bypassed.
 - Updated Chinese author copy and operator documentation for selection, direct
   editing, bounded AI adjustment, participant repair, comparison, autosave,
   recovery, adoption, and the Phase A stop point.
@@ -35,8 +38,10 @@ The serial Electron test proves this exact sequence:
 2. Selects the second, non-recommended direction.
 3. Directly edits and adopts that direction after reviewing the downstream
    invalidation warning.
-4. Removes all mission participants and proves validation blocks before the
-   `planning.generate_scene_cards_slim` provider stage.
+4. Removes all mission participants and proves editor validation blocks the
+   invalid working copy. A schema-valid no-participant legacy fixture then
+   enters the actual draft-start preflight and is routed to participant repair
+   without starting `planning.generate_scene_cards_slim`.
 5. Adds and adopts provisional participant `周谨`, regenerates planning, and
    confirms the adopted participant remains in `mission.json`.
 6. Generates two scenes and `draft_v1.md`, edits the draft, and waits for the
@@ -62,14 +67,17 @@ project, run, raw Codex output, or hash fixture is retained in the repository.
 - All generation uses the local deterministic fake binary selected through
   `NLE_CODEX_BIN`; the fixture rejects unknown commands, prompt IDs, schemas,
   prompt replacement, dangerous instructions, and unsafe execution flags.
-- Exactly one scene-card prompt is recorded, followed by exactly two
-  `production.write_scene` prompts. Participant repair records no scene-card
-  provider call.
+- The fake records every provider-process attempt before prompt validation.
+  Exactly one scene-card attempt is recorded, followed by exactly two
+  `production.write_scene` attempts. Empty-roster preflight records no provider
+  attempt at all.
 - Every fake invocation requires sandbox `read-only` and approval policy
   `never`.
 - Renderer chapter methods remain the exact allowlisted preload API.
-- Renderer payload assertions reject filesystem paths, hashes, run IDs, schema
-  names, raw JSONL/provider output, and auth/token-file fields.
+- Renderer payload assertions cover inspection, plan, draft, working-copy, and
+  adjustment start/get task results. Recursive key/value checks reject generic
+  filesystem paths on POSIX, Windows, and UNC forms; hashes; raw candidate IDs;
+  run/schema/provider/model/prompt/raw/auth metadata; JSONL; and secret fields.
 - Renderer `process` and `require` remain unavailable.
 
 ## Verification
@@ -84,16 +92,29 @@ Release-quality matrix:
 - `corepack pnpm test`: **199 files, 655 tests passed** in `237.58s`.
 - `corepack pnpm --dir apps/desktop check`: passed all Node, renderer, and E2E
   TypeScript configurations.
-- `corepack pnpm --dir apps/desktop test`: **36 files, 582 tests passed** in
-  `40.88s`.
+- `corepack pnpm --dir apps/desktop test`: **36 files, 584 tests passed** in
+  `39.68s`.
 - `corepack pnpm desktop:build`: passed; Electron main, preload, and renderer
   production bundles generated successfully.
-- `corepack pnpm --dir apps/desktop test:e2e`: **8 tests passed** in `37.4s`.
+- `corepack pnpm --dir apps/desktop test:e2e`: **9 tests passed** in `41.2s`.
 
 The focused author-control acceptance also passed independently before the full
 suite. An earlier CommonJS `ERR_PACKAGE_PATH_NOT_EXPORTED` startup failure and
 the chapter-read lease race were reproduced, fixed, and superseded by the
 passing results above.
+
+## Review Round 1 Closure
+
+The first independent review found four gaps, all covered by bounded fixes:
+
+- empty-participant acceptance now reaches the real draft-start preflight and
+  uses attempt-level fake-provider logging;
+- renderer boundary assertions cover plan and adjustment task payloads with
+  generic recursive cross-platform leakage detection;
+- post-adoption reads are fenced by the workspace request generation after
+  navigation/unmount;
+- operator documentation scopes queue immutability to editing/recovery/adoption
+  after `draft_ready`, while Story State remains immutable across the full flow.
 
 ## Operator Documentation
 

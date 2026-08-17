@@ -1101,4 +1101,16 @@ describe('chapter plan review', () => {
       name: '确认方向并生成草稿'
     })).toHaveFocus();
   });
+
+  test('blocks draft confirmation while an author working copy is open', async () => {
+    installApi();
+    render(<App />);
+    await openReview();
+
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+
+    expect(screen.getByRole('button', {
+      name: '确认方向并生成草稿'
+    })).toBeDisabled();
+  });
 });

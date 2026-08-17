@@ -698,6 +698,28 @@ test.describe('serial desktop author-control acceptance', () => {
       let page = await application.firstWindow();
       await openFirstChapterPlan(page);
 
+      const adjustmentBoundaryPayload = await page.evaluate(async (key) => {
+        const plan = await window.novelLoop.chapter.readPlan({ projectKey: key });
+        if (!plan.available) throw new Error('Expected an available plan review.');
+        const direction = plan.directions[0];
+        if (!direction) throw new Error('Expected at least one chapter direction.');
+        const started = await window.novelLoop.chapter.adjustPlan({
+          projectKey: key,
+          reviewToken: plan.reviewToken,
+          optionToken: direction.optionToken,
+          authorInstruction: '让旧楼入口更早出现。'
+        });
+        let completed = started;
+        for (let attempt = 0; attempt < 100; attempt += 1) {
+          if (!['queued', 'running', 'stop_requested'].includes(completed.status)) break;
+          await new Promise((resolve) => window.setTimeout(resolve, 50));
+          completed = await window.novelLoop.chapter.get({ taskId: started.taskId });
+        }
+        return { completed, started };
+      }, projectKey);
+      expectRendererBoundaryPayloadSafe(adjustmentBoundaryPayload);
+      expect(adjustmentBoundaryPayload.completed.status).toBe('succeeded');
+
       for (const title of AUTHOR_CONTROL_DIRECTION_TITLES) {
         await expect(page.getByRole('radio', { name: title })).toBeVisible();
       }
@@ -760,6 +782,30 @@ test.describe('serial desktop author-control acceptance', () => {
       expect(callsBeforeRepair.map(({ promptId }) => promptId))
         .not.toContain('planning.generate_scene_cards_slim');
 
+      const missionWithoutParticipants = JSON.parse(
+        await readFile(missionPath, 'utf8')
+      ) as Record<string, unknown>;
+      await writeFile(missionPath, `${JSON.stringify({
+        ...missionWithoutParticipants,
+        characterDeltas: [],
+        charactersToIntroduce: [],
+        participatingCharacterIds: []
+      }, null, 2)}\n`);
+      await page.getByRole('button', { name: '返回项目概览' }).click();
+      await page.getByRole('button', { name: '审阅第 1 章方向' }).click();
+      await expect(page.getByRole('heading', { name: '审阅第 1 章方向' }))
+        .toBeVisible();
+      await page.getByRole('button', { name: '确认方向并生成草稿' }).click();
+      await page.getByRole('button', { name: '开始生成草稿' }).click();
+      await expect(page.getByRole('alert')).toContainText(
+        '本章还没有声明可参与场景的人物'
+      );
+      expect(await readPlanningFakeCalls(
+        path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+      )).toEqual(callsBeforeRepair);
+      await page.getByRole('button', { name: '补充本章人物' }).click();
+      await expect(page.getByRole('heading', { name: '编辑本章任务' }))
+        .toBeFocused();
       await page.getByRole('button', { name: '添加人物', exact: true }).click();
       await page.getByRole('textbox', { name: '新人物 1 姓名' }).fill('周谨');
       await page.getByRole('textbox', { name: '新人物 1 角色' }).fill('物业值班员');
@@ -841,6 +887,8 @@ test.describe('serial desktop author-control acceptance', () => {
       await expect(page.getByText('作者采用修订')).toBeVisible();
 
       const rendererBoundary = await page.evaluate(async (key) => {
+        const inspection = await window.novelLoop.chapter.inspect({ projectKey: key });
+        const plan = await window.novelLoop.chapter.readPlan({ projectKey: key });
         const draft = await window.novelLoop.chapter.readDraft({ projectKey: key });
         const workingCopy = await window.novelLoop.chapter.readDraftWorkingCopy({
           projectKey: key
@@ -849,15 +897,13 @@ test.describe('serial desktop author-control acceptance', () => {
           chapterKeys: Object.keys(window.novelLoop.chapter),
           nodeProcessType: typeof globalThis.process,
           nodeRequireType: typeof globalThis.require,
-          payload: JSON.stringify({ draft, workingCopy })
+          payload: { draft, inspection, plan, workingCopy }
         };
       }, projectKey);
       expect(rendererBoundary.chapterKeys).toEqual(CHAPTER_API_KEYS);
       expect(rendererBoundary.nodeProcessType).toBe('undefined');
       expect(rendererBoundary.nodeRequireType).toBe('undefined');
-      expect(rendererBoundary.payload).not.toMatch(
-        /"(?:projectRoot|sourceHash|workingCopyHash|schemaName|runId|rawOutput|rawJsonl|auth|tokenFile)"\s*:|\.jsonl|\/home\/|\/tmp\//iu
-      );
+      expectRendererBoundaryPayloadSafe(rendererBoundary.payload);
       await application.close();
       application = null;
 
@@ -958,6 +1004,20 @@ test('chapter-flow fake Codex exposes deterministic bounded adjustment responses
     ]);
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test('renderer boundary detector rejects internal keys, IDs, and cross-platform paths', () => {
+  for (const leak of [
+    { artifactPath: 'chapters/chapter_001/mission.json' },
+    { candidateId: 'plan_001' },
+    { provider: 'codex-text' },
+    { sourceHash: 'a'.repeat(64) },
+    { nested: { value: '/tmp/novel-loop/raw.jsonl' } },
+    { nested: { value: 'C:\\Users\\author\\project\\state.json' } },
+    { nested: { value: '\\\\server\\share\\story_state.json' } }
+  ]) {
+    expect(() => expectRendererBoundaryPayloadSafe(leak)).toThrow();
   }
 });
 
@@ -1402,6 +1462,28 @@ async function sha256(filePath: string): Promise<string> {
   return createHash('sha256').update(await readFile(filePath)).digest('hex');
 }
 
+function expectRendererBoundaryPayloadSafe(value: unknown, trail = 'payload'): void {
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      expectRendererBoundaryPayloadSafe(item, `${trail}[${index}]`);
+    });
+    return;
+  }
+  if (typeof value === 'object' && value !== null) {
+    for (const [key, item] of Object.entries(value)) {
+      expect(key, `forbidden renderer key at ${trail}.${key}`).not.toMatch(
+        /(?:path|hash|runId|schema|raw|provider|profile|model|promptId|auth|credential|secret|tokenFile|apiKey|candidateId|artifactId|revisionId|mutationId)/iu
+      );
+      expectRendererBoundaryPayloadSafe(item, `${trail}.${key}`);
+    }
+    return;
+  }
+  if (typeof value !== 'string') return;
+  expect(value, `forbidden renderer value at ${trail}`).not.toMatch(
+    /(?:^|\s)(?:[a-z]:[\\/]|\\\\|\/)(?:[^\s]+)|file:\/\/|\.jsonl\b|\b(?:plan|mission|scene|run|artifact|revision|mutation)_[0-9][a-z0-9_-]*\b|\b[a-f0-9]{64}\b/iu
+  );
+}
+
 function parseChapterQueueForDraftAssertion(value: unknown): {
   chapters: Array<{
     chapterNumber: number;
@@ -1673,6 +1755,11 @@ if (unsafeArguments.some((arg) => args.includes(arg))
 }
 const stdin = fs.readFileSync(0, 'utf8');
 const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || '';
+fs.appendFileSync(callsLogPath, JSON.stringify({
+  args,
+  outputPath: typeof args[9] === 'string' ? path.resolve(args[9]) : '',
+  promptId
+}) + '\\n');
 const completedPromptIds = readCompletedPromptIds();
 if (!allowedNextPromptIds(completedPromptIds).includes(promptId)) {
   process.stderr.write('Unknown or out-of-order fake Codex prompt');
@@ -2094,7 +2181,6 @@ if (typeof finalText !== 'string') {
 }
 fs.writeFileSync(outputPath, finalText);
 fs.writeFileSync(statePath, JSON.stringify([...completedPromptIds, promptId]));
-fs.appendFileSync(callsLogPath, JSON.stringify({ args, outputPath, promptId }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'thread.started' }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'item.completed', item: { type: 'agent_message', text: finalText } }) + '\\n');
 process.stdout.write(JSON.stringify({ type: 'turn.completed' }) + '\\n');

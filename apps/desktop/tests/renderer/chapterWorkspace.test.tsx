@@ -246,6 +246,41 @@ describe('initial chapter workspace', () => {
     expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(2);
   });
 
+  test('stops the post-adoption read sequence after leaving the workspace', async () => {
+    if (!completeChapterDraft.available) {
+      throw new Error('Expected the complete chapter draft fixture to be available.');
+    }
+    const api = installApi();
+    const adoptedDraft = {
+      ...completeChapterDraft,
+      markdown: `${completeChapterDraft.markdown}\n\n离开前采用。`,
+      versionKind: 'author_adopted' as const
+    };
+    let resolveAdoptedDraft: ((value: typeof adoptedDraft) => void) | null = null;
+    api.chapter.readDraft
+      .mockResolvedValueOnce(completeChapterDraft)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveAdoptedDraft = resolve;
+      }));
+    render(<App />);
+    await openWorkspace();
+
+    fireEvent.change(screen.getByRole('textbox', { name: '章节正文' }), {
+      target: { value: adoptedDraft.markdown }
+    });
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(api.chapter.saveDraftWorkingCopy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
+    await waitFor(() => expect(api.chapter.readDraft).toHaveBeenCalledTimes(2));
+
+    fireEvent.click(screen.getByRole('button', { name: '返回项目概览' }));
+    await screen.findByRole('heading', { name: '白箱循环' });
+    await act(async () => resolveAdoptedDraft?.(adoptedDraft));
+
+    expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(1);
+  });
+
   test('uses stable responsive tracks without gradients or oversized radii', () => {
     const styles = readFileSync(
       resolve(process.cwd(), 'src/renderer/src/styles/chapter.css'),

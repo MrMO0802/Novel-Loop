@@ -149,9 +149,11 @@ export function ChapterWorkspace({
                 draft={availableDraft}
                 key={`${project.projectKey}:${availableDraft.chapterNumber}:${editorEpoch}`}
                 onAdopted={async () => {
+                  const currentRequest = ++requestToken.current;
                   const draftResult = await window.novelLoop.chapter.readDraft({
                     projectKey: project.projectKey
                   });
+                  if (currentRequest !== requestToken.current) return;
                   if (!draftResult.available) {
                     setDraft(draftResult);
                     setFailed(true);
@@ -160,6 +162,7 @@ export function ChapterWorkspace({
                   const copyResult = await window.novelLoop.chapter.readDraftWorkingCopy({
                     projectKey: project.projectKey
                   });
+                  if (currentRequest !== requestToken.current) return;
                   setDraft(draftResult);
                   setWorkingCopy(copyResult);
                   setFailed(false);

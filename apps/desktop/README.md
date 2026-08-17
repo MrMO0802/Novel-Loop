@@ -249,8 +249,10 @@ Then verify the author workflow:
    then add or repair a valid participant and explicitly adopt the mission.
 10. Generate the initial draft, edit it, wait for autosave, restart Electron,
     explicitly continue the recovered working copy, compare, and adopt it.
-11. Confirm `draft_v1.md`, Story State, the chapter queue, and the latest
-    committed chapter remain unchanged while a versioned author revision exists.
+11. After the generated draft reaches `draft_ready`, confirm author editing,
+    recovery, and adoption leave `draft_v1.md` and the chapter queue unchanged;
+    confirm Story State and the latest committed chapter stayed unchanged across
+    the complete Phase A workflow while a versioned author revision now exists.
 
 The Electron suites verify the built application, preload boundary, Chromium
 security controls, and author workflow with deterministic fake-Codex fixtures

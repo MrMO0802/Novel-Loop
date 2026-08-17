@@ -399,7 +399,7 @@ export function ChapterPlanReview({
                   <button
                     aria-describedby="chapter-draft-note"
                     className="nl-primary-action"
-                    disabled={adjustment !== null}
+                    disabled={adjustment !== null || editor !== null}
                     onClick={() => setConfirmingDraft(true)}
                     ref={confirmationTriggerRef}
                     type="button"
@@ -437,7 +437,7 @@ export function ChapterPlanReview({
                     <button
                       aria-describedby="chapter-draft-confirmation-note"
                       className="nl-primary-action"
-                      disabled={adjustment !== null}
+                      disabled={adjustment !== null || editor !== null}
                       onClick={onGenerateDraft}
                       type="button"
                     >

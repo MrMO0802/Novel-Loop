@@ -2,13 +2,31 @@
 
 ## Unreleased
 
+- Added the Phase A desktop author-control documentation and Chinese status
+  language for generated source, unadopted working copy, comparison candidate,
+  and explicitly adopted author draft.
+- Documented three-way chapter direction selection, direct mission/plan edits,
+  bounded local-Codex adjustment, source comparison, downstream invalidation
+  disclosure, and explicit adoption.
+- Documented participant repair as a pre-draft recovery path that retains the
+  existing character-reference validation boundary.
+- Documented chapter-draft autosave and restart recovery in Electron application
+  data, while generated `draft_v1.md`, Story State, chapter queue, and
+  `latestCommittedChapter` remain unchanged.
+- Clarified the Phase A stop point and unsupported desktop scope: no Story
+  Foundation/global-planning editing, diagnostics, canonical final/canon patch,
+  Story State commit, snapshots, DeepSeek, OpenAI API, Web UI,
+  CodexAgentConnector, workspace-write, historical recommit, stale regeneration,
+  or conflict auto-repair.
+- Added Ubuntu inotify watcher-limit recovery instructions while retaining the
+  required secure Chromium sandbox policy.
 - Added the desktop Story Foundation author workflow: explicit local-Codex
   confirmation, four-stage background generation, cooperative stop requests,
   retry for failed or cancelled incomplete work, and read-only review of four
   strategy documents.
-- Kept the desktop milestone scoped to Story Foundation. It does not expose
-  global planning, chapter generation or commits, or Story State and
-  chapter-queue mutation; Story Foundation generation protects those artifacts.
+- Extended the desktop milestone through author adoption of a chapter draft.
+  Generated Story Foundation and global planning remain review-only, and no
+  desktop authoring action commits Story State or advances the chapter queue.
 
 ## v2.5.0-rc.1
 

@@ -286,7 +286,7 @@ describe('chapter plan review', () => {
     expect(screen.getByRole('button', { name: '确认方向并生成草稿' }))
       .toBeDisabled();
     expect(screen.getByText(
-      'AI 只会调整这个方向并生成待采用版本，不会更换当前方向或修改正式故事状态。'
+      'AI 只会按这条意见局部调整当前方向，并生成一个待比较、待采用的版本；不会自动更换方向或修改正式故事状态。'
     )).toBeVisible();
     fireEvent.change(screen.getByRole('textbox', { name: '调整意见' }), {
       target: { value: '把开场提前到事故现场，但不要新增人物。' }

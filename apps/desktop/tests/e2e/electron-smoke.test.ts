@@ -1,4 +1,11 @@
-import { _electron as electron, expect, test } from '@playwright/test';
+import {
+  _electron as electron,
+  expect,
+  test,
+  type ElectronApplication,
+  type Locator,
+  type Page
+} from '@playwright/test';
 import { createHash } from 'node:crypto';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { statSync, readFileSync } from 'node:fs';
@@ -33,6 +40,10 @@ const CHAPTER_PROMPT_IDS = [
   'production.write_scene',
   'production.write_scene'
 ] as const;
+const ADJUSTMENT_PROMPT_IDS = [
+  'planning.adjust_chapter_mission_slim',
+  'planning.adjust_plan_candidate_slim'
+] as const;
 const FULL_DRAFT_PROMPT_IDS = [
   ...PLANNING_PROMPT_IDS,
   ...CHAPTER_PROMPT_IDS
@@ -44,13 +55,41 @@ const JSON_SCHEMA_BY_PROMPT = {
     'planning.chapter_queue.slim.schema.json',
   'planning.plan_chapter_mission_slim':
     'planning.chapter_mission.slim.schema.json',
+  'planning.adjust_chapter_mission_slim':
+    'planning.chapter_mission_adjustment.slim.schema.json',
   'planning.generate_plan_candidates_slim':
     'planning.plan_candidates.slim.schema.json',
+  'planning.adjust_plan_candidate_slim':
+    'planning.plan_adjustment.slim.schema.json',
   'planning.rank_plan_candidates_slim':
     'planning.ranking.slim.schema.json',
   'planning.generate_scene_cards_slim':
     'drafting.scene_cards.slim.schema.json'
 } as const;
+const AUTHOR_CONTROL_DIRECTION_TITLES = [
+  '断电后的呼声',
+  '旧楼先声',
+  '静默频段'
+] as const;
+const CHAPTER_API_KEYS = [
+  'inspect',
+  'startPlanning',
+  'startDrafting',
+  'adjustMission',
+  'adjustPlan',
+  'get',
+  'cancel',
+  'readPlan',
+  'readDraft',
+  'readDraftWorkingCopy',
+  'saveDraftWorkingCopy',
+  'discardDraftWorkingCopy',
+  'adoptDraftRevision',
+  'selectDirection',
+  'saveMissionWorkingCopy',
+  'savePlanWorkingCopy',
+  'adoptRevision'
+] as const;
 
 function readKernelSetting(settingPath: string): string | null {
   try {
@@ -212,15 +251,7 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
 
       expect(boundary).toEqual({
         apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter'],
-        chapterKeys: [
-          'inspect',
-          'startPlanning',
-          'startDrafting',
-          'get',
-          'cancel',
-          'readPlan',
-          'readDraft'
-        ],
+        chapterKeys: [...CHAPTER_API_KEYS],
         hasReadinessMethod: true,
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined',
@@ -400,7 +431,10 @@ test('authors can create chapter one through planning review and initial draft w
       await expect(page.getByRole('heading', { name: '人物变化' })).toBeVisible();
       await expect(page.getByRole('heading', { name: '读者会知道' })).toBeVisible();
       await expect(page.getByRole('heading', { name: '本章不能做' })).toBeVisible();
-      await expect(page.getByText('选定方向：Plan 001')).toBeVisible();
+      await expect(page.getByRole('radio', {
+        name: '断电后的呼声'
+      })).toBeChecked();
+      await expect(page.getByText('当前方向', { exact: true })).toBeVisible();
 
       await page.getByRole('button', {
         name: '确认方向并生成草稿'
@@ -437,15 +471,7 @@ test('authors can create chapter one through planning review and initial draft w
       }));
       expect(boundary).toEqual({
         apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter'],
-        chapterKeys: [
-          'inspect',
-          'startPlanning',
-          'startDrafting',
-          'get',
-          'cancel',
-          'readPlan',
-          'readDraft'
-        ],
+        chapterKeys: [...CHAPTER_API_KEYS],
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined'
       });
@@ -589,6 +615,347 @@ test('authors can create chapter one through planning review and initial draft w
     expect(await listProtectedArtifacts(projectRoot)).toEqual(
       protectedArtifactsBefore
     );
+  } finally {
+    await rm(temporaryRoot, { force: true, recursive: true });
+  }
+});
+
+test.describe('serial desktop author-control acceptance', () => {
+  test.describe.configure({ mode: 'serial' });
+
+  test('author-controlled chapter survives restart without changing canonical state', async () => {
+    test.setTimeout(180_000);
+    const blocker = secureSandboxBlocker();
+    if (
+      blocker !== null
+      && process.env['NOVEL_LOOP_REQUIRE_ELECTRON_SMOKE'] === '1'
+    ) {
+      throw new Error(blocker);
+    }
+    test.skip(blocker !== null, blocker ?? '');
+
+    const temporaryRoot = await mkdtemp(
+      path.join(tmpdir(), 'novel-loop-electron-author-control-')
+    );
+    const projectsRoot = path.join(temporaryRoot, 'projects');
+    const userDataDirectory = path.join(temporaryRoot, 'user-data');
+    const projectId = 'desktop-planning-e2e';
+    const projectKey = 'project_desktop_planning_e2e';
+    const projectRoot = path.join(projectsRoot, projectId);
+    const briefPath = path.join(temporaryRoot, 'brief.md');
+    const fake = await writePlanningFakeCodex(temporaryRoot);
+    const storyStatePath = path.join(projectRoot, 'state', 'story_state.json');
+    const queuePath = path.join(projectRoot, 'planning', 'chapter_queue.json');
+    const generatedDraftPath = path.join(
+      projectRoot,
+      'chapters',
+      'chapter_001',
+      'draft_v1.md'
+    );
+    const missionPath = path.join(
+      projectRoot,
+      'chapters',
+      'chapter_001',
+      'mission.json'
+    );
+    let application: ElectronApplication | null = null;
+
+    try {
+      await mkdir(projectsRoot, { recursive: true });
+      await writeFile(briefPath, [
+        '# Electron Planning Test',
+        '',
+        '## Core Idea',
+        '',
+        'A powerless radio leads a tenant into an old building mystery.'
+      ].join('\n'));
+      await runCli([
+        'init',
+        projectId,
+        '--brief',
+        briefPath,
+        '--root',
+        projectsRoot
+      ]);
+      await runCli([
+        'build-bible',
+        projectId,
+        '--provider',
+        'mock',
+        '--root',
+        projectsRoot
+      ]);
+      await writeProjectRegistry({
+        projectId,
+        projectKey,
+        projectRoot,
+        projectsRoot,
+        userDataDirectory
+      });
+      const storyStateHashBefore = await sha256(storyStatePath);
+
+      application = await launchDesktop(userDataDirectory, fake.codexBin);
+      let page = await application.firstWindow();
+      await openFirstChapterPlan(page);
+
+      for (const title of AUTHOR_CONTROL_DIRECTION_TITLES) {
+        await expect(page.getByRole('radio', { name: title })).toBeVisible();
+      }
+      await expect(page.getByText('Untitled Plan')).toHaveCount(0);
+      const secondDirection = directionArticle(page, AUTHOR_CONTROL_DIRECTION_TITLES[1]);
+      await secondDirection.getByRole('button', { name: '设为本章方向' }).click();
+      await expect(page.getByRole('heading', {
+        name: '确认更换本章方向'
+      })).toBeFocused();
+      await expect(page.getByText('场景规划、场景草稿、章节初稿')).toBeVisible();
+      await page.getByRole('button', { name: '确认设为本章方向' }).click();
+      await expect(page.getByRole('radio', {
+        name: AUTHOR_CONTROL_DIRECTION_TITLES[1]
+      })).toHaveAttribute('aria-checked', 'true');
+
+      const activeSecondDirection = directionArticle(
+        page,
+        AUTHOR_CONTROL_DIRECTION_TITLES[1]
+      );
+      await activeSecondDirection.getByRole('button', { name: '编辑后使用' }).click();
+      const planEditor = page.getByRole('textbox', { name: '章节规划 Markdown' });
+      const authorPlan = [
+        '# 旧楼先声（作者修订）',
+        '',
+        '先让林程在旧楼门口听见断电收音机的呼声，再回溯它为何把他引到这里。'
+      ].join('\n');
+      await planEditor.fill(authorPlan);
+      await page.getByRole('button', { name: '保存草稿' }).click();
+      await expect(page.getByText('已保存，等待采用')).toBeVisible();
+      await page.getByRole('button', { name: '采用此版' }).click();
+      await expect(page.getByRole('heading', {
+        name: '确认采用修订后的方向'
+      })).toBeFocused();
+      await expect(page.getByText('场景规划、场景草稿、章节初稿')).toBeVisible();
+      await page.getByRole('button', {
+        name: '确认采用修订后的方向'
+      }).click();
+      await expect(page.getByRole('heading', {
+        name: '确认采用修订后的方向'
+      })).toHaveCount(0);
+      await expect(page.getByRole('heading', {
+        level: 3,
+        name: '旧楼先声（作者修订）'
+      })).toBeVisible();
+
+      await page.getByRole('button', { name: '编辑本章任务' }).click();
+      const originalParticipant = page.getByRole('checkbox', {
+        name: /林程.*主角/u
+      });
+      await originalParticipant.uncheck();
+      const removeDelta = page.getByRole('button', { name: '移除人物变化 1' });
+      if (await removeDelta.count() > 0) await removeDelta.click();
+      await page.getByRole('button', { name: '保存草稿' }).click();
+      await expect(page.getByRole('alert')).toContainText(
+        '本章还没有声明可参与场景的人物'
+      );
+      const callsBeforeRepair = await readPlanningFakeCalls(
+        path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+      );
+      expect(callsBeforeRepair.map(({ promptId }) => promptId))
+        .not.toContain('planning.generate_scene_cards_slim');
+
+      await page.getByRole('button', { name: '添加人物', exact: true }).click();
+      await page.getByRole('textbox', { name: '新人物 1 姓名' }).fill('周谨');
+      await page.getByRole('textbox', { name: '新人物 1 角色' }).fill('物业值班员');
+      await page.getByRole('button', { name: '保存草稿' }).click();
+      await expect(page.getByText('已保存，等待采用')).toBeVisible();
+      await page.getByRole('button', { name: '采用此版' }).click();
+      await expect(page.getByRole('heading', {
+        name: '确认采用修订后的任务'
+      })).toBeFocused();
+      await expect(page.getByText(
+        '方案候选、方向排序、选定方案、场景规划、场景草稿、章节初稿'
+      )).toBeVisible();
+      await page.getByRole('button', {
+        name: '确认采用修订后的任务'
+      }).click();
+      await expect(page.getByRole('alert')).toContainText('暂时无法读取章节方向');
+      await expect(readFile(missionPath, 'utf8')).resolves.toContain('周谨');
+      await page.getByRole('button', { name: '返回项目概览' }).click();
+      await page.getByRole('button', { name: '继续准备第 1 章' }).click();
+      await expect(page.getByRole('heading', { name: '准备第 1 章方向' })).toBeVisible();
+      await page.getByRole('button', { name: '开始准备章节方向' }).click();
+      await expect(page.getByRole('heading', { name: '审阅第 1 章方向' })).toBeVisible({
+        timeout: 45_000
+      });
+      await expect(readFile(missionPath, 'utf8')).resolves.toContain('周谨');
+
+      await page.getByRole('button', { name: '确认方向并生成草稿' }).click();
+      await page.getByRole('button', { name: '开始生成草稿' }).click();
+      try {
+        await expect(page.getByText('初稿', { exact: true })).toBeVisible({
+          timeout: 45_000
+        });
+      } catch (error) {
+        const { readDesktopChapterDraft } = await import('novel-loop-engine/desktop');
+        const directRead = await readDesktopChapterDraft({ projectRoot })
+          .then((value) => JSON.stringify(value))
+          .catch((directError: unknown) => directError instanceof Error
+            ? `${directError.name}: ${directError.message}\n${directError.stack ?? ''}`
+            : String(directError));
+        const [fakeErrors, projectFiles, queueText] = await Promise.all([
+          readFile(fake.errorLogPath, 'utf8').catch(() => '(no fake Codex stderr)'),
+          listFilesRecursively(projectRoot),
+          readFile(queuePath, 'utf8').catch(() => '(queue unavailable)')
+        ]);
+        throw new Error([
+          'Author-controlled draft generation did not complete.',
+          `Fake Codex stderr: ${fakeErrors}`,
+          `Direct draft read: ${directRead}`,
+          `Project files: ${projectFiles.join(', ')}`,
+          `Queue: ${queueText}`
+        ].join('\n'), { cause: error });
+      }
+      const generatedDraftHash = await sha256(generatedDraftPath);
+      const queueHashAtDraftReady = await sha256(queuePath);
+      const generatedDraft = await readFile(generatedDraftPath, 'utf8');
+      expect(generatedDraft).toContain('Codex scene 1');
+
+      const draftEditor = page.getByRole('textbox', { name: '章节正文' });
+      const authorDraft = `${await draftEditor.inputValue()}\n\n林程在门把手上留下一道铅笔记号。`;
+      await draftEditor.fill(authorDraft);
+      await expect(page.getByRole('status')).toContainText('已自动保存', {
+        timeout: 10_000
+      });
+      await application.close();
+      application = null;
+
+      application = await launchDesktop(userDataDirectory, fake.codexBin);
+      page = await application.firstWindow();
+      await page.getByRole('button', { name: '进入作品库' }).click();
+      await page.getByRole('button', { name: '打开《Electron Planning Test》' }).click();
+      await page.getByRole('button', { name: '打开第 1 章初稿' }).click();
+      await expect(page.getByRole('alert')).toContainText('已恢复上次未采用的编辑草稿');
+      await page.getByRole('button', { name: '继续编辑' }).click();
+      await expect(page.getByRole('textbox', { name: '章节正文' }))
+        .toHaveValue(authorDraft);
+      await page.getByRole('button', { name: '采用此修订' }).click();
+      await expect(page.getByRole('dialog', { name: '采用草稿确认' })).toBeVisible();
+      await page.getByRole('button', { name: '确认采用' }).click();
+      await expect(page.getByText('作者采用修订')).toBeVisible();
+
+      const rendererBoundary = await page.evaluate(async (key) => {
+        const draft = await window.novelLoop.chapter.readDraft({ projectKey: key });
+        const workingCopy = await window.novelLoop.chapter.readDraftWorkingCopy({
+          projectKey: key
+        });
+        return {
+          chapterKeys: Object.keys(window.novelLoop.chapter),
+          nodeProcessType: typeof globalThis.process,
+          nodeRequireType: typeof globalThis.require,
+          payload: JSON.stringify({ draft, workingCopy })
+        };
+      }, projectKey);
+      expect(rendererBoundary.chapterKeys).toEqual(CHAPTER_API_KEYS);
+      expect(rendererBoundary.nodeProcessType).toBe('undefined');
+      expect(rendererBoundary.nodeRequireType).toBe('undefined');
+      expect(rendererBoundary.payload).not.toMatch(
+        /"(?:projectRoot|sourceHash|workingCopyHash|schemaName|runId|rawOutput|rawJsonl|auth|tokenFile)"\s*:|\.jsonl|\/home\/|\/tmp\//iu
+      );
+      await application.close();
+      application = null;
+
+      expect(await sha256(storyStatePath)).toBe(storyStateHashBefore);
+      const storyState = JSON.parse(await readFile(storyStatePath, 'utf8')) as {
+        latestCommittedChapter: number;
+      };
+      expect(storyState.latestCommittedChapter).toBe(0);
+      expect(await sha256(queuePath)).toBe(queueHashAtDraftReady);
+      expect(await sha256(generatedDraftPath)).toBe(generatedDraftHash);
+      expect(await readFile(generatedDraftPath, 'utf8')).toBe(generatedDraft);
+      await expect(readFile(path.join(
+        projectRoot,
+        'chapters',
+        'chapter_001',
+        'author_revisions',
+        'draft_revision_v1.md'
+      ), 'utf8')).resolves.toBe(authorDraft);
+
+      const promptIds = (await readPlanningFakeCalls(
+        path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+      )).map(({ promptId }) => promptId);
+      expect(promptIds.filter((promptId) => (
+        promptId === 'planning.generate_scene_cards_slim'
+      ))).toHaveLength(1);
+      expect(promptIds.slice(-3)).toEqual([
+        'planning.generate_scene_cards_slim',
+        'production.write_scene',
+        'production.write_scene'
+      ]);
+    } finally {
+      if (application !== null) await application.close().catch(() => undefined);
+      await rm(temporaryRoot, { force: true, recursive: true });
+    }
+  });
+});
+
+test('chapter-flow fake Codex exposes deterministic bounded adjustment responses', async () => {
+  const temporaryRoot = await mkdtemp(
+    path.join(tmpdir(), 'novel-loop-electron-adjustment-fixture-')
+  );
+  const fake = await writePlanningFakeCodex(temporaryRoot);
+  const completed = [
+    ...PLANNING_PROMPT_IDS,
+    'planning.plan_chapter_mission_slim',
+    'planning.generate_plan_candidates_slim',
+    'planning.rank_plan_candidates_slim'
+  ];
+
+  try {
+    await writeFile(
+      path.join(temporaryRoot, 'planning-codex-state.json'),
+      JSON.stringify(completed)
+    );
+    const planOutput = fakeOutputPath(
+      temporaryRoot,
+      70,
+      JSON_SCHEMA_BY_PROMPT['planning.adjust_plan_candidate_slim']
+    );
+    await mkdir(path.dirname(planOutput), { recursive: true });
+    await runFakeCodex(
+      fake.codexBin,
+      fakeExecArguments(
+        planOutput,
+        JSON_SCHEMA_BY_PROMPT['planning.adjust_plan_candidate_slim']
+      ),
+      adjustmentPrompt('planning.adjust_plan_candidate_slim')
+    );
+    expect(JSON.parse(await readFile(planOutput, 'utf8'))).toMatchObject({
+      title: '旧楼入口提前'
+    });
+
+    const missionOutput = fakeOutputPath(
+      temporaryRoot,
+      71,
+      JSON_SCHEMA_BY_PROMPT['planning.adjust_chapter_mission_slim']
+    );
+    await mkdir(path.dirname(missionOutput), { recursive: true });
+    await runFakeCodex(
+      fake.codexBin,
+      fakeExecArguments(
+        missionOutput,
+        JSON_SCHEMA_BY_PROMPT['planning.adjust_chapter_mission_slim']
+      ),
+      adjustmentPrompt('planning.adjust_chapter_mission_slim')
+    );
+    expect(JSON.parse(await readFile(missionOutput, 'utf8'))).toMatchObject({
+      chapterNumber: 1,
+      participatingCharacterIds: ['char_lincheng']
+    });
+
+    const calls = await readPlanningFakeCalls(
+      path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+    );
+    expect(calls.slice(-2).map(({ promptId }) => promptId)).toEqual([
+      'planning.adjust_plan_candidate_slim',
+      'planning.adjust_chapter_mission_slim'
+    ]);
   } finally {
     await rm(temporaryRoot, { force: true, recursive: true });
   }
@@ -906,6 +1273,119 @@ function electronEnvironment(overrides: Record<string, string>): Record<string, 
   };
 }
 
+async function launchDesktop(
+  userDataDirectory: string,
+  codexBin: string
+): Promise<ElectronApplication> {
+  return electron.launch({
+    args: [
+      `--user-data-dir=${userDataDirectory}`,
+      desktopRoot
+    ],
+    cwd: desktopRoot,
+    env: electronEnvironment({
+      NLE_CODEX_BIN: codexBin
+    })
+  });
+}
+
+async function openFirstChapterPlan(page: Page): Promise<void> {
+  await page.getByRole('button', { name: '进入作品库' }).click();
+  await page.getByRole('button', { name: '打开《Electron Planning Test》' }).click();
+  await page.getByRole('button', { name: '查看故事基础' }).click();
+  await page.getByRole('button', {
+    name: '确认故事基础并生成全局规划'
+  }).click();
+  await page.getByRole('button', { name: '开始生成全局规划' }).click();
+  await expect(page.getByRole('heading', {
+    name: '全局规划',
+    exact: true
+  })).toBeVisible({ timeout: 45_000 });
+  await page.getByRole('tab', { name: '章节计划' }).click();
+  await page.getByRole('button', { name: '创建第 1 章' }).click();
+  await page.getByRole('button', { name: '开始准备章节方向' }).click();
+  await expect(page.getByRole('heading', {
+    name: '审阅第 1 章方向'
+  })).toBeVisible({ timeout: 45_000 });
+}
+
+function directionArticle(page: Page, title: string): Locator {
+  return page.getByRole('radio', { name: title }).locator('..');
+}
+
+function adjustmentPrompt(promptId: typeof ADJUSTMENT_PROMPT_IDS[number]): string {
+  if (promptId === 'planning.adjust_plan_candidate_slim') {
+    return [
+      `PROMPT_ID: ${promptId}`,
+      'Return only JSON that matches the provided output schema.',
+      'Adjust only the supplied chapter plan candidate as requested by the author.',
+      '- Return exactly title, markdown, changeSummary, and preservedConstraints.',
+      '<chapter_number>1</chapter_number>',
+      '<author_instruction>让旧楼入口更早出现。</author_instruction>',
+      '<current_plan_candidate>',
+      JSON.stringify({
+        id: 'plan_002',
+        title: '旧楼先声',
+        markdown: '# 旧楼先声\n\n先看见旧楼，再听见收音机。'
+      }),
+      '</current_plan_candidate>',
+      '<chapter_mission_context>保持断电收音机谜团，不揭示来电者。</chapter_mission_context>',
+      '<story_state_summary>第 1 章前，正式故事状态尚未提交章节。</story_state_summary>'
+    ].join('\n');
+  }
+
+  return [
+    `PROMPT_ID: ${promptId}`,
+    'Return only JSON that matches the provided output schema.',
+    'Adjust the current chapter mission only as requested by the author.',
+    '- Return a complete mission value with every required top-level and nested field.',
+    '<chapter_number>1</chapter_number>',
+    '<author_instruction>保持现有人物，只收紧本章目的。</author_instruction>',
+    '<current_mission>',
+    JSON.stringify({
+      id: 'mission_001',
+      chapterNumber: 1,
+      chapterFunction: '建立断电收音机谜团。',
+      requiredObjectives: [{
+        id: 'objective_001',
+        text: '让林程听见断电收音机。',
+        type: 'plot',
+        priority: 'must'
+      }],
+      debtsToPayOrAdvance: [],
+      debtsToIntroduce: [{
+        type: 'mystery',
+        promise: '收音机为何能在断电时说话？',
+        importance: 8
+      }],
+      participatingCharacterIds: ['char_lincheng'],
+      charactersToIntroduce: [{
+        characterId: 'char_lincheng',
+        name: '林程',
+        role: '主角'
+      }],
+      characterDeltas: [{
+        characterId: 'char_lincheng',
+        from: '怀疑',
+        to: '警觉',
+        evidenceRequired: '他亲耳听见断电广播。'
+      }],
+      readerInformationDelta: {
+        newKnowledge: ['收音机断电后仍会说话。'],
+        newSuspicions: [],
+        questionsToMaintain: ['是谁在发送旧楼地址？'],
+        questionsToAnswer: []
+      },
+      forbiddenMoves: ['不得揭示来电者身份。'],
+      targetEmotionalCurve: ['平静', '疑惑', '警觉'],
+      targetWordCount: 1800
+    }),
+    '</current_mission>',
+    '<selected_plan_context>当前方向从断电收音机的第一声开始。</selected_plan_context>',
+    '<story_state_summary>第 1 章前，正式故事状态尚未提交章节。</story_state_summary>'
+  ].join('\n');
+}
+
 async function runCli(args: string[]): Promise<void> {
   await execFile(
     process.execPath,
@@ -1144,7 +1624,8 @@ async function writePlanningFakeCodex(root: string): Promise<{
 const fs = require('node:fs');
 const path = require('node:path');
 const args = process.argv.slice(2);
-const expectedPromptIds = ${JSON.stringify(FULL_DRAFT_PROMPT_IDS)};
+const initialPlanningPromptIds = ${JSON.stringify(PLANNING_PROMPT_IDS)};
+const adjustmentPromptIds = ${JSON.stringify(ADJUSTMENT_PROMPT_IDS)};
 const callsLogPath = ${JSON.stringify(callsLogPath)};
 const errorLogPath = ${JSON.stringify(errorLogPath)};
 const statePath = ${JSON.stringify(statePath)};
@@ -1193,7 +1674,7 @@ if (unsafeArguments.some((arg) => args.includes(arg))
 const stdin = fs.readFileSync(0, 'utf8');
 const promptId = (stdin.match(/PROMPT_ID:\\s*([^\\n]+)/) || [])[1] || '';
 const completedPromptIds = readCompletedPromptIds();
-if (promptId !== expectedPromptIds[completedPromptIds.length]) {
+if (!allowedNextPromptIds(completedPromptIds).includes(promptId)) {
   process.stderr.write('Unknown or out-of-order fake Codex prompt');
   process.exit(2);
 }
@@ -1256,6 +1737,20 @@ const promptContracts = {
       'chapter_queue_ITEM'
     ]
   },
+  'planning.adjust_chapter_mission_slim': {
+    requiredMarkers: [
+      'Return only JSON that matches the provided output schema.',
+      'Adjust the current chapter mission only as requested by the author.',
+      'Return a complete mission value with every required top-level and nested field.'
+    ],
+    requiredBlocks: [
+      'chapter_number',
+      'author_instruction',
+      'current_mission',
+      'selected_plan_context',
+      'story_state_summary'
+    ]
+  },
   'planning.generate_plan_candidates_slim': {
     requiredMarkers: [
       'Return only JSON that matches the provided output schema.',
@@ -1265,6 +1760,20 @@ const promptContracts = {
     requiredBlocks: [
       'chapter_number',
       'mission_summary'
+    ]
+  },
+  'planning.adjust_plan_candidate_slim': {
+    requiredMarkers: [
+      'Return only JSON that matches the provided output schema.',
+      'Adjust only the supplied chapter plan candidate as requested by the author.',
+      'Return exactly title, markdown, changeSummary, and preservedConstraints.'
+    ],
+    requiredBlocks: [
+      'chapter_number',
+      'author_instruction',
+      'current_plan_candidate',
+      'chapter_mission_context',
+      'story_state_summary'
     ]
   },
   'planning.rank_plan_candidates_slim': {
@@ -1344,7 +1853,9 @@ const jsonSchemaNames = {
   'planning.generate_arc_map_minimal_json': 'planning.arc_map.slim.schema.json',
   'planning.generate_chapter_queue_minimal_json': 'planning.chapter_queue.slim.schema.json',
   'planning.plan_chapter_mission_slim': 'planning.chapter_mission.slim.schema.json',
+  'planning.adjust_chapter_mission_slim': 'planning.chapter_mission_adjustment.slim.schema.json',
   'planning.generate_plan_candidates_slim': 'planning.plan_candidates.slim.schema.json',
+  'planning.adjust_plan_candidate_slim': 'planning.plan_adjustment.slim.schema.json',
   'planning.rank_plan_candidates_slim': 'planning.ranking.slim.schema.json',
   'planning.generate_scene_cards_slim': 'drafting.scene_cards.slim.schema.json'
 };
@@ -1388,6 +1899,28 @@ if (
   process.exit(2);
 }
 assertPromptContract(promptId, stdin);
+let sceneCharacterIds = ['char_lincheng'];
+if (promptId === 'planning.generate_scene_cards_slim') {
+  let characterMap;
+  try {
+    characterMap = JSON.parse(readPromptBlock(stdin, 'character_id_name_map') || '');
+  } catch {
+    failPromptContract('invalid character id/name map');
+  }
+  if (
+    !Array.isArray(characterMap)
+    || characterMap.length === 0
+    || !characterMap.every((item) => (
+      item !== null
+      && typeof item === 'object'
+      && hasNonEmptyString(item.id)
+      && hasNonEmptyString(item.name)
+    ))
+  ) {
+    failPromptContract('invalid character id/name map');
+  }
+  sceneCharacterIds = [characterMap[0].id];
+}
 const outputs = {
   'planning.generate_global_outline_text': '# Codex Global Outline\\n\\nA three chapter opening arc around the radio signal.\\n',
   'planning.generate_volume_outline_text': '# Codex Volume 01 Outline\\n\\nThe radio mystery escalates through the first volume.\\n',
@@ -1395,59 +1928,104 @@ const outputs = {
   'planning.generate_chapter_queue_minimal_json': JSON.stringify({ chapters: [{ chapterNumber: 1, title: 'The Radio Wakes', summary: 'The radio speaks without power.', primaryFunction: 'Open the impossible broadcast.', targetDebts: [] }, { chapterNumber: 2, title: 'The Elevator Log', summary: 'The elevator records an impossible stop.', primaryFunction: 'Escalate the building mystery.', targetDebts: [] }, { chapterNumber: 3, title: 'The Missing Floor', summary: 'Lin Cheng finds signs of a hidden floor.', primaryFunction: 'Create a strong midpoint hook.', targetDebts: [] }] }),
   'planning.plan_chapter_mission_slim': JSON.stringify({
     chapterNumber: 1,
-    chapterFunction: 'Open the impossible broadcast without resolving its source.',
+    chapterFunction: '让断电收音机第一次发声，但不揭示信号来源。',
     objectives: [
-      'Show the powerless radio speaking.',
-      'Give Lin Cheng a concrete reason to investigate the old building.'
+      '写出断电收音机发声的瞬间。',
+      '给林程一个前往旧楼调查的具体理由。'
     ],
     debtsToPayOrAdvance: [],
     debtsToIntroduce: [{
       type: 'mystery',
-      promise: 'Why does the radio speak without power?',
+      promise: '收音机为何能在断电时说话？',
       importance: 8
     }],
+    participatingCharacterIds: ['char_lincheng'],
     charactersToIntroduce: [{
       characterId: 'char_lincheng',
-      name: 'Lin Cheng',
-      role: 'protagonist'
+      name: '林程',
+      role: '主角'
     }],
     characterDeltas: [{
       characterId: 'char_lincheng',
-      from: 'skeptical',
-      to: 'alert',
-      evidenceRequired: 'He hears the broadcast without a power source.'
+      from: '怀疑',
+      to: '警觉',
+      evidenceRequired: '他亲耳听见断电广播。'
     }],
-    readerKnowledge: ['The radio speaks while disconnected from power.'],
-    readerQuestions: ['Who is sending the old building address?'],
-    forbiddenMoves: ['Do not reveal the final caller identity.']
+    readerKnowledge: ['收音机在断电状态下仍会说话。'],
+    readerQuestions: ['是谁在发送旧楼地址？'],
+    forbiddenMoves: ['不得揭示来电者身份。']
+  }),
+  'planning.adjust_chapter_mission_slim': JSON.stringify({
+    id: 'mission_001',
+    chapterNumber: 1,
+    chapterFunction: '用更紧凑的开场建立断电收音机谜团。',
+    requiredObjectives: [{
+      id: 'objective_001',
+      text: '让林程听见断电收音机。',
+      type: 'plot',
+      priority: 'must'
+    }],
+    debtsToPayOrAdvance: [],
+    debtsToIntroduce: [{
+      type: 'mystery',
+      promise: '收音机为何能在断电时说话？',
+      importance: 8
+    }],
+    participatingCharacterIds: ['char_lincheng'],
+    charactersToIntroduce: [{
+      characterId: 'char_lincheng',
+      name: '林程',
+      role: '主角'
+    }],
+    characterDeltas: [{
+      characterId: 'char_lincheng',
+      from: '怀疑',
+      to: '警觉',
+      evidenceRequired: '他亲耳听见断电广播。'
+    }],
+    readerInformationDelta: {
+      newKnowledge: ['收音机断电后仍会说话。'],
+      newSuspicions: [],
+      questionsToMaintain: ['是谁在发送旧楼地址？'],
+      questionsToAnswer: []
+    },
+    forbiddenMoves: ['不得揭示来电者身份。'],
+    targetEmotionalCurve: ['平静', '疑惑', '警觉'],
+    targetWordCount: 1800
   }),
   'planning.generate_plan_candidates_slim': JSON.stringify({
     chapterNumber: 1,
     candidates: [
       {
         id: 'plan_001',
-        title: 'Signal First',
-        summary: 'Open on the impossible signal and end on the address.',
-        markdown: '# Plan 001\\n\\nThe powerless radio interrupts Lin Cheng and repeats the address of the old building.'
+        title: '断电后的呼声',
+        summary: '从不可能的信号开场，以旧楼地址收束。',
+        markdown: '# 断电后的呼声\\n\\n断电收音机打断林程的夜晚，并反复播报旧楼地址。'
       },
       {
         id: 'plan_002',
-        title: 'Building First',
-        summary: 'Frame the building before introducing the radio.',
-        markdown: '# Plan 002\\n\\nA memory of the old building frames the first impossible broadcast.'
+        title: '旧楼先声',
+        summary: '先建立旧楼印象，再引出收音机。',
+        markdown: '# 旧楼先声\\n\\n一段旧楼记忆包围着第一次不可能的广播。'
       },
       {
         id: 'plan_003',
-        title: 'Quiet Discovery',
-        summary: 'Let Lin Cheng discover the radio gradually.',
-        markdown: '# Plan 003\\n\\nA quiet apartment scene slowly exposes the radio signal.'
+        title: '静默频段',
+        summary: '让林程在安静中逐步发现异常信号。',
+        markdown: '# 静默频段\\n\\n公寓的静夜里，收音机信号一点点显露。'
       }
     ]
+  }),
+  'planning.adjust_plan_candidate_slim': JSON.stringify({
+    title: '旧楼入口提前',
+    markdown: '# 旧楼入口提前\\n\\n先让林程站在旧楼入口听见收音机，再追问信号为何把他引到这里。',
+    changeSummary: ['把旧楼入口提前到开场。'],
+    preservedConstraints: ['不新增人物。', '不揭示来电者身份。']
   }),
   'planning.rank_plan_candidates_slim': JSON.stringify({
     chapterNumber: 1,
     selectedCandidateId: 'plan_001',
-    rationale: 'The direct impossible signal creates the clearest hook.'
+    rationale: '直接呈现不可能信号，开篇钩子最清晰。'
   }),
   'planning.generate_scene_cards_slim': JSON.stringify({
     scenes: [
@@ -1457,7 +2035,7 @@ const outputs = {
         entryPoint: 'Lin Cheng sets the powerless radio on his desk.',
         exitPoint: 'The radio says the old building address.',
         location: 'Lin Cheng apartment',
-        characters: ['char_lincheng']
+        characters: sceneCharacterIds
       },
       {
         purpose: 'Turn the broadcast into a decision.',
@@ -1465,7 +2043,7 @@ const outputs = {
         entryPoint: 'The address repeats after the room falls silent.',
         exitPoint: 'Lin Cheng writes down the address and leaves.',
         location: 'Apartment stairwell',
-        characters: ['char_lincheng']
+        characters: sceneCharacterIds
       }
     ]
   })
@@ -1530,6 +2108,48 @@ function readCompletedPromptIds() {
   }
 }
 
+function allowedNextPromptIds(completed) {
+  for (let index = 0; index < initialPlanningPromptIds.length; index += 1) {
+    if (completed[index] !== initialPlanningPromptIds[index]) {
+      return completed.length === index ? [initialPlanningPromptIds[index]] : [];
+    }
+  }
+
+  const chapterPrompts = completed.slice(initialPlanningPromptIds.length);
+  if (chapterPrompts.length === 0) {
+    return ['planning.plan_chapter_mission_slim'];
+  }
+  const lastPromptId = chapterPrompts[chapterPrompts.length - 1];
+  if (lastPromptId === 'planning.plan_chapter_mission_slim') {
+    return ['planning.generate_plan_candidates_slim'];
+  }
+  if (lastPromptId === 'planning.generate_plan_candidates_slim') {
+    return ['planning.rank_plan_candidates_slim'];
+  }
+  if (
+    lastPromptId === 'planning.rank_plan_candidates_slim'
+    || adjustmentPromptIds.includes(lastPromptId)
+  ) {
+    return [
+      ...adjustmentPromptIds,
+      'planning.generate_plan_candidates_slim',
+      'planning.generate_scene_cards_slim'
+    ];
+  }
+  if (lastPromptId === 'planning.generate_scene_cards_slim') {
+    return ['production.write_scene'];
+  }
+  if (lastPromptId === 'production.write_scene') {
+    const sceneCardIndex = chapterPrompts.lastIndexOf(
+      'planning.generate_scene_cards_slim'
+    );
+    const writtenScenes = chapterPrompts.slice(sceneCardIndex + 1)
+      .filter((item) => item === 'production.write_scene').length;
+    return writtenScenes < 2 ? ['production.write_scene'] : [];
+  }
+  return [];
+}
+
 function assertPromptContract(id, prompt) {
   const normalizedPrompt = prompt.toLowerCase();
   const instructionSurface = normalizedPrompt
@@ -1557,7 +2177,9 @@ function assertPromptContract(id, prompt) {
   }
   if (
     id === 'planning.plan_chapter_mission_slim'
+    || id === 'planning.adjust_chapter_mission_slim'
     || id === 'planning.generate_plan_candidates_slim'
+    || id === 'planning.adjust_plan_candidate_slim'
     || id === 'planning.rank_plan_candidates_slim'
     || id === 'planning.generate_scene_cards_slim'
   ) {

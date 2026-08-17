@@ -39,7 +39,16 @@ corepack pnpm novel-loop validate demo-novel
 
 ## Desktop Prototype Status
 
-The local Electron prototype now connects Story Foundation, global planning, and the first chapter workflow through `draft_v1.md`. An author can open a project, review the generated Story Foundation, confirm global planning, create the next chapter, review its mission and selected direction, explicitly confirm drafting, and read the resulting initial draft with its scene summary.
+The local Electron prototype now connects read-only Story Foundation and global-planning review with an author-controlled first-chapter workflow. An author can compare three chapter directions, select a non-recommended direction, directly edit the chapter mission or selected plan, request a bounded local-Codex adjustment, compare the result, and explicitly adopt the version that should guide drafting. Story Foundation and global planning remain generated review surfaces; this milestone does not claim that either is editable.
+
+Phase A distinguishes four author-facing states:
+
+- **Generated source**: the engine-produced mission, plan, or `draft_v1.md`. It remains the reproducible source artifact.
+- **Working copy**: the author's unadopted local edits. Chapter prose is autosaved in Electron application data, not written over `draft_v1.md`.
+- **Candidate / comparison**: a saved direct edit or bounded AI adjustment shown beside its source before adoption.
+- **Adopted author draft**: the version the author explicitly accepts. Adopted prose is stored as a versioned author revision while the generated draft stays intact.
+
+Participant repair is part of the chapter-mission review. Drafting is blocked when the mission has no valid scene participant; the author can select an existing character, add a provisional participant, or request a bounded repair. This does not weaken character-reference validation: invalid or incomplete participants still fail before scene generation.
 
 Run the current source build as an Electron desktop application:
 
@@ -52,7 +61,11 @@ The chapter workflow requires a locally installed and logged-in Codex CLI. Novel
 
 The desktop boundary remains local and narrow: the renderer uses a typed preload API, Electron main owns project access and invokes the local Codex provider, and Codex runs with sandbox `read-only`, approval policy `never`, and no workspace-write capability. Story Foundation, global planning, chapter planning, scenes, and `draft_v1.md` may write generated non-canonical artifacts together with local run and provenance records. They do not submit a chapter or mutate `state/story_state.json`.
 
-This milestone stops at a read-only initial draft. Manual editing and autosave, diagnostics, revision candidates, `final.md`, canon patch generation, state diff, approval, snapshots, and chapter commit are not available in the desktop application yet.
+Phase A stops after the author has edited, recovered if necessary, compared, and explicitly adopted a chapter draft. It does not run diagnostics, produce `final.md`, generate a canon patch or state diff, create commit snapshots, approve Story State changes, or commit the chapter. The chapter queue, `latestCommittedChapter`, and formal Story State remain unchanged.
+
+On Ubuntu, an `ENOSPC: System limit for number of file watchers reached` development error is a host watcher-limit issue rather than a project-data failure. See `apps/desktop/README.md` for the temporary and persistent watcher-limit remedies and the separate secure Chromium sandbox requirements. Never work around a sandbox failure with `--no-sandbox` or `--disable-setuid-sandbox`.
+
+The desktop Phase A scope does not add DeepSeek, OpenAI API integration, Web UI/SaaS behavior, CodexAgentConnector, workspace-write access, diagnostics and revision-loop UI, canonical final/patch/commit controls, historical recommit, stale regeneration, conflict auto-repair, or Story Foundation/global-planning editing.
 
 ## Quickstart: Mock Demo
 

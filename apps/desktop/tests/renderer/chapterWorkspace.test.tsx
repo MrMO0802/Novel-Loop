@@ -5,6 +5,7 @@ import '@testing-library/jest-dom/vitest';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import {
+  act,
   cleanup,
   fireEvent,
   render,
@@ -109,6 +110,30 @@ afterEach(() => {
 });
 
 describe('initial chapter workspace', () => {
+  test('loads the canonical draft before lease-backed companion reads', async () => {
+    const api = installApi();
+    let resolveDraft: ((value: typeof completeChapterDraft) => void) | null = null;
+    api.chapter.readDraft.mockImplementation(() => new Promise((resolve) => {
+      resolveDraft = resolve;
+    }));
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: '进入作品库' }));
+    fireEvent.click(await screen.findByRole('button', { name: '打开《白箱循环》' }));
+    fireEvent.click(await screen.findByRole('button', {
+      name: '打开第 1 章初稿'
+    }));
+
+    await waitFor(() => expect(api.chapter.readDraft).toHaveBeenCalledTimes(1));
+    expect(api.chapter.readDraftWorkingCopy).not.toHaveBeenCalled();
+    expect(api.chapter.readPlan).not.toHaveBeenCalled();
+
+    await act(async () => resolveDraft?.(completeChapterDraft));
+    await screen.findByRole('heading', { name: '第 1 章 凌晨三点十七分' });
+    expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(1);
+    expect(api.chapter.readPlan).toHaveBeenCalledTimes(1);
+  });
+
   test('presents a three-region author workspace with draft status and scene summaries', async () => {
     installApi();
     render(<App />);
@@ -184,6 +209,41 @@ describe('initial chapter workspace', () => {
     fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
     fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
     await waitFor(() => expect(api.chapter.adoptDraftRevision).toHaveBeenCalledTimes(2));
+  });
+
+  test('reloads an adopted draft before reading its cleared working copy', async () => {
+    if (!completeChapterDraft.available) {
+      throw new Error('Expected the complete chapter draft fixture to be available.');
+    }
+    const api = installApi();
+    const adoptedDraft = {
+      ...completeChapterDraft,
+      markdown: `${completeChapterDraft.markdown}\n\n作者采用内容。`,
+      versionKind: 'author_adopted' as const
+    };
+    let resolveAdoptedDraft: ((value: typeof adoptedDraft) => void) | null = null;
+    api.chapter.readDraft
+      .mockResolvedValueOnce(completeChapterDraft)
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveAdoptedDraft = resolve;
+      }));
+    render(<App />);
+    await openWorkspace();
+
+    fireEvent.change(screen.getByRole('textbox', { name: '章节正文' }), {
+      target: { value: adoptedDraft.markdown }
+    });
+    fireEvent.keyDown(window, { key: 's', ctrlKey: true });
+    await waitFor(() => expect(api.chapter.saveDraftWorkingCopy).toHaveBeenCalledTimes(1));
+    fireEvent.click(screen.getByRole('button', { name: '采用此修订' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用' }));
+
+    await waitFor(() => expect(api.chapter.readDraft).toHaveBeenCalledTimes(2));
+    expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(1);
+
+    await act(async () => resolveAdoptedDraft?.(adoptedDraft));
+    expect(await screen.findByText('作者采用修订')).toBeVisible();
+    expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(2);
   });
 
   test('uses stable responsive tracks without gradients or oversized radii', () => {

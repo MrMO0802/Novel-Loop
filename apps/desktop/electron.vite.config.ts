@@ -5,10 +5,11 @@ import { defineConfig, externalizeDepsPlugin } from 'electron-vite';
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()],
+    plugins: [externalizeDepsPlugin({ exclude: ['novel-loop-engine'] })],
     build: {
       rollupOptions: {
-        input: fileURLToPath(new URL('./src/main/index.ts', import.meta.url))
+        input: fileURLToPath(new URL('./src/main/index.ts', import.meta.url)),
+        external: ['novel-loop-engine/desktop']
       }
     }
   },

@@ -34,20 +34,33 @@ export function ChapterWorkspace({
 
   useEffect(() => {
     const currentRequest = ++requestToken.current;
-    void Promise.all([
-      window.novelLoop.chapter.readDraft({ projectKey: project.projectKey }),
-      window.novelLoop.chapter.readDraftWorkingCopy({ projectKey: project.projectKey }),
-      window.novelLoop.chapter.readPlan({ projectKey: project.projectKey })
-        .catch(() => null)
-    ]).then(([draftResult, copyResult, planResult]) => {
-      if (currentRequest !== requestToken.current) return;
-      setDraft(draftResult);
-      setWorkingCopy(copyResult);
-      setPlan(planResult);
-      setFailed(!draftResult.available);
-    }).catch(() => {
-      if (currentRequest === requestToken.current) setFailed(true);
-    });
+    void (async () => {
+      try {
+        const draftResult = await window.novelLoop.chapter.readDraft({
+          projectKey: project.projectKey
+        });
+        if (currentRequest !== requestToken.current) return;
+        if (!draftResult.available) {
+          setDraft(draftResult);
+          setFailed(true);
+          return;
+        }
+        const copyResult = await window.novelLoop.chapter.readDraftWorkingCopy({
+          projectKey: project.projectKey
+        });
+        if (currentRequest !== requestToken.current) return;
+        const planResult = await window.novelLoop.chapter.readPlan({
+          projectKey: project.projectKey
+        }).catch(() => null);
+        if (currentRequest !== requestToken.current) return;
+        setDraft(draftResult);
+        setWorkingCopy(copyResult);
+        setPlan(planResult);
+        setFailed(false);
+      } catch {
+        if (currentRequest === requestToken.current) setFailed(true);
+      }
+    })();
     return () => {
       requestToken.current += 1;
     };
@@ -136,13 +149,20 @@ export function ChapterWorkspace({
                 draft={availableDraft}
                 key={`${project.projectKey}:${availableDraft.chapterNumber}:${editorEpoch}`}
                 onAdopted={async () => {
-                  const [draftResult, copyResult] = await Promise.all([
-                    window.novelLoop.chapter.readDraft({ projectKey: project.projectKey }),
-                    window.novelLoop.chapter.readDraftWorkingCopy({ projectKey: project.projectKey })
-                  ]);
+                  const draftResult = await window.novelLoop.chapter.readDraft({
+                    projectKey: project.projectKey
+                  });
+                  if (!draftResult.available) {
+                    setDraft(draftResult);
+                    setFailed(true);
+                    return;
+                  }
+                  const copyResult = await window.novelLoop.chapter.readDraftWorkingCopy({
+                    projectKey: project.projectKey
+                  });
                   setDraft(draftResult);
                   setWorkingCopy(copyResult);
-                  setFailed(!draftResult.available);
+                  setFailed(false);
                   setEditorEpoch((current) => current + 1);
                 }}
                 projectKey={project.projectKey}

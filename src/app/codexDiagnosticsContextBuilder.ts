@@ -21,6 +21,13 @@ export interface BuildDiagnosticsContextManifestInput {
   mode: DiagnosticsContextMode;
   contextBudgetBytes?: number;
   draftPath?: string;
+  outputDirectory?: string;
+  capturedContext?: {
+    storyState: StoryState;
+    mission: ChapterMission;
+    selectedPlan: string;
+    draft: string;
+  };
 }
 
 export interface BuildDiagnosticsContextManifestResult {
@@ -61,9 +68,9 @@ export async function buildDiagnosticsContextManifest(
   fileStore = new FileStore()
 ): Promise<BuildDiagnosticsContextManifestResult> {
   const paths = new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId);
-  const beforeState = await readOptionalText(paths.storyState(), fileStore);
-  const storyState = await fileStore.readJson(paths.storyState(), StoryStateSchema);
-  const candidates = await buildCandidates(paths, fileStore, input.chapterNumber, storyState, input.draftPath);
+  const beforeState = input.capturedContext === undefined ? await readOptionalText(paths.storyState(), fileStore) : null;
+  const storyState = input.capturedContext?.storyState ?? await fileStore.readJson(paths.storyState(), StoryStateSchema);
+  const candidates = await buildCandidates(paths, fileStore, input.chapterNumber, storyState, input.draftPath, input.capturedContext);
   const included = candidates.filter((candidate) => candidate.present && shouldInclude(input.mode, candidate));
   const excluded = candidates.filter((candidate) => !candidate.present || !shouldInclude(input.mode, candidate));
   const missingRequiredArtifacts = candidates
@@ -74,7 +81,18 @@ export async function buildDiagnosticsContextManifest(
   const contextBudgetBytes = input.contextBudgetBytes ?? DEFAULT_CONTEXT_BUDGET_BYTES;
   const truncated = contextBytes > contextBudgetBytes;
   const finalPromptContext = truncated ? promptContext.slice(0, contextBudgetBytes) : promptContext;
-  const versioned = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'diagnostics_context_manifest');
+  const versioned = input.outputDirectory === undefined
+    ? await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'diagnostics_context_manifest')
+    : {
+        version: 1,
+        jsonPath: paths.projectArtifact(path.join(input.outputDirectory, 'diagnostics_context_manifest.json')),
+        mdPath: paths.projectArtifact(path.join(input.outputDirectory, 'diagnostics_context_manifest.md')),
+        relativeJsonPath: path.join(input.outputDirectory, 'diagnostics_context_manifest.json'),
+        relativeMdPath: path.join(input.outputDirectory, 'diagnostics_context_manifest.md')
+      };
+  if (input.outputDirectory !== undefined && (await fileStore.exists(versioned.jsonPath) || await fileStore.exists(versioned.mdPath))) {
+    throw new Error('Isolated diagnostics context output already exists.');
+  }
   const manifest = await fileStore.writeJson(
     versioned.jsonPath,
     {
@@ -105,7 +123,7 @@ export async function buildDiagnosticsContextManifest(
     DiagnosticsContextManifestSchema
   );
   await fileStore.writeText(versioned.mdPath, renderManifestMarkdown(manifest));
-  const afterState = await readOptionalText(paths.storyState(), fileStore);
+  const afterState = input.capturedContext === undefined ? await readOptionalText(paths.storyState(), fileStore) : null;
   if (afterState !== beforeState) {
     throw new Error('diagnostics context manifest mutated Story State');
   }
@@ -122,14 +140,15 @@ async function buildCandidates(
   fileStore: FileStore,
   chapterNumber: number,
   storyState: StoryState,
-  selectedDraftPath?: string
+  selectedDraftPath?: string,
+  captured?: BuildDiagnosticsContextManifestInput['capturedContext']
 ): Promise<ContextArtifactCandidate[]> {
   const missionPath = relativeChapterArtifact(chapterNumber, 'mission.json');
   const selectedPlanPath = relativeChapterArtifact(chapterNumber, 'selected_plan.md');
   const draftPath = selectedDraftPath ?? relativeChapterArtifact(chapterNumber, 'draft_v1.md');
-  const mission = await readOptionalJson(paths.projectArtifact(missionPath), fileStore);
-  const selectedPlan = await readOptionalText(paths.projectArtifact(selectedPlanPath), fileStore);
-  const draft = await readOptionalText(paths.projectArtifact(draftPath), fileStore);
+  const mission = captured?.mission ?? await readOptionalJson(paths.projectArtifact(missionPath), fileStore);
+  const selectedPlan = captured?.selectedPlan ?? await readOptionalText(paths.projectArtifact(selectedPlanPath), fileStore);
+  const draft = captured?.draft ?? await readOptionalText(paths.projectArtifact(draftPath), fileStore);
   return [
     {
       name: 'story_state summary',

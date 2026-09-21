@@ -202,12 +202,14 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
         chapterKeys: Object.keys(window.novelLoop.chapter),
         foundationKeys: Object.keys(window.novelLoop.foundation),
         planningKeys: Object.keys(window.novelLoop.planning),
+        submissionKeys: Object.keys(window.novelLoop.submission),
         projectKeys: Object.keys(window.novelLoop.projects),
         systemKeys: Object.keys(window.novelLoop.system)
       }));
 
       expect(boundary).toEqual({
-        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter'],
+        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter', 'submission'],
+        submissionKeys: ['startCheck', 'get', 'cancel', 'readPreview', 'confirm'],
         chapterKeys: [...CHAPTER_API_KEYS],
         hasReadinessMethod: true,
         nodeProcessType: 'undefined',
@@ -428,7 +430,7 @@ test('authors can create chapter one through planning review and initial draft w
         nodeRequireType: typeof globalThis.require
       }));
       expect(boundary).toEqual({
-        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter'],
+        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter', 'submission'],
         chapterKeys: [...CHAPTER_API_KEYS],
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined'
@@ -779,16 +781,26 @@ test.describe('serial desktop author-control acceptance', () => {
       await page.getByRole('button', {
         name: '确认采用修订后的任务'
       }).click();
-      await expect(page.getByRole('alert')).toContainText('暂时无法读取章节方向');
+      await expect(page.getByRole('heading', {
+        name: '本章任务已保留，章节方向待更新'
+      })).toBeVisible();
+      await expect(page.getByRole('alert')).toHaveCount(0);
       await expect(readFile(missionPath, 'utf8')).resolves.toContain('周谨');
-      await page.getByRole('button', { name: '返回项目概览' }).click();
-      await page.getByRole('button', { name: '继续准备第 1 章' }).click();
+      const adoptedMissionHash = await sha256(missionPath);
+      expect(await readPlanningFakeCalls(
+        path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+      )).toEqual(callsBeforeRepair);
+      await page.getByRole('button', { name: '继续准备章节方向' }).click();
       await expect(page.getByRole('heading', { name: '准备第 1 章方向' })).toBeVisible();
+      expect(await readPlanningFakeCalls(
+        path.join(temporaryRoot, 'planning-codex-calls.ndjson')
+      )).toEqual(callsBeforeRepair);
       await page.getByRole('button', { name: '开始准备章节方向' }).click();
       await expect(page.getByRole('heading', { name: '审阅第 1 章方向' })).toBeVisible({
         timeout: 45_000
       });
       await expect(readFile(missionPath, 'utf8')).resolves.toContain('周谨');
+      expect(await sha256(missionPath)).toBe(adoptedMissionHash);
 
       await page.getByRole('button', { name: '确认方向并生成草稿' }).click();
       await page.getByRole('button', { name: '开始生成草稿' }).click();
@@ -824,7 +836,8 @@ test.describe('serial desktop author-control acceptance', () => {
       const draftEditor = page.getByRole('textbox', { name: '章节正文' });
       const authorDraft = `${await draftEditor.inputValue()}\n\n林程在门把手上留下一道铅笔记号。`;
       await draftEditor.fill(authorDraft);
-      await expect(page.getByRole('status')).toContainText('已自动保存', {
+      await page.getByRole('button', { name: '保存草稿' }).click();
+      await expect(page.getByRole('status')).toContainText('已保存', {
         timeout: 10_000
       });
       await application.close();
@@ -843,6 +856,15 @@ test.describe('serial desktop author-control acceptance', () => {
       await expect(page.getByRole('dialog', { name: '采用草稿确认' })).toBeVisible();
       await page.getByRole('button', { name: '确认采用' }).click();
       await expect(page.getByText('作者采用修订')).toBeVisible();
+      await expect(page.getByRole('tab', { name: '预览' })).toHaveAttribute('aria-selected', 'true');
+      await expect(page.getByText('修订已采用，尚未正式提交。')).toBeVisible();
+      await expect(page.getByRole('button', { name: '采用此修订' })).toBeDisabled();
+      await expect(page.getByRole('button', { name: '保存草稿' })).toBeEnabled();
+      await page.getByRole('button', { name: '保存草稿' }).click();
+      await expect(page.getByRole('status')).toHaveText('已保存');
+      await expect(page.getByRole('button', { name: '采用此修订' })).toBeDisabled();
+      await expect(page.getByRole('heading', { name: 'Chapter 001 Draft' })).toHaveCount(0);
+      await page.screenshot({ path: test.info().outputPath('draft-adopted-preview.png') });
 
       const rendererBoundary = await page.evaluate(async (key) => {
         const inspection = await window.novelLoop.chapter.inspect({ projectKey: key });

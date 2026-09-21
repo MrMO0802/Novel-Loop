@@ -14,6 +14,7 @@ const DesktopSystemReadinessSchema = z.object({
     status: z.enum([
       'ready',
       'not_installed',
+      'installation_incomplete',
       'not_logged_in',
       'warning',
       'unavailable'
@@ -75,6 +76,22 @@ export async function getDesktopSystemReadiness(
       }
     });
   } catch (error) {
+    if (
+      error instanceof AppError
+      && error.code === 'CODEX_EXEC_FAILED'
+      && /Missing optional dependency @openai\/codex-(linux|darwin|win32)-(x64|arm64)\b/.test(error.message)
+    ) {
+      return parseReadiness({
+        checkedAt,
+        codex: {
+          canRunSmoke: false,
+          status: 'installation_incomplete',
+          summary: 'Codex 安装不完整，无法启动。请修复安装后重新检查。',
+          version: null
+        }
+      });
+    }
+
     if (
       error instanceof AppError
       && error.code === 'CODEX_BINARY_NOT_FOUND'

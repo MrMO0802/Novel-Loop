@@ -29,6 +29,10 @@ export const CodexReadinessSchema = z.discriminatedUnion('status', [
   }).strict(),
   CodexReadinessBaseSchema.extend({
     canRunSmoke: z.literal(false),
+    status: z.literal('installation_incomplete')
+  }).strict(),
+  CodexReadinessBaseSchema.extend({
+    canRunSmoke: z.literal(false),
     status: z.literal('not_logged_in')
   }).strict(),
   CodexReadinessBaseSchema.extend({

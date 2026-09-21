@@ -421,6 +421,7 @@ function GenerationFailure({
 function foundationErrorMessage(kind: FoundationErrorKind): string {
   switch (kind) {
     case 'codex_unavailable': return t('foundation.error.codexUnavailable');
+    case 'upgrade_required': return t('foundation.error.upgradeRequired');
     case 'login_required': return t('foundation.error.loginRequired');
     case 'usage_limit': return t('foundation.error.usageLimit');
     case 'timeout': return t('foundation.error.timeout');

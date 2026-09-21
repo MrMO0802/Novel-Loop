@@ -516,6 +516,7 @@ function inspectionError(
 function chapterPlanningError(kind: ChapterErrorKind | null): string {
   switch (kind) {
     case 'codex_unavailable': return t('chapter.error.codexUnavailable');
+    case 'upgrade_required': return t('chapter.error.upgradeRequired');
     case 'login_required': return t('chapter.error.loginRequired');
     case 'usage_limit': return t('chapter.error.usageLimit');
     case 'timeout': return t('chapter.planning.error.timeout');

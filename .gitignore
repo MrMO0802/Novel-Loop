@@ -50,3 +50,7 @@ artifacts/
 # Local development worktrees and agent progress ledgers
 .worktrees/
 .superpowers/
+
+# Local browser verification output and desktop screenshots
+.playwright-mcp/
+/novel-loop-desktop-*.png

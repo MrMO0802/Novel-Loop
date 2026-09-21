@@ -101,7 +101,9 @@ import type { CodexBusinessOptimizationPlan, CodexChapterRegressionAnalysis, Cod
 import type { AuditIssue, ProjectAuditReport } from '../schemas/index.js';
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
-import { refreshArtifactIndex } from './artifactIndex.js';
+import { classifyDesktopSubmissionArtifact, refreshArtifactIndex } from './artifactIndex.js';
+import { auditDesktopSubmissions } from './desktopSubmissionAudit.js';
+import { readExactSubmissionText, submissionHash, submissionStore } from './desktopSubmissionSource.js';
 import { isCompletedCommitJournal } from './commitJournal.js';
 import { readFileMetadata } from './fileHash.js';
 import { validateChapterQueueConsistency } from './chapterQueue.js';
@@ -162,12 +164,20 @@ export async function auditProject(input: ProjectAuditInput, fileStore = new Fil
     }
     const latest = queue.chapters.find((chapter) => chapter.chapterNumber === storyState.latestCommittedChapter);
     if (latest !== undefined && ['committed', 'recommitted'].includes(latest.status)) {
-      await checkJson(issues, fileStore, paths.chapterArtifact(latest.chapterNumber, 'commit_report.json'), 'commit', `chapters/chapter_${String(latest.chapterNumber).padStart(3, '0')}/commit_report.json`, CommitReportSchema);
-      await checkJson(issues, fileStore, paths.chapterArtifact(latest.chapterNumber, 'canon_patch.json'), 'commit', `chapters/chapter_${String(latest.chapterNumber).padStart(3, '0')}/canon_patch.json`, CanonPatchSchema);
+      const commitStore = submissionStore(paths.projectRoot, fileStore);
+      await checkJson(issues, commitStore, paths.chapterArtifact(latest.chapterNumber, 'commit_report.json'), 'commit', `chapters/chapter_${String(latest.chapterNumber).padStart(3, '0')}/commit_report.json`, CommitReportSchema);
+      await checkJson(issues, commitStore, paths.chapterArtifact(latest.chapterNumber, 'canon_patch.json'), 'commit', `chapters/chapter_${String(latest.chapterNumber).padStart(3, '0')}/canon_patch.json`, CanonPatchSchema);
     }
   }
 
-  await checkRunManifests(issues, paths, fileStore);
+  const submissionIssues = await auditDesktopSubmissions(paths, fileStore);
+  issues.push(...submissionIssues);
+  // Do not reopen submission manifests already rejected by the guarded evidence reader.
+  const invalidSubmissionManifests = new Set(submissionIssues
+    .filter(candidate => ['desktop_submission_read', 'desktop_submission_schema'].includes(candidate.category)
+      && /^runs\/[A-Za-z0-9_-]+\/run_manifest\.json$/u.test(candidate.path ?? ''))
+    .map(candidate => candidate.path!));
+  await checkRunManifests(issues, paths, fileStore, invalidSubmissionManifests);
   await checkArchives(issues, paths, fileStore);
   await checkCommitJournals(issues, paths, fileStore);
   await checkCodexM25Artifacts(issues, paths, fileStore);
@@ -187,7 +197,7 @@ export async function auditProject(input: ProjectAuditInput, fileStore = new Fil
     summary: summarize(issues),
     issues,
     ...(artifactIndexPath === undefined ? {} : { artifactIndexPath }),
-    performance: await collectAuditPerformance(paths, fileStore, started)
+    performance: await collectAuditPerformance(paths, fileStore, started, invalidSubmissionManifests)
   });
   const written = await fileStore.writeJson(reportArtifact.jsonPath, report, ProjectAuditReportSchema);
   await fileStore.writeText(reportArtifact.mdPath, renderAuditMarkdown(written));
@@ -213,14 +223,16 @@ async function checkJson<T>(
   relativePath: string,
   schema: { parse: (value: unknown) => T }
 ): Promise<void> {
-  if (!(await fileStore.exists(absolutePath))) {
-    issues.push(issue(`missing_${relativePath.replace(/[^a-zA-Z0-9]+/g, '_')}`, 'error', category, relativePath, `${relativePath} is missing.`, 'Restore or regenerate the missing artifact.', true));
-    return;
-  }
   try {
-    schema.parse(JSON.parse(await fileStore.readText(absolutePath)));
+    if (!(await fileStore.exists(absolutePath))) {
+      issues.push(issue(`missing_${relativePath.replace(/[^a-zA-Z0-9]+/g, '_')}`, 'error', category, relativePath, `${relativePath} is missing.`, 'Restore or regenerate the missing artifact.', true));
+      return;
+    }
+    const text = category === 'commit' ? await readExactSubmissionText(fileStore, absolutePath) : await fileStore.readText(absolutePath);
+    schema.parse(JSON.parse(text));
   } catch (error) {
-    issues.push(issue(`invalid_${relativePath.replace(/[^a-zA-Z0-9]+/g, '_')}`, 'error', category, relativePath, `${relativePath} failed schema validation: ${String(error)}`, 'Regenerate or repair the JSON artifact.', true));
+    const message = category === 'commit' ? 'Commit artifact is unsafe, unreadable, or failed schema validation.' : `${relativePath} failed schema validation: ${String(error)}`;
+    issues.push(issue(`invalid_${relativePath.replace(/[^a-zA-Z0-9]+/g, '_')}`, 'error', category, relativePath, message, 'Regenerate or repair the JSON artifact.', true));
   }
 }
 
@@ -250,22 +262,26 @@ async function checkCommitJournals(issues: AuditIssue[], paths: ProjectPaths, fi
       const absolutePath = path.join(chapterDir, fileName);
       const relativePath = path.join('chapters', chapterDirName, fileName);
       try {
-        const journal = await fileStore.readJson(absolutePath, CommitJournalSchema);
+        const journal = CommitJournalSchema.parse(JSON.parse(await readExactSubmissionText(submissionStore(paths.projectRoot, fileStore), absolutePath)));
         if (!isCompletedCommitJournal(journal)) {
           issues.push(issue(`commit_journal_incomplete_${chapterDirName}_${fileName}`, 'critical', 'commit_journal', relativePath, 'Commit journal is not complete; Story State may have been partially committed.', 'Inspect the journal, snapshots, commit report, and queue before rerunning commit.', true));
         }
-      } catch (error) {
-        issues.push(issue(`commit_journal_invalid_${chapterDirName}_${fileName}`, 'error', 'commit_journal', relativePath, `Commit journal failed schema validation: ${String(error)}`, 'Repair or preserve the journal before recommitting.', true));
+      } catch {
+        issues.push(issue(`commit_journal_invalid_${chapterDirName}_${fileName}`, 'error', 'commit_journal', relativePath, 'Commit journal is unsafe, unreadable, or failed schema validation.', 'Repair or preserve the journal before recommitting.', true));
       }
     }
   }
 }
 
-async function checkRunManifests(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
+async function checkRunManifests(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore, invalidSubmissionManifests: ReadonlySet<string>): Promise<void> {
   if (!(await fileStore.exists(paths.runsDir()))) return;
   const manifests: Array<{ runId: string; relativeManifestPath: string; manifest?: RunManifest }> = [];
   for (const runId of await fileStore.list(paths.runsDir())) {
     const relativeManifestPath = path.join('runs', runId, 'run_manifest.json');
+    if (invalidSubmissionManifests.has(path.posix.join('runs', runId, 'run_manifest.json'))) {
+      manifests.push({ runId, relativeManifestPath });
+      continue;
+    }
     await checkJson(issues, fileStore, paths.runManifest(runId), 'run_manifest', relativeManifestPath, RunManifestSchema);
     try {
       manifests.push({
@@ -526,6 +542,17 @@ async function checkRunLineage(
     const latestWriter = latestWriterByPath.get(artifact.path);
     if (latestWriter !== undefined && latestWriter.runId !== manifest.runId && latestWriter.startedAt > manifest.startedAt) continue;
     const artifactPath = paths.projectArtifact(artifact.path);
+    if (classifyDesktopSubmissionArtifact(artifact.path) !== undefined || manifest.command === 'desktop-submission-commit') {
+      try {
+        const text = await readExactSubmissionText(submissionStore(paths.projectRoot, fileStore), artifactPath);
+        if (artifact.sha256 !== undefined && submissionHash(text) !== artifact.sha256) {
+          issues.push(issue(`lineage_hash_${runId}_${artifact.artifactId}`, 'error', 'artifact_lineage', artifact.path, 'Artifact hash does not match run manifest lineage.', 'Restore the recorded submission evidence.', true));
+        }
+      } catch {
+        issues.push(issue(`lineage_read_${runId}_${artifact.artifactId}`, 'error', 'artifact_lineage', artifact.path, 'Submission artifact is missing, unsafe, or unreadable.', 'Inspect and restore the recorded submission evidence.', true));
+      }
+      continue;
+    }
     if (!(await fileStore.exists(artifactPath))) {
       issues.push(issue(`lineage_missing_${runId}_${artifact.artifactId}`, 'error', 'artifact_lineage', artifact.path, 'Artifact lineage path is missing.', 'Restore the artifact or mark lineage status missing.', true));
       continue;
@@ -3575,12 +3602,14 @@ async function checkArchives(issues: AuditIssue[], paths: ProjectPaths, fileStor
   }
 }
 
-async function collectAuditPerformance(paths: ProjectPaths, fileStore: FileStore, started: number): Promise<ProjectAuditReport['performance']> {
+async function collectAuditPerformance(paths: ProjectPaths, fileStore: FileStore, started: number, invalidSubmissionManifests: ReadonlySet<string>): Promise<ProjectAuditReport['performance']> {
   const index = (await fileStore.exists(paths.artifactIndex()))
     ? await fileStore.readJson(paths.artifactIndex(), ArtifactIndexSchema)
     : undefined;
   const runManifestCount = (await fileStore.exists(paths.runsDir()))
-    ? (await Promise.all((await fileStore.list(paths.runsDir())).map((runId) => fileStore.exists(paths.runManifest(runId)))))
+    ? (await Promise.all((await fileStore.list(paths.runsDir())).map((runId) =>
+        invalidSubmissionManifests.has(path.posix.join('runs', runId, 'run_manifest.json'))
+          ? false : fileStore.exists(paths.runManifest(runId)))))
         .filter(Boolean).length
     : 0;
   const snapshotCount = (await fileStore.exists(paths.snapshotsDir()))

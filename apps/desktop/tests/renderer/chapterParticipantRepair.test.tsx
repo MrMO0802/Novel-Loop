@@ -24,6 +24,7 @@ import type { SystemReadiness } from '../../src/shared/systemContract';
 import {
   completeChapterPlan,
   createInertChapterApi,
+  createInertSubmissionApi,
   deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
@@ -100,7 +101,8 @@ function installApi(plan: ChapterPlanReviewResult = completeChapterPlan) {
       cancel: vi.fn(),
       read: vi.fn()
     },
-    chapter
+    chapter,
+    submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,
@@ -160,6 +162,7 @@ describe('chapter participant repair', () => {
     const props = {
       onBack: vi.fn(),
       onGenerateDraft: vi.fn(),
+      onPreparePlanning: vi.fn(),
       project
     };
     const { rerender } = render(
@@ -191,6 +194,7 @@ describe('chapter participant repair', () => {
     const props = {
       onBack: vi.fn(),
       onGenerateDraft: vi.fn(),
+      onPreparePlanning: vi.fn(),
       project
     };
     const { rerender } = render(<ChapterPlanReview {...props} />);

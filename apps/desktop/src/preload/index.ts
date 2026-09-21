@@ -53,6 +53,17 @@ import type {
   ProjectOpenResult
 } from '../shared/projectContract';
 import type { SystemReadiness } from '../shared/systemContract';
+import type {
+  SubmissionCancelRequest,
+  SubmissionConfirmRequest,
+  SubmissionConfirmResult,
+  SubmissionGetRequest,
+  SubmissionPreviewResult,
+  SubmissionReadPreviewRequest,
+  SubmissionStartCheckRequest,
+  SubmissionStartCheckResult,
+  SubmissionTask
+} from '../shared/submissionContract';
 
 const novelLoopApi: NovelLoopDesktopApi = {
   system: {
@@ -279,6 +290,28 @@ const novelLoopApi: NovelLoopDesktopApi = {
         request
       );
       return response as ChapterAuthoringResult;
+    }
+  },
+  submission: {
+    startCheck: async (request: SubmissionStartCheckRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.submissionStartCheck, request);
+      return response as SubmissionStartCheckResult;
+    },
+    get: async (request: SubmissionGetRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.submissionGet, request);
+      return response as SubmissionTask;
+    },
+    cancel: async (request: SubmissionCancelRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.submissionCancel, request);
+      return response as SubmissionTask;
+    },
+    readPreview: async (request: SubmissionReadPreviewRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.submissionReadPreview, request);
+      return response as SubmissionPreviewResult;
+    },
+    confirm: async (request: SubmissionConfirmRequest) => {
+      const response: unknown = await ipcRenderer.invoke(IPC_CHANNELS.submissionConfirm, request);
+      return response as SubmissionConfirmResult;
     }
   }
 };

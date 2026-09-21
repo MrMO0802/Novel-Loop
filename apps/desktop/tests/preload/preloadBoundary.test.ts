@@ -7,6 +7,11 @@ import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 import { IPC_CHANNELS } from '../../src/shared/ipcChannels';
 import { registerChapterHandlers } from '../../src/main/ipc/registerChapterHandlers';
 import type { ChapterApplicationService } from '../../src/main/chapter/ProjectChapterService';
+import {
+  registerSubmissionHandlers,
+  type ProjectSubmissionServiceContract
+} from '../../src/main/ipc/registerSubmissionHandlers';
+import type { SubmissionTask } from '../../src/shared/submissionContract';
 
 const electron = vi.hoisted(() => ({
   exposeInMainWorld: vi.fn(),
@@ -41,6 +46,106 @@ async function exposeApi(): Promise<NovelLoopDesktopApi> {
   return captured[1] as NovelLoopDesktopApi;
 }
 
+const submissionProject = { projectKey: 'project_radio' };
+const submissionTaskRequest = { taskId: 'submission_check_123' };
+const submissionConfirm = {
+  ...submissionProject,
+  previewToken: `submission_${'b'.repeat(48)}`,
+  confirm: true as const
+};
+const submissionTask: SubmissionTask = {
+  ...submissionProject,
+  ...submissionTaskRequest,
+  chapterNumber: 1,
+  stage: 'checking_source',
+  status: 'running',
+  startedAt: '2026-09-21T00:00:00.000Z',
+  endedAt: null,
+  safeErrorCode: null,
+  issues: []
+};
+
+function connectSubmissionHandlers() {
+  const service: ProjectSubmissionServiceContract = {
+    startCheck: vi.fn(async () => submissionTaskRequest),
+    get: vi.fn(async () => submissionTask),
+    cancel: vi.fn(async () => ({ ...submissionTask, status: 'cancel_requested' as const })),
+    readPreview: vi.fn(async () => ({
+      outcome: 'ready' as const,
+      previewToken: submissionConfirm.previewToken,
+      chapterNumber: 1,
+      draft: { kind: 'adopted' as const, label: 'Adopted draft', summary: 'The broadcast returns.' },
+      changes: [],
+      warnings: []
+    })),
+    confirm: vi.fn(async () => ({ outcome: 'recovery_required' as const, messageKey: 'submission.recovery_required' as const }))
+  };
+  const handlers = new Map<string, (
+    event: { senderFrame: { url: string } }, request: unknown
+  ) => Promise<unknown>>();
+  const url = 'http://127.0.0.1:5173';
+  registerSubmissionHandlers({
+    handle(channel, handler) { handlers.set(channel, handler); }
+  }, service, url);
+  electron.invoke.mockImplementation(async (channel: string, request: unknown) => {
+    const handler = handlers.get(channel);
+    if (!handler) throw new Error('Unexpected IPC call.');
+    try {
+      return structuredClone(await handler({ senderFrame: { url } }, structuredClone(request)));
+    } catch (error) {
+      // Electron serializes the message, not custom error properties.
+      throw new Error(error instanceof Error ? error.message : 'Unexpected IPC failure.');
+    }
+  });
+  return service;
+}
+
+describe('submission preload boundary', () => {
+  test('uses exactly the five fixed routes and preserves parsed results across IPC serialization', async () => {
+    const service = connectSubmissionHandlers();
+    const api = await exposeApi();
+    await expect(api.submission.startCheck(submissionProject)).resolves.toEqual(submissionTaskRequest);
+    await expect(api.submission.get(submissionTaskRequest)).resolves.toEqual(submissionTask);
+    await expect(api.submission.cancel(submissionTaskRequest)).resolves.toEqual({ ...submissionTask, status: 'cancel_requested' });
+    await expect(api.submission.readPreview(submissionProject)).resolves.toEqual({
+      outcome: 'ready', previewToken: submissionConfirm.previewToken, chapterNumber: 1,
+      draft: { kind: 'adopted', label: 'Adopted draft', summary: 'The broadcast returns.' },
+      changes: [], warnings: []
+    });
+    await expect(api.submission.confirm(submissionConfirm)).resolves.toEqual({
+      outcome: 'recovery_required', messageKey: 'submission.recovery_required'
+    });
+    expect(electron.invoke.mock.calls).toEqual([
+      ['novel-loop:submission:start-check', submissionProject],
+      ['novel-loop:submission:get', submissionTaskRequest],
+      ['novel-loop:submission:cancel', submissionTaskRequest],
+      ['novel-loop:submission:read-preview', submissionProject],
+      ['novel-loop:submission:confirm', submissionConfirm]
+    ]);
+    expect(service.confirm).toHaveBeenCalledExactlyOnceWith(submissionConfirm);
+  });
+
+  test.each([
+    { method: 'startCheck', request: submissionProject },
+    { method: 'get', request: submissionTaskRequest },
+    { method: 'cancel', request: submissionTaskRequest },
+    { method: 'readPreview', request: submissionProject },
+    { method: 'confirm', request: submissionConfirm }
+  ] as const)('$method cannot bypass strict request or result validation via preload', async ({ method, request }) => {
+    const service = connectSubmissionHandlers();
+    const api = await exposeApi();
+    await expect(api.submission[method]({ ...request, patch: {} } as never))
+      .rejects.toThrow(/^submission\.blocked$/u);
+    expect(service[method]).not.toHaveBeenCalled();
+
+    vi.spyOn(service, method).mockResolvedValueOnce({ rawPrompt: '/private/project' } as never);
+    await expect(api.submission[method](request as never)).rejects.toThrow(/^submission\.blocked$/u);
+
+    vi.spyOn(service, method).mockRejectedValueOnce(new Error('private prompt /private/project'));
+    await expect(api.submission[method](request as never)).rejects.toThrow(/^submission\.blocked$/u);
+  });
+});
+
 describe('typed preload boundary', () => {
   test('exposes exactly the draft-authoring chapter methods', async () => {
     const api = await exposeApi();
@@ -50,7 +155,8 @@ describe('typed preload boundary', () => {
       'projects',
       'foundation',
       'planning',
-      'chapter'
+      'chapter',
+      'submission'
     ]);
     expect(Object.keys(api.chapter)).toEqual([
       'inspect',
@@ -70,6 +176,9 @@ describe('typed preload boundary', () => {
       'saveMissionWorkingCopy',
       'savePlanWorkingCopy',
       'adoptRevision'
+    ]);
+    expect(Object.keys(api.submission)).toEqual([
+      'startCheck', 'get', 'cancel', 'readPreview', 'confirm'
     ]);
   });
 
@@ -253,7 +362,7 @@ describe('typed preload boundary', () => {
       'codex'
     ];
 
-    for (const surface of [api, api.chapter]) {
+    for (const surface of [api, api.chapter, api.submission]) {
       for (const property of forbidden) {
         expect(surface).not.toHaveProperty(property);
       }

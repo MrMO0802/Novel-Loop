@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, test } from 'vitest';
@@ -20,6 +20,32 @@ afterEach(async () => {
 });
 
 describe('CodexTextProvider', () => {
+  test.each([
+    ['upgrade-required', 'upgrade_required'],
+    ['jsonl-usage-limit', 'usage_limit'],
+    ['jsonl-login-required', 'login_required']
+  ] as const)('classifies redacted JSONL-only execution errors: %s', async (mode, classification) => {
+    const fake = await writeFakeCodex(tempRoot, mode);
+    const provider = createProvider(fake.codexBin);
+    const error: unknown = await provider.generateText({
+      promptId: 'strategy.build_story_bible', system: 'system', user: 'user', responseFormat: 'markdown'
+    }).catch((failure: unknown) => failure);
+    expect(error).toMatchObject({ code: 'CODEX_EXEC_FAILED', classification });
+    expect(String(error)).not.toMatch(/sk-SECRET|secret123|auth\.json/);
+  });
+
+  test('does not retry JSON generation when Codex must be upgraded', async () => {
+    const fake = await writeFakeCodex(tempRoot, 'upgrade-required');
+    const provider = createProvider(fake.codexBin);
+    const schemaPath = path.join(tempRoot, 'output.schema.json');
+    await writeFile(schemaPath, JSON.stringify({ type: 'object', properties: {}, additionalProperties: false }));
+    await expect(provider.generateJson({
+      promptId: 'provider.test_json', system: 'system', user: 'user', responseFormat: 'json',
+      metadata: { outputSchemaPath: schemaPath }
+    })).rejects.toMatchObject({ classification: 'upgrade_required', recoverable: false });
+    const commands = (await readFile(fake.argsLogPath, 'utf8')).split('\n');
+    expect(commands.filter((command) => /\bexec\b/.test(command))).toHaveLength(1);
+  });
   test('appears in provider registry with read-only CLI capabilities', async () => {
     const providers = listProviders();
     const codex = providers.find((provider) => provider.providerId === 'codex-text');

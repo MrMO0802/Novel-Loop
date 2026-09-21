@@ -22,6 +22,10 @@ export interface StartCommitJournalInput {
   canonPatchPath?: string | undefined;
   latestCommittedChapterBefore?: number | undefined;
   latestCommittedChapterAfter?: number | undefined;
+  desktopSubmission?: Pick<CommitJournal,
+    'previewId' | 'previewManifestPath' | 'previewManifestHash' | 'approvalId'
+    | 'approvalRecordPath' | 'approvalRecordHash' | 'sourceHash' | 'patchHash'
+    | 'diffHash' | 'canonicalFinalPath' | 'beforeStateHash' | 'afterStateHash'>;
 }
 
 export interface UpdateCommitJournalInput {
@@ -39,6 +43,7 @@ export async function startCommitJournal(input: StartCommitJournalInput): Promis
   const artifact = await nextCommitJournalArtifact(input.paths, input.fileStore, input.chapterNumber);
   const now = new Date().toISOString();
   const journal = CommitJournalSchema.parse({
+    ...input.desktopSubmission,
     journalId: `commit_journal_ch${formatChapterNumber(input.chapterNumber)}_v${artifact.version}`,
     projectId: input.paths.projectId,
     chapterNumber: input.chapterNumber,
@@ -93,6 +98,19 @@ export async function recordCommitJournalPhase(
 }
 
 export function isCompletedCommitJournal(journal: CommitJournal): boolean {
+  if (journal.commitKind === 'desktop_controlled_commit') {
+    if (!journal.previewId || !journal.previewManifestPath || !journal.previewManifestHash
+      || !journal.approvalId || !journal.approvalRecordPath || !journal.approvalRecordHash
+      || !journal.sourceHash || !journal.patchHash || !journal.diffHash || !journal.canonicalFinalPath
+      || !journal.beforeStateHash || !journal.afterStateHash || !journal.runId || !journal.canonPatchPath) return false;
+    const required: CommitJournalPhase[] = [
+      'prepared', 'approval_recorded', 'canonical_final_written', 'canonical_patch_written',
+      'before_snapshot_created', 'story_state_written', 'after_snapshot_created',
+      'state_mutation_recorded', 'commit_report_written', 'queue_committed', 'completed'
+    ];
+    if (journal.phases.some(entry => entry.status === 'failed' || entry.phase === 'failed')
+      || required.some((phase, index) => journal.phases[index]?.phase !== phase || journal.phases[index]?.status !== 'completed')) return false;
+  }
   return (
     journal.status === 'completed' &&
     journal.stateWriteCompleted === true &&

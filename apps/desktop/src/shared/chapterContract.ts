@@ -193,6 +193,7 @@ export const ChapterTaskStageSchema = z.enum([
 ]);
 
 export const ChapterErrorKindSchema = z.enum([
+  'upgrade_required',
   'codex_unavailable',
   'login_required',
   'usage_limit',

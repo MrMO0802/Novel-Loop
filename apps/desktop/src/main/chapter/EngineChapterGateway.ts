@@ -585,12 +585,13 @@ const MissionArtifactSchema = z.object({
     to: z.string().min(1).max(2_000),
     evidenceRequired: z.string().min(1).max(2_000)
   }).passthrough()).max(100),
-  participatingCharacterIds: z.array(z.string().min(1).max(240)).max(32),
+  // Match ChapterMissionSchema's legacy defaults without rewriting source files.
+  participatingCharacterIds: z.array(z.string().min(1).max(240)).max(32).default([]),
   charactersToIntroduce: z.array(z.object({
     characterId: z.string().min(1).max(240),
     name: z.string().min(1).max(120),
     role: z.string().min(1).max(120)
-  }).strict()).max(8),
+  }).strict()).max(8).default([]),
   readerInformationDelta: TrustedReaderInformationSchema,
   forbiddenMoves: z.array(z.string().min(1).max(8_000)).max(100),
   targetEmotionalCurve: z.array(z.string().min(1).max(2_000)).max(100),

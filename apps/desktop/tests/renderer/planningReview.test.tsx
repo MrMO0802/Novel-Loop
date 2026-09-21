@@ -20,6 +20,7 @@ import type { ProjectSummary } from '../../src/shared/projectContract';
 import type { SystemReadiness } from '../../src/shared/systemContract';
 import {
   createInertChapterApi,
+  createInertSubmissionApi,
   readyChapterInspection
 } from './desktopApiFixtures';
 
@@ -131,7 +132,8 @@ function installApi(result: PlanningReviewResult = review) {
       inspect: vi.fn()
         .mockRejectedValueOnce(new Error('chapter inspection unavailable'))
         .mockResolvedValue(readyChapterInspection)
-    }
+    },
+    submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,

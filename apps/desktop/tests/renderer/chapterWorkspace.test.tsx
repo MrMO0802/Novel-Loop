@@ -22,6 +22,7 @@ import type { SystemReadiness } from '../../src/shared/systemContract';
 import {
   completeChapterDraft,
   createInertChapterApi,
+  createInertSubmissionApi,
   readyChapterInspection
 } from './desktopApiFixtures';
 
@@ -86,7 +87,8 @@ function installApi() {
         reason: 'not_ready'
       }),
       readDraft: vi.fn().mockResolvedValue(completeChapterDraft)
-    }
+    },
+    submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,
@@ -101,7 +103,7 @@ async function openWorkspace() {
   fireEvent.click(await screen.findByRole('button', {
     name: '打开第 1 章初稿'
   }));
-  await screen.findByRole('heading', { name: '第 1 章 凌晨三点十七分' });
+  await screen.findByRole('heading', { name: '第 1 章 凌晨三点十七分', level: 1 });
 }
 
 afterEach(() => {
@@ -156,18 +158,77 @@ describe('initial chapter workspace', () => {
     )).toBeVisible();
   });
 
-  test('exposes draft editing without diagnostics, final, patch, or commit controls', async () => {
+  test('exposes a check-and-review entry without direct final, patch, or formal commit controls', async () => {
     installApi();
     render(<App />);
     await openWorkspace();
 
     expect(screen.getByRole('textbox', { name: '章节正文' })).toBeVisible();
     expect(screen.getByRole('button', { name: '采用此修订' })).toBeVisible();
-    expect(screen.queryByRole('button', { name: /诊断|定稿|提交/i }))
+    expect(screen.getByRole('button', { name: '检查并提交' })).toBeEnabled();
+    expect(screen.queryByRole('button', { name: /诊断|定稿|正式提交/i }))
       .not.toBeInTheDocument();
     expect(document.body).not.toHaveTextContent(
       /canon_patch|story_state|mutation|jsonl|runId|taskId|artifact path/i
     );
+  });
+
+  test('routes the clean draft to the real submission view and returns to the same manuscript without starting a check', async () => {
+    const api = installApi();
+    api.submission.readPreview.mockResolvedValue({ outcome: 'not_ready', messageKey: 'submission.not_ready', issues: [] });
+    render(<App />);
+    await openWorkspace();
+    expect(api.submission.readPreview).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '检查并提交' }));
+    expect(await screen.findByRole('heading', { name: '检查并提交' })).toBeVisible();
+    expect(await screen.findByRole('button', { name: '开始检查' })).toBeEnabled();
+    expect(api.submission.readPreview).toHaveBeenCalledExactlyOnceWith({ projectKey });
+    expect(api.submission.startCheck).not.toHaveBeenCalled();
+    expect(api.submission.confirm).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '返回修改' }));
+    expect(await screen.findByRole('textbox', { name: '章节正文' })).toHaveValue(
+      completeChapterDraft.available ? completeChapterDraft.markdown : ''
+    );
+    expect(api.submission.startCheck).not.toHaveBeenCalled();
+    expect(api.submission.confirm).not.toHaveBeenCalled();
+  });
+
+  test('does not leave the workspace or read a submission preview with unadopted edits', async () => {
+    const api = installApi();
+    render(<App />);
+    await openWorkspace();
+    fireEvent.change(screen.getByRole('textbox', { name: '章节正文' }), { target: { value: '# 第一章\n\n未采用的正文。' } });
+    const check = screen.getByRole('button', { name: '检查并提交' });
+    expect(check).toBeDisabled();
+    fireEvent.click(check);
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(screen.getByRole('status')).toHaveTextContent('已保存'));
+    expect(check).toBeDisabled();
+    fireEvent.click(check);
+    expect(screen.getByRole('textbox', { name: '章节正文' })).toHaveValue('# 第一章\n\n未采用的正文。');
+    expect(api.submission.readPreview).not.toHaveBeenCalled();
+    expect(api.submission.startCheck).not.toHaveBeenCalled();
+    expect(api.submission.confirm).not.toHaveBeenCalled();
+  });
+
+  test('returns blocked diagnostics to the adopted manuscript without committing or regenerating', async () => {
+    if (!completeChapterDraft.available) throw new Error('Expected available draft fixture.');
+    const api = installApi();
+    api.chapter.readDraft.mockResolvedValue({ ...completeChapterDraft, versionKind: 'author_adopted' });
+    api.submission.readPreview.mockResolvedValue({
+      outcome: 'blocked', messageKey: 'submission.diagnostics_failed',
+      issues: [{ severity: 'error', message: '人物行动与前文矛盾。', evidence: '前文尚未拿到报告。' }]
+    });
+    render(<App />);
+    await openWorkspace();
+    fireEvent.click(screen.getByRole('button', { name: '检查并提交' }));
+    expect(await screen.findByText('人物行动与前文矛盾。')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: '返回修改' }));
+    expect(await screen.findByText('修订已采用，尚未正式提交。')).toBeVisible();
+    expect(screen.getByRole('tab', { name: '预览' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByTestId('draft-manuscript-preview')).toHaveTextContent('屏幕上的“测试进行中”闪了一下');
+    expect(api.submission.confirm).not.toHaveBeenCalled();
+    expect(api.chapter.startDrafting).not.toHaveBeenCalled();
   });
 
   test('reinitializes the editor after adoption recovery before allowing another save and adoption', async () => {
@@ -240,10 +301,17 @@ describe('initial chapter workspace', () => {
 
     await waitFor(() => expect(api.chapter.readDraft).toHaveBeenCalledTimes(2));
     expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: '检查并提交' })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: '检查并提交' }));
+    expect(api.submission.readPreview).not.toHaveBeenCalled();
 
     await act(async () => resolveAdoptedDraft?.(adoptedDraft));
     expect(await screen.findByText('作者采用修订')).toBeVisible();
     expect(api.chapter.readDraftWorkingCopy).toHaveBeenCalledTimes(2);
+    expect(screen.getByRole('tab', { name: '预览' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getByText('修订已采用，尚未正式提交。')).toBeVisible();
+    expect(screen.getByRole('button', { name: '采用此修订' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '检查并提交' })).toBeEnabled();
   });
 
   test('stops the post-adoption read sequence after leaving the workspace', async () => {

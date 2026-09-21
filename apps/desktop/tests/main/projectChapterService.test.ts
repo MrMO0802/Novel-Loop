@@ -1,11 +1,12 @@
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 
 import { ChapterReviewTokenStore } from '../../src/main/chapter/ChapterReviewTokenStore';
 import { DraftWorkingCopyStore } from '../../src/main/chapter/DraftWorkingCopyStore';
+import { ProjectSubmissionGuard } from '../../src/main/submission/ProjectSubmissionGuard';
 
 import type {
   ChapterDraftReviewResult,
@@ -488,6 +489,30 @@ class DeferredChapterGateway implements ChapterEngineGateway {
 }
 
 describe('ProjectChapterService', () => {
+  test.each(['read', 'save', 'discard', 'adopt'] as const)('shares submission admission guard with draft %s without nested locking', async (operation) => {
+    const root = await mkdtemp(path.join(os.tmpdir(), 'chapter-shared-guard-'));
+    try {
+      const submissionGuard = new ProjectSubmissionGuard();
+      const { gateway, service } = createService({ workingCopies: new DraftWorkingCopyStore(root), submissionGuard });
+      gateway.draftReviews.set(projectRoot, draftReview);
+      const saved = await service.saveDraftWorkingCopy({ projectKey, markdown: 'Saved pending edit.' });
+      let entered!: () => void; let release!: () => void;
+      const started = new Promise<void>(resolve => { entered = resolve; });
+      const wait = new Promise<void>(resolve => { release = resolve; });
+      const held = submissionGuard.runExclusive(projectKey, async () => { entered(); await wait; });
+      await started;
+      let finished = false;
+      const editing = (operation === 'read' ? service.readDraftWorkingCopy({ projectKey })
+        : operation === 'save' ? service.saveDraftWorkingCopy({ projectKey, markdown: 'New pending edit.' })
+        : operation === 'discard' ? service.discardDraftWorkingCopy({ projectKey })
+        : service.adoptDraftRevision({ projectKey, revisionToken: saved.revisionToken, confirmAdoption: true }))
+        .then(() => { finished = true; });
+      await new Promise(resolve => setImmediate(resolve));
+      expect(finished).toBe(false);
+      release(); await held; await editing;
+      expect(finished).toBe(true);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
   test('revokes an older draft token when a newer working copy is saved', async () => {
     const userDataRoot = await mkdtemp(path.join(os.tmpdir(), 'chapter-draft-token-'));
     try {
@@ -931,6 +956,9 @@ describe('ProjectChapterService', () => {
   });
 
   test.each([
+    [Object.assign(new Error('secret model details'), {
+      classification: 'upgrade_required'
+    }), 'upgrade_required'],
     [Object.assign(new Error('secret login path'), {
       classification: 'login_required'
     }), 'login_required'],
@@ -2131,6 +2159,42 @@ describe('ProjectChapterService', () => {
 });
 
 describe('EngineChapterGateway plan candidate containment', () => {
+  test.each(['participatingCharacterIds', 'charactersToIntroduce'])(
+    'reads legacy missions without %s without rewriting the artifact', async (field) => {
+      const fixture = await createGatewayArtifactFixture('plan_001');
+      const missionPath = path.join(fixture.projectRoot, 'chapters', 'chapter_001', 'mission.json');
+      try {
+        const mission = JSON.parse(await readFile(missionPath, 'utf8')) as Record<string, unknown>;
+        delete mission[field];
+        const original = JSON.stringify(mission);
+        await writeFile(missionPath, original);
+        await writeFile(path.join(fixture.candidatesRoot, 'plan_001.md'), '# Direction\n\nA signal.');
+        await expect(new EngineChapterGateway().readPlan(fixture.projectRoot))
+          .resolves.toMatchObject({ available: true, chapterNumber: 1 });
+        expect(await readFile(missionPath, 'utf8')).toBe(original);
+      } finally {
+        await rm(fixture.tempRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
+  test.each(['participatingCharacterIds', 'charactersToIntroduce'])(
+    'still rejects an explicitly invalid %s', async (field) => {
+      const fixture = await createGatewayArtifactFixture('plan_001');
+      const missionPath = path.join(fixture.projectRoot, 'chapters', 'chapter_001', 'mission.json');
+      try {
+        const mission = JSON.parse(await readFile(missionPath, 'utf8')) as Record<string, unknown>;
+        mission[field] = null;
+        await writeFile(missionPath, JSON.stringify(mission));
+        await writeFile(path.join(fixture.candidatesRoot, 'plan_001.md'), '# Direction\n\nA signal.');
+        await expect(new EngineChapterGateway().readPlan(fixture.projectRoot))
+          .rejects.toMatchObject({ name: 'ZodError' });
+      } finally {
+        await rm(fixture.tempRoot, { recursive: true, force: true });
+      }
+    }
+  );
+
   test('rejects a traversal candidate ID before reading candidate Markdown', async () => {
     const fixture = await createGatewayArtifactFixture('../../../outside/secret');
     await mkdir(path.join(fixture.projectRoot, 'outside'), { recursive: true });
@@ -2536,6 +2600,7 @@ function createService(overrides: {
   resolver?: MemoryProjectResolver;
   tokenStore?: ChapterReviewTokenStore;
   workingCopies?: DraftWorkingCopyStore;
+  submissionGuard?: ProjectSubmissionGuard;
 } = {}) {
   const gateway = overrides.gateway ?? new DeferredChapterGateway();
   const resolver = overrides.resolver ?? new MemoryProjectResolver();
@@ -2547,6 +2612,7 @@ function createService(overrides: {
     ...(overrides.workingCopies === undefined
       ? {}
       : { workingCopies: overrides.workingCopies }),
+    ...(overrides.submissionGuard === undefined ? {} : { submissionGuard: overrides.submissionGuard }),
     clock: () => new Date(Date.UTC(2026, 6, 30, 1, 0, tick++)),
     randomBytes: (size) => new Uint8Array(size).fill(tick % 255)
   });

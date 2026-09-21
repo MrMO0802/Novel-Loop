@@ -191,6 +191,21 @@ export class ProjectLibraryService implements ProjectLibraryApplicationService {
     }
   }
 
+  /** Read-only recovery only: never use this to authorize canonical writes. */
+  async resolveRegisteredRootForRecovery(projectKey: string): Promise<string | null> {
+    try {
+      const loaded = await this.dependencies.registry.load();
+      if (loaded.warning !== null) return null;
+      const project = loaded.registry.projects.find((candidate) => candidate.projectKey === projectKey);
+      if (project === undefined) return null;
+      const canonical = await canonicalProjectPath(project.projectRoot);
+      // Registry entries are canonical at registration. Do not follow a substituted alias.
+      return canonical === path.resolve(project.projectRoot) ? canonical : null;
+    } catch {
+      return null;
+    }
+  }
+
   private async resolveCreationRoot(
     input: CreateProjectRequest,
     registry: ProjectRegistry

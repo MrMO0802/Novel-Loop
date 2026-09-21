@@ -20,6 +20,7 @@ import {
   completeChapterDraft,
   completeChapterPlan,
   createInertChapterApi,
+  createInertSubmissionApi,
   deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
@@ -88,7 +89,8 @@ function installApi() {
       cancel: vi.fn(),
       read: vi.fn()
     },
-    chapter
+    chapter,
+    submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,

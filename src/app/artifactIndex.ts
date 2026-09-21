@@ -199,6 +199,8 @@ async function isDirectory(fileStore: FileStore, targetPath: string): Promise<bo
 
 function classifyArtifact(relativePath: string): { artifactType: ArtifactType; phase: string; schemaName?: string } {
   const fileName = path.posix.basename(relativePath);
+  const submission = classifyDesktopSubmissionArtifact(relativePath);
+  if (submission !== undefined) return submission;
   if (relativePath === 'brief.md') return { artifactType: 'brief', phase: 'init' };
   if (relativePath === 'config.json') return { artifactType: 'config', phase: 'init', schemaName: 'ConfigSchema' };
   if (relativePath === 'state/story_state.json') return { artifactType: 'story_state', phase: 'state', schemaName: 'StoryStateSchema' };
@@ -406,6 +408,29 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
   if (/^downstream_invalidation_report_v\d+\.json$/.test(fileName)) return { artifactType: 'downstream_invalidation_report', phase: 'historical_recommit', schemaName: 'DownstreamInvalidationReportSchema' };
   if (/^historical_recommit_report_v\d+\.json$/.test(fileName)) return { artifactType: 'historical_recommit_report', phase: 'historical_recommit', schemaName: 'HistoricalRecommitReportSchema' };
   return { artifactType: 'brief', phase: 'unknown' };
+}
+
+export function classifyDesktopSubmissionArtifact(relativePath: string): { artifactType: ArtifactType; phase: string; schemaName?: string } | undefined {
+  if (/^runs\/[A-Za-z0-9_-]+\/submission_task\.json$/u.test(relativePath)) {
+    return { artifactType: 'desktop_submission_task', phase: 'submission', schemaName: 'DesktopSubmissionTaskSchema' };
+  }
+  const match = /^chapters\/chapter_\d{3,}\/submission_previews\/preview_v[1-9]\d*\/([^/]+)$/u.exec(relativePath);
+  if (match === null) return undefined;
+  switch (match[1]) {
+    case 'manifest.json': return { artifactType: 'desktop_submission_preview', phase: 'submission', schemaName: 'DesktopSubmissionPreviewSchema' };
+    case 'approval.json': return { artifactType: 'desktop_submission_approval', phase: 'submission', schemaName: 'DesktopSubmissionApprovalSchema' };
+    case 'source.md': return { artifactType: 'desktop_submission_source', phase: 'submission' };
+    case 'source_evidence.json': return { artifactType: 'desktop_submission_source', phase: 'submission', schemaName: 'DesktopSubmissionSourceSchema' };
+    case 'diagnostics.json': return { artifactType: 'diagnostics', phase: 'submission', schemaName: 'DiagnosticsReportSchema' };
+    // Raw provider proposals are normalized before CanonPatchSchema validation.
+    case 'patch_proposal.json': return { artifactType: 'canon_patch', phase: 'submission', schemaName: 'DesktopSubmissionPatchProposalSchema' };
+    case 'normalized_patch.json': return { artifactType: 'canon_patch', phase: 'submission', schemaName: 'CanonPatchSchema' };
+    case 'conflict_report.json': return { artifactType: 'conflict_report', phase: 'submission', schemaName: 'ConflictReportSchema' };
+    case 'state_diff.json': return { artifactType: 'state_diff', phase: 'submission', schemaName: 'StateDiffReportSchema' };
+    case 'diagnostics_context_manifest.json': return { artifactType: 'diagnostics_context_manifest', phase: 'submission', schemaName: 'DiagnosticsContextManifestSchema' };
+    case 'diagnostics_context_manifest.md': return { artifactType: 'diagnostics_context_manifest', phase: 'submission' };
+    default: return undefined;
+  }
 }
 
 function statusFor(relativePath: string, chapterNumber: number | undefined, queue: ChapterQueue | undefined): ArtifactStatus {

@@ -36,6 +36,7 @@ export const PlanningStageSchema = z.enum([
 ]);
 
 export const PlanningErrorKindSchema = z.enum([
+  'upgrade_required',
   'codex_unavailable',
   'login_required',
   'usage_limit',

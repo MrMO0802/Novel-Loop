@@ -22,6 +22,28 @@ afterEach(async () => {
 });
 
 describe('DraftWorkingCopyStore', () => {
+  test('submission admission remains blocked by invalid and quarantined edits across restart', async () => {
+    const root = await makeRoot();
+    const store = new DraftWorkingCopyStore(root);
+    const directory = path.join(root, 'working-copies', projectKey, 'chapter_001');
+    await mkdir(directory, { recursive: true });
+    await writeFile(path.join(directory, 'draft.json'), '{invalid');
+    await expect(store.hasPendingSubmissionEdit(projectKey, 1)).resolves.toBe(true);
+    await expect(store.read(projectKey, 1)).resolves.toMatchObject({ recoveryAvailable: false });
+    await expect(new DraftWorkingCopyStore(root).hasPendingSubmissionEdit(projectKey, 1)).resolves.toBe(true);
+    await store.discard(projectKey, 1);
+    await expect(store.hasPendingSubmissionEdit(projectKey, 1)).resolves.toBe(false);
+  });
+
+  test('submission admission treats every persisted copy, including stale or identical text, as pending', async () => {
+    const root = await makeRoot();
+    const store = new DraftWorkingCopyStore(root);
+    await expect(store.hasPendingSubmissionEdit(projectKey, 1)).resolves.toBe(false);
+    await store.save({ projectKey, chapterNumber: 1, sourceHash, markdown: 'same', savedAt: '2026-09-21T00:00:00Z' });
+    await expect(store.hasPendingSubmissionEdit(projectKey, 1)).resolves.toBe(true);
+    await expect(store.read(projectKey, 1, 'b'.repeat(64))).resolves.toMatchObject({ stale: true });
+    await expect(store.hasPendingSubmissionEdit(projectKey, 1)).resolves.toBe(true);
+  });
   test('reopens a saved working copy with restrictive permissions', async () => {
     const root = await makeRoot();
     const store = new DraftWorkingCopyStore(root);

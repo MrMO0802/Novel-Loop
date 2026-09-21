@@ -40,6 +40,7 @@ export const FoundationStageSchema = z.enum([
 ]);
 
 export const FoundationErrorKindSchema = z.enum([
+  'upgrade_required',
   'codex_unavailable',
   'login_required',
   'usage_limit',

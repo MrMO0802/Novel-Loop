@@ -39,6 +39,7 @@ export interface CodexTextProviderOptions {
 
 export type CodexProviderFailureClassification =
   | 'unavailable'
+  | 'upgrade_required'
   | 'login_required'
   | 'usage_limit'
   | 'invalid_output';
@@ -224,6 +225,7 @@ export class CodexTextProvider implements LLMClient {
       } catch (error) {
         lastError = error;
         attempts.push(this.failureAttempt(attemptIndex + 1, error));
+        if (normalizeProviderError(error).classification === 'upgrade_required') break;
       }
     }
 
@@ -559,11 +561,12 @@ function normalizeProviderError(error: unknown): ProviderError {
       );
     }
     if (error.code === 'CODEX_EXEC_FAILED') {
+      const classification = classifyExecFailure(error.message);
       return new ProviderError(
         'CODEX_EXEC_FAILED',
         error.message,
-        true,
-        classifyExecFailure(error.message)
+        classification !== 'upgrade_required',
+        classification
       );
     }
     if (error.code === 'CODEX_OUTPUT_MISSING') {
@@ -580,6 +583,9 @@ function normalizeProviderError(error: unknown): ProviderError {
 }
 
 function classifyExecFailure(message: string): CodexProviderFailureClassification {
+  if (/requires a newer version of Codex|Codex.{0,40}(?:outdated|too old)|upgrade.{0,60}(?:Codex|latest app or CLI)/i.test(message)) {
+    return 'upgrade_required';
+  }
   if (/usage limit|rate limit|quota|too many requests|limit reached|\b429\b/i.test(message)) {
     return 'usage_limit';
   }

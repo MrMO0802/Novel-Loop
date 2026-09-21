@@ -15,6 +15,23 @@
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
+}
+
+.nl-draft-editor__save-actions {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.nl-draft-editor__save-actions p { margin: 0; }
+
+.nl-draft-editor__adopted {
+  margin: 0;
+  padding: 12px 16px;
+  border-left: 3px solid var(--nl-accent);
+  background: var(--nl-surface);
 }
 
 .nl-draft-editor textarea,

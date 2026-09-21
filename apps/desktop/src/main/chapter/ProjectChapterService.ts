@@ -52,6 +52,7 @@ import {
 } from './EngineChapterGateway';
 import { ChapterReviewTokenStore } from './ChapterReviewTokenStore';
 import { DraftWorkingCopyStore } from './DraftWorkingCopyStore';
+import { ProjectSubmissionGuard, type ProjectSubmissionGuardContract } from '../submission/ProjectSubmissionGuard';
 
 export type {
   ChapterAdjustMissionRequest,
@@ -102,6 +103,7 @@ export interface ProjectChapterServiceDependencies {
   randomBytes?: (size: number) => Uint8Array;
   tokenStore?: ChapterReviewTokenStore;
   workingCopies?: DraftWorkingCopyStore;
+  submissionGuard?: ProjectSubmissionGuardContract;
 }
 
 interface InternalChapterTask {
@@ -153,7 +155,7 @@ export class ProjectChapterService implements ChapterApplicationService {
   private readonly draftAdoptions = new Map<string, PendingDraftAdoption>();
   private readonly retiredDraftAdoptions = new Set<string>();
   private readonly retiredDraftAdoptionOrder: string[] = [];
-  private readonly draftOperations = new Map<string, Promise<void>>();
+  private readonly submissionGuard: ProjectSubmissionGuardContract;
   private readonly tasks = new Map<string, InternalChapterTask>();
   private readonly activeByProject = new Map<string, string>();
   private readonly startingByProject = new Map<string, StartingTask>();
@@ -166,6 +168,7 @@ export class ProjectChapterService implements ChapterApplicationService {
     this.randomBytes = dependencies.randomBytes ?? nodeRandomBytes;
     this.tokenStore = dependencies.tokenStore ?? new ChapterReviewTokenStore();
     this.workingCopies = dependencies.workingCopies ?? null;
+    this.submissionGuard = dependencies.submissionGuard ?? new ProjectSubmissionGuard();
   }
 
   async inspect(projectKey: string): Promise<ChapterInspection> {
@@ -889,17 +892,7 @@ export class ProjectChapterService implements ChapterApplicationService {
     projectKey: string,
     operation: () => Promise<T>
   ): Promise<T> {
-    const previous = this.draftOperations.get(projectKey) ?? Promise.resolve();
-    const current = previous.catch(() => undefined).then(operation);
-    const tail = current.then(() => undefined, () => undefined);
-    this.draftOperations.set(projectKey, tail);
-    try {
-      return await current;
-    } finally {
-      if (this.draftOperations.get(projectKey) === tail) {
-        this.draftOperations.delete(projectKey);
-      }
-    }
+    return this.submissionGuard.runExclusive(projectKey, operation);
   }
 
   private async withAuthoringOperation(
@@ -1929,6 +1922,7 @@ function toChapterRunErrorKind(
 ): ChapterErrorKind {
   const classification = providerClassification(error);
   if (classification === 'login_required') return 'login_required';
+  if (classification === 'upgrade_required') return 'upgrade_required';
   if (classification === 'usage_limit') return 'usage_limit';
   if (classification === 'invalid_output') return 'invalid_output';
   if (classification === 'unavailable') return 'codex_unavailable';
@@ -2089,6 +2083,8 @@ function chapterErrorMessage(kind: ChapterErrorKind): string {
   switch (kind) {
     case 'codex_unavailable':
       return 'Codex is unavailable on this device.';
+    case 'upgrade_required':
+      return 'Upgrade Codex to use the configured model, then retry.';
     case 'login_required':
       return 'Sign in to Codex before generating this chapter.';
     case 'usage_limit':

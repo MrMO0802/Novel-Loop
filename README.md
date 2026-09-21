@@ -1,25 +1,168 @@
-# Novel Loop Engine
+# Novel Loop
 
-Novel Loop Engine is a local-first TypeScript CLI for building an AI-assisted long-form novel production loop.
+以故事档案（Story State）为核心、由本机 Codex CLI 辅助的本地优先长篇小说创作工具。
 
-This repository is currently packaged as `v2.5.0-rc.1` from the accepted M26.5 / v2.4.0 Codex pilot baseline: project skeleton, core Zod schemas, local file-system infrastructure, deterministic mock provider, multi-chapter mock production through commit, observability/audit hardening, a read-only local Codex CLI execution boundary, `provider=codex-text` dry-run generation through draft, Codex controlled commit for the normal next uncommitted chapter, single-chapter Codex smoke reports, a controlled Codex multi-chapter pilot for chapters 1-3, and progressive Codex runtime benchmarks. Web UI, DeepSeek, OpenAI API work, CodexAgentConnector, Codex historical recommit, Codex stale-regeneration commit, and M27 output/runtime optimization commitments remain intentionally out of scope for this release candidate.
+仓库包含 **Electron 桌面应用**和 **Novel Loop Engine 命令行引擎**。作者在桌面中组织小说、选择章节方向、编辑正文、检查一致性，并明确确认哪些变化写入正式故事档案。AI 生成不等于正式提交。
 
-## Requirements
+> 当前是源码运行的桌面开发版本，不是已经打包发布的正式安装版。引擎包版本仍为 `2.5.0-rc.1`，桌面包版本为 `0.1.0`；历史 RC 文档描述的是当时的 CLI 基线，不代表后续桌面功能都已达到生产发布标准。
 
-- Node.js 20+
-- pnpm
+## 文档导航
 
-If `pnpm` is not available directly, use Corepack:
+- [本地启动](#本地启动)
+- [作者使用流程](#作者使用流程)
+- [数据与安全边界](#数据与安全边界)
+- [开发与验证](#开发与验证)
+- [桌面应用详细说明](apps/desktop/README.md)
+- [本次受控提交验证记录](docs/superpowers/reports/2026-09-21-desktop-controlled-submission-verification.md)
+- [Codex pilot 操作手册](docs/operations/codex-pilot-runbook.md)
+- [历史 RC checkpoint](docs/releases/v2.5.0-rc.1-release-checkpoint.md)
+- [不需要 API key 的 Mock Demo](#quickstart-mock-demo)
+
+## 当前能力
+
+| 模块 | 当前支持 |
+| --- | --- |
+| 环境与项目 | Codex 可用性检查、本地作品库、新建或打开项目 |
+| 故事准备 | 生成并阅读故事基础、全书及分卷规划 |
+| 章节方向 | 比较候选、选择非默认方案、编辑章节任务和方向、修复出场人物 |
+| 正文创作 | 场景生成、初稿、手动保存与自动保存、工作副本恢复、对比并采用作者修订 |
+| 检查与提交 | 检查已采用正文、展示问题和证据、审阅故事变化、二次确认后本地提交 |
+| 状态保护 | 来源哈希校验、过期预览阻断、一次性确认凭证、快照、提交日志、审计 |
+| 后续章节 | 提交成功后进入已有下一章规划流程；规划耗尽则返回规划 |
+| 引擎工具 | Mock 三章闭环、运行记录、artifact 索引、快照浏览、回滚及实验性 Codex 工具 |
+
+桌面上的故事基础和全局规划目前是生成后的只读审阅界面，尚不支持逐项编辑。诊断失败后由作者修改，不自动改写或采用新正文。CLI 支持的所有内部命令并不等于桌面已开放对应功能。
+
+## 本地启动
+
+### 环境要求
+
+- 首版目标系统：Ubuntu 24.04。Windows 和 macOS 尚未作为本轮桌面验收平台。
+- 桌面构建：Node.js `20.19+` 或 `22.12+`，与当前 Vite 依赖要求一致；仅使用 CLI 的最低要求是 Node.js 20。
+- pnpm `10.12.1`，可通过 Corepack 使用。
+- AI 生成需要预先安装并登录的本机 Codex CLI。应用不替你管理安装、更新、认证或使用额度。
+- Linux 需要可用的 Chromium 安全沙箱和图形桌面环境。
+
+### 克隆与运行
+
+需要已配置 GitHub SSH 访问权限。当前桌面开发分支为 `codex/novel-loop-desktop-prototype`：
 
 ```bash
+git clone --branch codex/novel-loop-desktop-prototype git@github.com:MrMO0802/Novel-Loop.git
+cd Novel-Loop
+corepack enable
 corepack prepare pnpm@10.12.1 --activate
-corepack pnpm install
+corepack pnpm install --frozen-lockfile
+corepack pnpm desktop:dev
 ```
 
-Every `pnpm ...` command below can be run through Corepack. For example:
+如果系统没有 `corepack`，先为当前 Node.js 环境安装 Corepack，或直接使用 pnpm `10.12.1`。已可用时不必重复执行 `corepack enable`。首次安装请允许仓库配置的 Electron/esbuild 依赖构建，否则 Electron 二进制可能不可用。
+
+命令会构建本地引擎并打开 **Novel Loop 桌面窗口**。终端显示的 `http://127.0.0.1:5173/` 是开发用 renderer 服务，不是让作者在浏览器中使用的产品入口。
+
+仅构建桌面应用：
 
 ```bash
-corepack pnpm install
+corepack pnpm desktop:build
+```
+
+该命令生成 Electron 构建目录，不生成 `.deb`、AppImage 或 Windows 安装包。更新源码后，请停止原启动进程并重新运行 `desktop:dev`，确保 main 和 preload 也加载新版本。
+
+## 作者使用流程
+
+1. 完成环境检查，进入作品库并创建小说项目。
+2. 输入创意，明确开始生成故事基础；阅读后继续生成全局规划。
+3. 创建下一章，比较章节方向，按需调整任务、人物和方案，再确认生成初稿。
+4. 阅读和编辑正文。自动保存或点击“保存草稿”保存工作副本。
+5. 对比修改并“采用此修订”。采用后切换到正文预览，但还没有正式提交。
+6. 点击“检查并提交”，再点击“开始检查”。等待一致性检查和故事变化提案。
+7. 如果检查失败，阅读问题和证据，返回修改。若通过，审阅全部故事变化与高风险提示。
+8. 勾选“我已审阅正文版本和全部故事变化”，点击“正式提交第 N 章”，在弹窗中再次确认。
+9. 提交成功后，点击“创作下一章”。不会自动开始新的 AI 生成任务。
+
+| 显示状态 | 含义 |
+| --- | --- |
+| 已保存 / 已自动保存 | 工作副本已落盘；不代表采用或提交 |
+| 已采用 | 当前作者修订被选中；原始 `draft_v1.md` 和正式故事档案不变 |
+| 检查完成 | 生成了可审阅的独立预览；正式故事档案仍不变 |
+| 已正式提交 | 本地引擎已应用批准的变化并推进章节状态 |
+
+自动保存后仍可以主动点击“保存草稿”，相同内容不会制造重复修订。有未采用修改时，先采用或放弃修改才能提交。正文或故事档案变化会使旧预览失效，必须重新检查和审阅。
+
+## 数据与安全边界
+
+```text
+React renderer
+  -> typed preload API
+  -> Electron main / application service
+  -> Novel Loop Engine
+  -> local files / read-only Codex execution boundary
+```
+
+- 项目目录由作者选择。作品库登记信息和未采用工作副本保存在 Electron 应用数据目录。
+- 原稿和作者修订保留。确认后的 `final.md` 与审阅正文逐字节一致，不静默换回原稿。
+- 检查阶段不写正式 final、canonical patch、Story State 或 commit snapshots，也不用章节队列冒充检查任务进度。
+- 正式确认不再调用 Codex；本地引擎重新检查来源、schema 和冲突后，通过 Canon Patch 更新状态。
+- Codex 默认 `read-only`，不开放 workspace-write；renderer 不直接读写项目文件、不执行 shell、不接触 token 或认证文件。
+- 多文件提交不是原子事务。中断后保留 journal、快照和证据，阻断重复提交；**不自动恢复、回滚或清除异常记录**。
+- 快照用于状态追溯，不是整个项目的完整备份。重要项目仍应另外备份项目目录及所需的应用数据。
+
+**本地优先不等于 AI 离线运行。** 本机 Codex 可能把当前任务所选的小说正文和上下文发送给其服务完成生成；项目文件存于本地，不意味着模型推理也在本机。请按自己的内容隐私要求决定是否使用生成和检查功能。
+
+DeepSeek、OpenAI API 产品接入、Web SaaS、云账号、CodexAgentConnector，以及 Codex 历史重提交、stale regeneration 和冲突自动修复，不在当前桌面交付范围内。仓库内保留的 legacy provider 和实验命令不构成相应产品承诺。
+
+## 开发与验证
+
+```bash
+corepack pnpm build
+corepack pnpm check
+corepack pnpm --dir apps/desktop check
+corepack pnpm test --maxWorkers=2
+corepack pnpm --dir apps/desktop test --maxWorkers=2
+corepack pnpm desktop:build
+corepack pnpm --dir apps/desktop test:e2e:required
+git diff --check
+```
+
+测试使用临时项目和 deterministic mock / fake Codex，不要求真实 API key。Electron required 测试需要图形会话和安全沙箱，不会靠关闭沙箱来通过。建议依次运行测试，避免多个全套同时争用内存。
+
+本轮受控提交验收包含引擎和桌面回归、110 个持久化边界故障注入场景、预览发布中断校验和 14 项完整 Electron 测试。执行范围及最后修复后的补充验证见[验证记录](docs/superpowers/reports/2026-09-21-desktop-controlled-submission-verification.md)。这不等于新的真实 Codex 长篇质量验收。
+
+### 目录概览
+
+```text
+apps/desktop/       Electron main / preload / React renderer
+src/               TypeScript CLI、业务服务、schema、provider 和存储层
+prompts/           引擎提示模板
+schemas/           Provider 输出约束
+fixtures/          确定性测试和 mock fixtures
+tests/             引擎单元、集成与端到端测试
+examples/          创意样例和 demo 脚本
+docs/              设计、运维、发布与验证文档
+projects/          本地生成项目，不进入 Git
+```
+
+### 常见问题
+
+- **环境检查不可用**：先确认本机 Codex 已安装、登录且版本兼容；应用不自动安装或升级它。
+- **额度不足或超时**：保留原文，原因解决后由作者重新开始；界面不会无限重启任务。底层 provider 保留现有的有界重试策略。
+- **提交预览过期**：重新检查当前已采用正文，不能重复使用旧确认。
+- **提交中断**：保留项目、journal 和快照并进行检查，不要删除记录来强行重试。
+- **`ENOSPC: System limit for number of file watchers reached`**：通常是开发环境监听器限额，不等于小说文件损坏。
+- **Chromium sandbox 报错**：修复主机沙箱配置，不使用 `--no-sandbox` 或 `--disable-setuid-sandbox` 绕过。
+
+监听器和沙箱的详细排查步骤见[桌面 README](apps/desktop/README.md)。不要为排查问题先运行清理脚本删除真实小说项目。
+
+## CLI 与历史发布参考
+
+下文保留引擎命令、mock demo 和历史 RC 的详细参考。`pnpm ...` 均可替换为 `corepack pnpm ...`；命令是否属于稳定交付面，应结合所在阶段的说明判断。
+
+## Quickstart: Mock Demo
+
+The mock demo does not require a real API key. It initializes a project from `examples/brief.md`, generates strategy and planning artifacts, produces chapter 1, runs diagnostics and revision, commits Story State through a canon patch, inspects the result, and validates the project.
+
+```bash
+corepack pnpm install --frozen-lockfile
 corepack pnpm build
 corepack pnpm test
 corepack pnpm novel-loop init demo-novel --brief ./examples/brief.md
@@ -28,61 +171,8 @@ corepack pnpm novel-loop plan-global demo-novel --provider mock
 corepack pnpm novel-loop chapter demo-novel 1 --provider mock --max-revisions 2 --commit
 corepack pnpm novel-loop chapter demo-novel next --provider mock --max-revisions 2 --commit
 corepack pnpm novel-loop chapter demo-novel next --provider mock --max-revisions 2 --commit
-corepack pnpm novel-loop artifacts demo-novel --refresh
-corepack pnpm novel-loop runs demo-novel
-corepack pnpm novel-loop snapshots demo-novel
-corepack pnpm novel-loop verify-snapshots demo-novel
-corepack pnpm novel-loop audit demo-novel --strict
-corepack pnpm novel-loop inspect demo-novel --debts --reader --characters
+corepack pnpm novel-loop inspect demo-novel --debts --reader --characters --timeline --foreshadowing
 corepack pnpm novel-loop validate demo-novel
-```
-
-## Desktop Prototype Status
-
-The local Electron prototype now connects read-only Story Foundation and global-planning review with an author-controlled first-chapter workflow. An author can compare three chapter directions, select a non-recommended direction, directly edit the chapter mission or selected plan, request a bounded local-Codex adjustment, compare the result, and explicitly adopt the version that should guide drafting. Story Foundation and global planning remain generated review surfaces; this milestone does not claim that either is editable.
-
-Phase A distinguishes four author-facing states:
-
-- **Generated source**: the engine-produced mission, plan, or `draft_v1.md`. It remains the reproducible source artifact.
-- **Working copy**: the author's unadopted local edits. Chapter prose is autosaved in Electron application data, not written over `draft_v1.md`.
-- **Candidate / comparison**: a saved direct edit or bounded AI adjustment shown beside its source before adoption.
-- **Adopted author draft**: the version the author explicitly accepts. Adopted prose is stored as a versioned author revision while the generated draft stays intact.
-
-Participant repair is part of the chapter-mission review. Drafting is blocked when the mission has no valid scene participant; the author can select an existing character, add a provisional participant, or request a bounded repair. This does not weaken character-reference validation: invalid or incomplete participants still fail before scene generation.
-
-Run the current source build as an Electron desktop application:
-
-```bash
-corepack pnpm install
-corepack pnpm desktop:dev
-```
-
-The chapter workflow requires a locally installed and logged-in Codex CLI. Novel Loop checks the local binary and invokes it through the existing `codex-text` read-only boundary. The Vite renderer URL printed during development is an internal Electron development server; the author-facing product opens in the Electron window.
-
-The desktop boundary remains local and narrow: the renderer uses a typed preload API, Electron main owns project access and invokes the local Codex provider, and Codex runs with sandbox `read-only`, approval policy `never`, and no workspace-write capability. Story Foundation, global planning, chapter planning, scenes, and `draft_v1.md` may write generated non-canonical artifacts together with local run and provenance records. They do not submit a chapter or mutate `state/story_state.json`.
-
-Phase A stops after the author has edited, recovered if necessary, compared, and explicitly adopted a chapter draft. It does not run diagnostics, produce `final.md`, generate a canon patch or state diff, create commit snapshots, approve Story State changes, or commit the chapter. Planning and draft generation may advance the non-canonical chapter lifecycle to `draft_ready`; after that point, author editing, recovery, and adoption leave the queue unchanged. `latestCommittedChapter` and formal Story State remain unchanged across the complete Phase A workflow.
-
-On Ubuntu, an `ENOSPC: System limit for number of file watchers reached` development error is a host watcher-limit issue rather than a project-data failure. See `apps/desktop/README.md` for the temporary and persistent watcher-limit remedies and the separate secure Chromium sandbox requirements. Never work around a sandbox failure with `--no-sandbox` or `--disable-setuid-sandbox`.
-
-The desktop Phase A scope does not add DeepSeek, OpenAI API integration, Web UI/SaaS behavior, CodexAgentConnector, workspace-write access, diagnostics and revision-loop UI, canonical final/patch/commit controls, historical recommit, stale regeneration, conflict auto-repair, or Story Foundation/global-planning editing.
-
-## Quickstart: Mock Demo
-
-The mock demo does not require a real API key. It initializes a project from `examples/brief.md`, generates strategy and planning artifacts, produces chapter 1, runs diagnostics and revision, commits Story State through a canon patch, inspects the result, and validates the project.
-
-```bash
-pnpm install
-pnpm build
-pnpm test
-pnpm novel-loop init demo-novel --brief ./examples/brief.md
-pnpm novel-loop build-bible demo-novel --provider mock
-pnpm novel-loop plan-global demo-novel --provider mock
-pnpm novel-loop chapter demo-novel 1 --provider mock --max-revisions 2 --commit
-pnpm novel-loop chapter demo-novel next --provider mock --max-revisions 2 --commit
-pnpm novel-loop chapter demo-novel next --provider mock --max-revisions 2 --commit
-pnpm novel-loop inspect demo-novel --debts --reader --characters --timeline --foreshadowing
-pnpm novel-loop validate demo-novel
 ```
 
 You can run the same sequence with:

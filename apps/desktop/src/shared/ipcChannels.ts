@@ -32,5 +32,10 @@ export const IPC_CHANNELS = {
   chapterSaveMissionWorkingCopy:
     'novel-loop:chapter:save-mission-working-copy',
   chapterSavePlanWorkingCopy: 'novel-loop:chapter:save-plan-working-copy',
-  chapterAdoptRevision: 'novel-loop:chapter:adopt-revision'
+  chapterAdoptRevision: 'novel-loop:chapter:adopt-revision',
+  submissionStartCheck: 'novel-loop:submission:start-check',
+  submissionGet: 'novel-loop:submission:get',
+  submissionCancel: 'novel-loop:submission:cancel',
+  submissionReadPreview: 'novel-loop:submission:read-preview',
+  submissionConfirm: 'novel-loop:submission:confirm'
 } as const;

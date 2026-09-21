@@ -59,6 +59,7 @@ interface ChapterPlanReviewProps {
   participantRepairEntry?: number;
   onBack: () => void;
   onGenerateDraft: () => void;
+  onPreparePlanning: () => void;
   project: ProjectSummary;
 }
 
@@ -67,6 +68,7 @@ export function ChapterPlanReview({
   participantRepairEntry,
   onBack,
   onGenerateDraft,
+  onPreparePlanning,
   project
 }: ChapterPlanReviewProps) {
   const repairEntry = participantRepairEntry
@@ -81,6 +83,7 @@ export function ChapterPlanReview({
   const requestToken = useRef(0);
   const [review, setReview] = useState<ChapterPlanReviewResult | null>(null);
   const [failed, setFailed] = useState(false);
+  const [needsPlanning, setNeedsPlanning] = useState(false);
   const [confirmingDraft, setConfirmingDraft] = useState(false);
   const [editor, setEditor] = useState<EditorState>(null);
   const [adjustment, setAdjustment] = useState<AdjustmentState>(null);
@@ -95,6 +98,7 @@ export function ChapterPlanReview({
     if (resetBindings) {
       setReview(null);
       setFailed(false);
+      setNeedsPlanning(false);
       setEditor(null);
       setAdjustment(null);
       setConfirmingDraft(false);
@@ -104,11 +108,22 @@ export function ChapterPlanReview({
         projectKey: project.projectKey
       });
       if (currentRequest !== requestToken.current) return;
+      let planningRequired = false;
+      if (!result.available && result.reason === 'not_ready') {
+        const inspection = await window.novelLoop.chapter.inspect({
+          projectKey: project.projectKey
+        });
+        if (currentRequest !== requestToken.current) return;
+        planningRequired = inspection.available
+          && inspection.phase === 'planning_partial';
+      }
       setReview(result.available ? result : null);
-      setFailed(!result.available);
+      setNeedsPlanning(planningRequired);
+      setFailed(!result.available && !planningRequired);
     } catch {
       if (currentRequest === requestToken.current) {
         setReview(null);
+        setNeedsPlanning(false);
         setFailed(true);
       }
     }
@@ -229,11 +244,22 @@ export function ChapterPlanReview({
           {liveStatus}
         </p>
 
-        {!review && !failed && (
+        {!review && !failed && !needsPlanning && (
           <div className="nl-chapter-review-loading" role="status">
             <CircleNotch aria-hidden className="nl-spin" size={28} />
             <p>{t('chapter.review.loading')}</p>
           </div>
+        )}
+        {needsPlanning && (
+          <section className="nl-authoring-recovery" aria-label={t('chapter.review.replanningTitle')}>
+            <div role="status">
+              <h2>{t('chapter.review.replanningTitle')}</h2>
+              <p>{t('chapter.review.replanningNote')}</p>
+            </div>
+            <button className="nl-primary-action" onClick={onPreparePlanning} type="button">
+              {t('chapter.review.replanningAction')}
+            </button>
+          </section>
         )}
         {failed && (
           <div className="nl-authoring-recovery">

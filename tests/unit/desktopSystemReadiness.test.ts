@@ -22,6 +22,20 @@ const statusResult: CodexStatusResult = {
 };
 
 describe('desktop system readiness mapping', () => {
+  test('identifies a missing Codex platform dependency without leaking command output', async () => {
+    const result = await getDesktopSystemReadiness({}, async () => {
+      throw new AppError('CODEX_EXEC_FAILED',
+        'Error: Missing optional dependency @openai/codex-linux-x64. /private/auth/token', 1);
+    });
+    expect(result.codex).toEqual({
+      canRunSmoke: false,
+      status: 'installation_incomplete',
+      summary: 'Codex 安装不完整，无法启动。请修复安装后重新检查。',
+      version: null
+    });
+    expect(JSON.stringify(result)).not.toMatch(/private|token|optional dependency/);
+  });
+
   test('maps a healthy Codex status into a redacted author-facing result', async () => {
     const result = await getDesktopSystemReadiness(
       {},

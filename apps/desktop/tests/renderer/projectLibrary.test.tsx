@@ -29,7 +29,7 @@ import type {
   ProjectSummary
 } from '../../src/shared/projectContract';
 import type { SystemReadiness } from '../../src/shared/systemContract';
-import { createInertChapterApi } from './desktopApiFixtures';
+import { createInertChapterApi, createInertSubmissionApi } from './desktopApiFixtures';
 
 const readyReadiness: SystemReadiness = {
   app: {
@@ -129,7 +129,8 @@ function installProjectApi(
         cancel: vi.fn(),
         read: vi.fn()
       },
-      chapter: createInertChapterApi()
+      chapter: createInertChapterApi(),
+      submission: createInertSubmissionApi()
     } satisfies NovelLoopDesktopApi
   });
 

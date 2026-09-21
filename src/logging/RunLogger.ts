@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 
+import { classifyDesktopSubmissionArtifact } from '../app/artifactIndex.js';
 import {
   RunEventSchema,
   RunManifestSchema,
@@ -695,6 +696,8 @@ function numberArg(args: Record<string, unknown>, key: string): number | undefin
 function classifyArtifact(relativePath: string): { artifactType: ArtifactLineageRecord['artifactType']; phase: string; schemaName?: string } {
   const normalized = relativePath.split(path.sep).join(path.posix.sep);
   const fileName = path.posix.basename(normalized);
+  const submission = classifyDesktopSubmissionArtifact(normalized);
+  if (submission !== undefined) return submission;
   if (normalized.startsWith('codex/runs/') && fileName === 'prompt.md') return { artifactType: 'prompt_artifact', phase: 'codex' };
   if (normalized.startsWith('codex/runs/') && fileName === 'raw_output.jsonl') return { artifactType: 'codex_raw_output', phase: 'codex' };
   if (normalized.startsWith('codex/runs/') && fileName === 'parsed_output.json') return { artifactType: 'codex_parsed_json', phase: 'codex' };

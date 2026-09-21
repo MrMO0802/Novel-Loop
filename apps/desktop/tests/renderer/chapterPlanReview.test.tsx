@@ -25,6 +25,7 @@ import type { SystemReadiness } from '../../src/shared/systemContract';
 import {
   completeChapterPlan,
   createInertChapterApi,
+  createInertSubmissionApi,
   deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
@@ -91,7 +92,8 @@ function installApi() {
       cancel: vi.fn(),
       read: vi.fn()
     },
-    chapter
+    chapter,
+    submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,
@@ -174,6 +176,50 @@ afterEach(() => {
 });
 
 describe('chapter plan review', () => {
+  test('offers explicit replanning after adopting added participants instead of a read error', async () => {
+    const api = installApi();
+    render(<App />);
+    await openReview();
+    fireEvent.click(screen.getByRole('button', { name: '编辑本章任务' }));
+    fireEvent.click(screen.getByRole('button', { name: '添加人物' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '新人物 1 姓名' }), {
+      target: { value: '周岚' }
+    });
+    fireEvent.change(screen.getByRole('textbox', { name: '新人物 1 角色' }), {
+      target: { value: '事故目击者' }
+    });
+    fireEvent.click(screen.getByRole('button', { name: '保存草稿' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: '采用此版' })).toBeEnabled());
+    api.chapter.readPlan.mockResolvedValue({ available: false, reason: 'not_ready' });
+    api.chapter.inspect.mockResolvedValue({ ...readyChapterInspection, phase: 'planning_partial' });
+    fireEvent.click(screen.getByRole('button', { name: '采用此版' }));
+    fireEvent.click(screen.getByRole('button', { name: '确认采用修订后的任务' }));
+
+    const continueButton = await screen.findByRole('button', { name: '继续准备章节方向' });
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('radio')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '确认方向并生成草稿' })).not.toBeInTheDocument();
+    expect(api.chapter.startPlanning).not.toHaveBeenCalled();
+    expect(api.chapter.startDrafting).not.toHaveBeenCalled();
+    fireEvent.click(continueButton);
+    expect(await screen.findByRole('button', { name: '开始准备章节方向' })).toBeVisible();
+    expect(api.chapter.startPlanning).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: '开始准备章节方向' }));
+    await waitFor(() => expect(api.chapter.startPlanning).toHaveBeenCalledTimes(1));
+  });
+
+  test('recovers a previously invalidated plan on entry without automatically generating', async () => {
+    const api = installApi();
+    api.chapter.readPlan.mockResolvedValue({ available: false, reason: 'not_ready' });
+    render(<App />);
+    await openReview();
+    // The overview observed an old plan; the review must check the current phase.
+    api.chapter.inspect.mockResolvedValue({ ...readyChapterInspection, phase: 'planning_partial' });
+    fireEvent.click(await screen.findByRole('button', { name: '重新读取章节方向' }));
+    expect(await screen.findByRole('button', { name: '继续准备章节方向' })).toBeVisible();
+    expect(api.chapter.startPlanning).not.toHaveBeenCalled();
+  });
+
   test('renders every direction as a safe peer option with author controls', async () => {
     const api = installApi();
     api.chapter.readPlan.mockResolvedValue({

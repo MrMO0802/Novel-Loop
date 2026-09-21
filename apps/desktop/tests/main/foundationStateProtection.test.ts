@@ -141,6 +141,11 @@ describe('Story Foundation state protection', () => {
 
   test.each([
     {
+      mode: 'upgrade-required',
+      classification: 'upgrade_required',
+      kind: 'upgrade_required'
+    },
+    {
       mode: 'binary-missing',
       classification: 'unavailable',
       kind: 'codex_unavailable'
@@ -300,7 +305,7 @@ class StaticProjectRootResolver implements ProjectRootResolver {
 }
 
 async function createFailingDesktopFoundation(
-  mode: 'binary-missing' | 'login-required' | 'usage-limit' | 'exec-unavailable' | 'output-missing'
+  mode: 'binary-missing' | 'login-required' | 'usage-limit' | 'exec-unavailable' | 'output-missing' | 'upgrade-required'
 ): Promise<{
   paths: ProjectPaths;
   restoreCodexBin(): void;
@@ -320,6 +325,7 @@ async function createFailingDesktopFoundation(
   } else {
     const codexBin = path.join(projectsRoot, `fake-codex-${mode}.cjs`);
     const stderr = {
+      'upgrade-required': 'The model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again. sk-SECRET',
       'login-required': 'Not logged in. Run codex login. token sk-SECRET /home/private/.codex/auth.json',
       'usage-limit': 'You have reached your usage limit. Try again later. token sk-SECRET',
       'exec-unavailable': 'Codex service is unavailable. connection refused at /home/private/socket',
@@ -342,6 +348,8 @@ if (args[0] === 'doctor') {
 if (args.includes('exec')) {
   ${mode === 'output-missing'
     ? "process.exit(0);"
+    : mode === 'upgrade-required'
+    ? `process.stdout.write(JSON.stringify({type: 'turn.failed', error: {message: ${JSON.stringify(stderr)}}}) + '\\n'); process.exit(1);`
     : `process.stderr.write(${JSON.stringify(stderr)} + '\\n'); process.exit(1);`}
 }
 process.exit(2);

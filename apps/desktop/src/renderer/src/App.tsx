@@ -17,6 +17,7 @@ import {
 } from 'react';
 
 import type { ProjectSummary } from '../../shared/projectContract';
+import type { SubmissionConfirmResult } from '../../shared/submissionContract';
 import type { SystemReadiness } from '../../shared/systemContract';
 import { ChapterDraftGenerationView } from './features/chapter/ChapterDraftGenerationView';
 import { ChapterPlanningGenerationView } from './features/chapter/ChapterPlanningGenerationView';
@@ -29,7 +30,8 @@ import { PlanningReview } from './features/planning/PlanningReview';
 import { CreateProjectView } from './features/projects/CreateProjectView';
 import { ProjectLibrary } from './features/projects/ProjectLibrary';
 import { ProjectOverview } from './features/projects/ProjectOverview';
-import { t } from './i18n/messages.zh-CN';
+import { ChapterSubmissionView } from './features/submission/ChapterSubmissionView';
+import { formatMessage, t } from './i18n/messages.zh-CN';
 
 type ReadinessView =
   | { kind: 'loading' }
@@ -52,6 +54,7 @@ type AppRoute =
     project: ProjectSummary;
   }
   | { kind: 'chapter-draft-generation'; project: ProjectSummary }
+  | { kind: 'chapter-submission'; project: ProjectSummary }
   | { kind: 'chapter-workspace'; project: ProjectSummary };
 
 const READINESS_UI_TIMEOUT_MS = 20_000;
@@ -255,6 +258,10 @@ export function App() {
           ? {}
           : { participantRepairEntry: route.participantRepairEntry })}
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onPreparePlanning={() => setRoute({
+          kind: 'chapter-planning-generation',
+          project: route.project
+        })}
         onGenerateDraft={() => setRoute({
           kind: 'chapter-draft-generation',
           project: route.project
@@ -293,7 +300,23 @@ export function App() {
     return (
       <ChapterWorkspace
         onBack={() => setRoute({ kind: 'overview', project: route.project })}
+        onCheckSubmission={() => setRoute({ kind: 'chapter-submission', project: route.project })}
         project={route.project}
+      />
+    );
+  }
+
+  if (route.kind === 'chapter-submission') {
+    return (
+      <ChapterSubmissionRoute
+        key={route.project.projectKey}
+        project={route.project}
+        onBack={() => setRoute({ kind: 'chapter-workspace', project: route.project })}
+        onLibrary={() => setRoute({ kind: 'library' })}
+        onContinue={(project, hasNextChapter) => setRoute({
+          kind: hasNextChapter ? 'chapter-planning-generation' : 'planning-review',
+          project
+        })}
       />
     );
   }
@@ -331,6 +354,64 @@ export function App() {
       </aside>
     </main>
   );
+}
+
+type CommittedSubmission = Extract<SubmissionConfirmResult, { outcome: 'committed' }>;
+
+function ChapterSubmissionRoute({ project, onBack, onLibrary, onContinue }: {
+  project: ProjectSummary;
+  onBack: () => void;
+  onLibrary: () => void;
+  onContinue: (project: ProjectSummary, hasNextChapter: boolean) => void;
+}) {
+  const lifetime = useRef(0);
+  const refreshing = useRef(false);
+  const [failedResult, setFailedResult] = useState<CommittedSubmission | null>(null);
+  const [retrying, setRetrying] = useState(false);
+
+  useEffect(() => () => { lifetime.current += 1; }, []);
+
+  async function continueAfterCommit(result: CommittedSubmission): Promise<void> {
+    if (refreshing.current) return;
+    refreshing.current = true;
+    setRetrying(true);
+    const current = lifetime.current;
+    try {
+      const opened = await window.novelLoop.projects.open(project.projectKey);
+      if (current !== lifetime.current) return;
+      if (opened.outcome !== 'opened'
+        || opened.project.projectKey !== project.projectKey
+        || opened.project.latestCommittedChapter < result.latestCommittedChapter) {
+        setFailedResult(result);
+        return;
+      }
+      onContinue(opened.project, result.hasNextChapter);
+    } catch {
+      if (current === lifetime.current) setFailedResult(result);
+    } finally {
+      refreshing.current = false;
+      if (current === lifetime.current) setRetrying(false);
+    }
+  }
+
+  if (failedResult) {
+    return (
+      <main className="nl-project-shell">
+        <section className="nl-project-content">
+          <h1>{formatMessage('submission.success', { chapter: failedResult.chapterNumber })}</h1>
+          <p className="nl-inline-alert nl-inline-alert--error" role="alert">{t('submission.refreshProjectFailed')}</p>
+          <div className="nl-draft-editor__save-actions">
+            <button className="nl-secondary-action" type="button" disabled={retrying} onClick={() => { void continueAfterCommit(failedResult); }}>
+              <ArrowClockwise aria-hidden size={18} />{t('submission.refreshProject')}
+            </button>
+            <button className="nl-tertiary-action" type="button" onClick={onLibrary}>{t('submission.library')}</button>
+          </div>
+        </section>
+      </main>
+    );
+  }
+
+  return <ChapterSubmissionView projectKey={project.projectKey} onBack={onBack} onCommitted={(result) => { void continueAfterCommit(result); }} />;
 }
 
 function ReadinessContent({
@@ -434,6 +515,15 @@ function presentationFor(readiness: SystemReadiness): StatusPresentation {
         icon: SignIn,
         summary: t('setup.notLoggedIn.summary'),
         title: t('setup.notLoggedIn.title'),
+        tone: 'blocked'
+      };
+    case 'installation_incomplete':
+      return {
+        action: t('setup.installationIncomplete.action'),
+        guide: t('setup.installationIncomplete.guide'),
+        icon: WarningCircle,
+        summary: t('setup.installationIncomplete.summary'),
+        title: t('setup.installationIncomplete.title'),
         tone: 'blocked'
       };
     case 'warning':

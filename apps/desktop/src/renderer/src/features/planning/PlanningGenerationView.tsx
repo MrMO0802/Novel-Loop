@@ -484,6 +484,7 @@ function stageStateLabel(
 function planningErrorMessage(kind: PlanningErrorKind): string {
   switch (kind) {
     case 'codex_unavailable': return t('planning.error.codexUnavailable');
+    case 'upgrade_required': return t('planning.error.upgradeRequired');
     case 'login_required': return t('planning.error.loginRequired');
     case 'usage_limit': return t('planning.error.usageLimit');
     case 'timeout': return t('planning.error.timeout');

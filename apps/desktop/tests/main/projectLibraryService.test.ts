@@ -539,6 +539,13 @@ describe('ProjectLibraryService', () => {
 
     gateway.inspection = { valid: false, reason: 'project_data_invalid' };
     await expect(service.resolveProjectRoot(projectKey)).resolves.toBeNull();
+    await expect(service.resolveRegisteredRootForRecovery(projectKey)).resolves.toBe(projectRoot);
+    await expect(service.resolveRegisteredRootForRecovery(projectRoot)).resolves.toBeNull();
+    await expect(service.resolveRegisteredRootForRecovery('project_missing')).resolves.toBeNull();
+    const moved = `${projectRoot}-moved`;
+    await import('node:fs/promises').then(({ rename }) => rename(projectRoot, moved));
+    await symlink(moved, projectRoot);
+    await expect(service.resolveRegisteredRootForRecovery(projectKey)).resolves.toBeNull();
   });
 
   test('default library dialog errors map to location_unavailable', async () => {

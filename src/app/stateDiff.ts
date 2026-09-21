@@ -118,7 +118,7 @@ function diffStoryStates(before: StoryState, after: StoryState): StateDiffChange
   return changes;
 }
 
-function diffPatchPreview(storyState: StoryState, patch: CanonPatch): StateDiffChange[] {
+export function diffPatchPreview(storyState: StoryState, patch: CanonPatch): StateDiffChange[] {
   const changes: StateDiffChange[] = [];
   for (const fact of patch.newFacts) {
     changes.push(createChange(`/canonFacts/${fact.id}`, 'added', null, fact, 'low', `Adds canon fact ${fact.id}.`));
@@ -202,7 +202,7 @@ function createChange(
   };
 }
 
-function summarizeChanges(changes: StateDiffChange[]): StateDiffReport['summary'] {
+export function summarizeChanges(changes: StateDiffChange[]): StateDiffReport['summary'] {
   return {
     totalChanges: changes.length,
     added: changes.filter((change) => change.changeType === 'added').length,

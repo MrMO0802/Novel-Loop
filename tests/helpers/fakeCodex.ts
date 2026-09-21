@@ -3,6 +3,9 @@ import path from 'node:path';
 
 export type FakeCodexMode =
   | 'valid'
+  | 'upgrade-required'
+  | 'jsonl-usage-limit'
+  | 'jsonl-login-required'
   | 'invalid-json'
   | 'schema-invalid'
   | 'doctor-unhealthy'
@@ -76,6 +79,19 @@ if (args[0] === 'doctor') {
 }
 if (args.includes('exec')) {
   const stdin = fs.readFileSync(0, 'utf8');
+  fs.appendFileSync(${JSON.stringify(`${codexBin}.stdin.ndjson`)}, JSON.stringify(stdin) + '\\n');
+  if (['upgrade-required', 'jsonl-usage-limit', 'jsonl-login-required'].includes(mode)) {
+    const message = {
+      'upgrade-required': "The 'gpt-6-astra' model requires a newer version of Codex. Please upgrade to the latest app or CLI and try again.",
+      'jsonl-usage-limit': 'You have reached your usage limit.',
+      'jsonl-login-required': 'Not logged in. Run codex login.'
+    }[mode] + ' sk-SECRET Bearer secret123 /home/user/.codex/auth.json';
+    const error = JSON.stringify({ type: 'error', status: 400, error: { type: 'invalid_request_error', message } });
+    process.stdout.write(JSON.stringify({ type: 'error', message: error }) + '\\n');
+    process.stdout.write(JSON.stringify({ type: 'turn.failed', error: { message: error } }) + '\\n');
+    process.stderr.write('Warning: no last agent message');
+    process.exit(1);
+  }
   const outputIndex = args.indexOf('--output-last-message');
   const outputFile = outputIndex === -1 ? undefined : args[outputIndex + 1];
   const schemaMode = args.includes('--output-schema');

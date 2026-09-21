@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { constants } from 'node:fs';
 import {
+  lstat,
   mkdir,
   open,
   rename,
@@ -207,10 +208,36 @@ export class DraftWorkingCopyStore {
           path.join(this.descriptorPath(directory.handle), 'draft.json'),
           { force: true }
         );
+        await rm(
+          path.join(this.descriptorPath(directory.handle), 'draft.json.quarantine'),
+          { force: true }
+        );
       } finally {
         await closeDirectory(directory);
       }
     });
+  }
+
+  /** Admission must not confuse a quarantined/invalid edit with an absent edit. */
+  async hasPendingSubmissionEdit(projectKey: string, chapterNumber: number): Promise<boolean> {
+    const key = ProjectKeySchema.parse(projectKey);
+    const chapter = positiveChapter(chapterNumber);
+    await this.operations.get(this.operationKey(key, chapter));
+    const directory = await this.openDirectory(key, chapter, false);
+    if (directory === null) return false;
+    try {
+      for (const name of ['draft.json', 'draft.json.quarantine']) {
+        try {
+          await lstat(path.join(this.descriptorPath(directory.handle), name));
+          return true;
+        } catch (error) {
+          if (!isMissing(error)) throw error;
+        }
+      }
+      return false;
+    } finally {
+      await closeDirectory(directory);
+    }
   }
 
   async discardIfMatches(

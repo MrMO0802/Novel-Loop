@@ -32,6 +32,32 @@ afterEach(async () => {
 });
 
 describe('chapter workspace Story State protection', () => {
+  test('opens a legacy chapter plan through the real gateway without changing project artifacts', async () => {
+    const context = await createChapterProject('chapter-legacy-review', 'valid');
+    try {
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      const missionPath = path.join(context.paths.projectRoot, 'chapters', 'chapter_001', 'mission.json');
+      const mission = JSON.parse(await readFile(missionPath, 'utf8')) as Record<string, unknown>;
+      delete mission.participatingCharacterIds;
+      expect(ChapterMissionSchema.safeParse(mission).success).toBe(true);
+      await writeFile(missionPath, JSON.stringify(mission));
+      const protectedPaths = [
+        context.paths.storyState(), context.paths.chapterQueue(), missionPath,
+        path.join(context.paths.projectRoot, 'chapters', 'chapter_001', 'selected_plan.md')
+      ];
+      const before = await Promise.all(protectedPaths.map(sha256));
+      const service = chapterServiceFor(context, 'project_legacy_review');
+      const review = await service.readPlan('project_legacy_review');
+      expect(review).toMatchObject({ available: true, chapterNumber: 1 });
+      if (!review.available) throw new Error('Expected legacy review to be available.');
+      expect(review.directions.filter((direction) => direction.active)).toHaveLength(1);
+      expect(review.mission.participantOptions.some((participant) => participant.selected)).toBe(true);
+      expect(await Promise.all(protectedPaths.map(sha256))).toEqual(before);
+    } finally {
+      context.restoreCodexBin();
+    }
+  }, 30_000);
+
   test('preserves Story State bytes after successful planning and drafting', async () => {
     const context = await createChapterProject('chapter-state-success', 'valid');
     const before = await sha256(context.paths.storyState());
@@ -306,6 +332,25 @@ describe('chapter workspace Story State protection', () => {
         revisionToken: saved.revisionToken,
         confirmInvalidation: true
       })).resolves.toEqual({ outcome: 'adopted' });
+      await expect(service.readPlan(projectKey)).resolves.toEqual({
+        available: false, reason: 'not_ready'
+      });
+      await expect(context.gateway.inspect(context.paths.projectRoot))
+        .resolves.toMatchObject({ available: true, phase: 'planning_partial' });
+      const missionPath = context.paths.chapterArtifact(1, 'mission.json');
+      const adoptedMissionHash = await sha256(missionPath);
+      const missionCalls = await promptCallCount(
+        context.statePath, 'planning.plan_chapter_mission_slim'
+      );
+      await context.gateway.plan(runInput(context.paths.projectRoot));
+      const refreshed = await availablePlan(service, projectKey);
+      expect(refreshed.mission.participantOptions).toEqual(expect.arrayContaining([
+        expect.objectContaining({ name: '许薇', role: '调查搭档', selected: true })
+      ]));
+      expect(await sha256(missionPath)).toBe(adoptedMissionHash);
+      expect(await promptCallCount(
+        context.statePath, 'planning.plan_chapter_mission_slim'
+      )).toBe(missionCalls);
       expect(await sha256(context.paths.storyState())).toBe(before);
     } finally {
       context.restoreCodexBin();

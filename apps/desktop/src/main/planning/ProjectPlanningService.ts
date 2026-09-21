@@ -293,6 +293,7 @@ function isCancellation(error: unknown): boolean {
 function toPlanningErrorKind(error: unknown): PlanningErrorKind {
   const classification = providerClassification(error);
   if (classification === 'login_required') return 'login_required';
+  if (classification === 'upgrade_required') return 'upgrade_required';
   if (classification === 'usage_limit') return 'usage_limit';
   if (classification === 'invalid_output') return 'invalid_output';
   if (classification === 'unavailable') return 'codex_unavailable';
@@ -356,6 +357,7 @@ function canRetry(kind: PlanningErrorKind): boolean {
 
 function planningErrorMessage(kind: PlanningErrorKind): string {
   switch (kind) {
+    case 'upgrade_required': return 'Upgrade Codex to use the configured model, then retry.';
     case 'codex_unavailable': return 'Codex is unavailable on this device.';
     case 'login_required': return 'Sign in to Codex before generating global planning.';
     case 'usage_limit': return 'Codex usage limit reached. Try again later.';

@@ -49,8 +49,26 @@ import type {
   ChapterStartPlanningRequest,
   ChapterTask
 } from './chapterContract';
+import type {
+  SubmissionCancelRequest,
+  SubmissionConfirmRequest,
+  SubmissionConfirmResult,
+  SubmissionGetRequest,
+  SubmissionPreviewResult,
+  SubmissionReadPreviewRequest,
+  SubmissionStartCheckRequest,
+  SubmissionStartCheckResult,
+  SubmissionTask
+} from './submissionContract';
 
 export interface NovelLoopDesktopApi {
+  submission: {
+    startCheck(request: SubmissionStartCheckRequest): Promise<SubmissionStartCheckResult>;
+    get(request: SubmissionGetRequest): Promise<SubmissionTask>;
+    cancel(request: SubmissionCancelRequest): Promise<SubmissionTask>;
+    readPreview(request: SubmissionReadPreviewRequest): Promise<SubmissionPreviewResult>;
+    confirm(request: SubmissionConfirmRequest): Promise<SubmissionConfirmResult>;
+  };
   system: {
     getReadiness(): Promise<SystemReadiness>;
   };

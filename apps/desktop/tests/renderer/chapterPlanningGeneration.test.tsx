@@ -21,6 +21,7 @@ import {
   chapterTask,
   completeChapterPlan,
   createInertChapterApi,
+  createInertSubmissionApi,
   deferred,
   readyChapterInspection
 } from './desktopApiFixtures';
@@ -83,7 +84,8 @@ function installApi(
       cancel: vi.fn(),
       read: vi.fn()
     },
-    chapter
+    chapter,
+    submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
     configurable: true,
@@ -208,6 +210,20 @@ describe('chapter planning generation', () => {
     expect(document.body).not.toHaveTextContent(/private|jsonl|taskId|run_/i);
     fireEvent.click(screen.getByRole('button', { name: '继续准备' }));
     expect(api.chapter.startPlanning).toHaveBeenCalledTimes(2);
+  });
+
+  test('explains that an installed Codex needs upgrading without exposing provider details', async () => {
+    const api = installApi();
+    api.chapter.startPlanning.mockResolvedValue(chapterTask({
+      status: 'failed', canCancel: false, canRetry: true,
+      error: { kind: 'upgrade_required', message: '/private/codex sk-SECRET' }
+    }));
+    render(<App />);
+    await openPlanningGeneration();
+    fireEvent.click(await screen.findByRole('button', { name: '开始准备章节方向' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('本地 Codex 版本过旧，无法使用当前模型');
+    expect(document.body).not.toHaveTextContent(/private|sk-SECRET|请确认它已安装/);
+    expect(api.chapter.startPlanning).toHaveBeenCalledTimes(1);
   });
 
   test('keeps planning progress visible when a stop request is temporarily unavailable', async () => {

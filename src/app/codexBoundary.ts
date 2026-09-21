@@ -357,7 +357,8 @@ async function execCodexPrompt(input: ExecPromptInput): Promise<
         );
         await recordArtifactWriteEvent(runLogger, runId, 'completed', finalOutputPath, 'final_output');
       }
-      throw new AppError('CODEX_EXEC_FAILED', `Codex CLI command failed: ${stderrExcerpt || 'non-zero exit; inspect redacted raw JSONL'}`, 1, {
+      const failureMessage = jsonlFailureMessage(commandResult.stdout);
+      throw new AppError('CODEX_EXEC_FAILED', `Codex CLI command failed: ${failureMessage || stderrExcerpt || 'non-zero exit; inspect redacted raw JSONL'}`, 1, {
         reason: `exit=${commandResult.exitCode}`
       });
     }
@@ -650,6 +651,23 @@ function parseJsonlEvent(line: string): unknown | undefined {
   } catch {
     return undefined;
   }
+}
+
+function jsonlFailureMessage(stdout: string): string | undefined {
+  // Only failure events are diagnostic input; never forward assistant text or prompts.
+  const lines = stdout.split(/\r?\n/);
+  for (let index = lines.length - 1; index >= 0; index -= 1) {
+    const event = parseJsonlEvent(lines[index]!);
+    if (!isRecord(event) || (event.type !== 'error' && event.type !== 'turn.failed')) continue;
+    const message = isRecord(event.error) ? event.error.message : event.message;
+    if (typeof message !== 'string' || !message.trim()) continue;
+    const nested = parseJsonlEvent(message);
+    const detail = isRecord(nested) && isRecord(nested.error) && typeof nested.error.message === 'string'
+      ? nested.error.message
+      : message;
+    return redactSensitive(detail).slice(0, 4000);
+  }
+  return undefined;
 }
 
 function jsonlType(value: unknown): string {

@@ -1,6 +1,27 @@
 export { ConfigSchema, ProjectIdSchema } from './config.js';
 export type { Config } from './config.js';
 
+export {
+  DesktopSubmissionArtifactReferenceSchema,
+  DesktopSubmissionStageSchema,
+  DesktopSubmissionStatusSchema,
+  DesktopSubmissionSafeErrorCodeSchema,
+  DesktopSubmissionSourceSchema,
+  DesktopSubmissionPreviewSchema,
+  DesktopSubmissionApprovalSchema,
+  DesktopSubmissionTaskSchema
+} from './desktopSubmission.js';
+export type {
+  DesktopSubmissionArtifactReference,
+  DesktopSubmissionStage,
+  DesktopSubmissionStatus,
+  DesktopSubmissionSafeErrorCode,
+  DesktopSubmissionSource,
+  DesktopSubmissionPreview,
+  DesktopSubmissionApproval,
+  DesktopSubmissionTask
+} from './desktopSubmission.js';
+
 export { ReaderStateSchema } from './readerState.js';
 export type { ReaderState } from './readerState.js';
 

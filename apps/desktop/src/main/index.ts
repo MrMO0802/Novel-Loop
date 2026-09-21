@@ -7,6 +7,9 @@ import { EngineChapterGateway } from './chapter/EngineChapterGateway';
 import { ChapterReviewTokenStore } from './chapter/ChapterReviewTokenStore';
 import { DraftWorkingCopyStore } from './chapter/DraftWorkingCopyStore';
 import { ProjectChapterService } from './chapter/ProjectChapterService';
+import { ProjectSubmissionGuard } from './submission/ProjectSubmissionGuard';
+import { EngineSubmissionGateway } from './submission/EngineSubmissionGateway';
+import { ProjectSubmissionService } from './submission/ProjectSubmissionService';
 import { EngineFoundationGateway } from './foundation/EngineFoundationGateway';
 import { ProjectFoundationService } from './foundation/ProjectFoundationService';
 import { registerChapterHandlers } from './ipc/registerChapterHandlers';
@@ -14,6 +17,7 @@ import { registerFoundationHandlers } from './ipc/registerFoundationHandlers';
 import { registerPlanningHandlers } from './ipc/registerPlanningHandlers';
 import { registerProjectHandlers } from './ipc/registerProjectHandlers';
 import { registerSystemHandlers } from './ipc/registerSystemHandlers';
+import { registerSubmissionHandlers } from './ipc/registerSubmissionHandlers';
 import { EngineProjectGateway } from './projects/EngineProjectGateway';
 import { EnginePlanningGateway } from './planning/EnginePlanningGateway';
 import { ProjectPlanningService } from './planning/ProjectPlanningService';
@@ -73,11 +77,20 @@ void app.whenReady().then(() => {
     projects: projectService,
     gateway: new EnginePlanningGateway()
   });
+  const submissionGuard = new ProjectSubmissionGuard();
+  const workingCopies = new DraftWorkingCopyStore(app.getPath('userData'));
   const chapterService = new ProjectChapterService({
     projects: projectService,
     gateway: new EngineChapterGateway(),
     tokenStore: new ChapterReviewTokenStore(),
-    workingCopies: new DraftWorkingCopyStore(app.getPath('userData'))
+    workingCopies,
+    submissionGuard
+  });
+  const submissionService = new ProjectSubmissionService({
+    projects: projectService,
+    gateway: new EngineSubmissionGateway(),
+    workingCopies,
+    guard: submissionGuard
   });
 
   registerSystemHandlers(
@@ -142,6 +155,19 @@ void app.whenReady().then(() => {
       }
     },
     chapterService,
+    rendererTarget.trustedRendererUrl
+  );
+
+  registerSubmissionHandlers(
+    {
+      handle: (channel, handler) => {
+        ipcMain.handle(channel, (event, request) => handler(
+          { senderFrame: { url: event.senderFrame?.url ?? '' } },
+          request
+        ));
+      }
+    },
+    submissionService,
     rendererTarget.trustedRendererUrl
   );
 

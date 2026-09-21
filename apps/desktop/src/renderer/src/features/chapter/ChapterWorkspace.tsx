@@ -17,11 +17,13 @@ import { formatMessage, t } from '../../i18n/messages.zh-CN';
 
 interface ChapterWorkspaceProps {
   onBack: () => void;
+  onCheckSubmission?: () => void;
   project: ProjectSummary;
 }
 
 export function ChapterWorkspace({
   onBack,
+  onCheckSubmission,
   project
 }: ChapterWorkspaceProps) {
   const headingRef = useRef<HTMLHeadingElement>(null);
@@ -146,6 +148,7 @@ export function ChapterWorkspace({
             </header>
             {workingCopy && (
               <ChapterDraftEditor
+                {...(onCheckSubmission ? { onCheckSubmission } : {})}
                 draft={availableDraft}
                 key={`${project.projectKey}:${availableDraft.chapterNumber}:${editorEpoch}`}
                 onAdopted={async () => {

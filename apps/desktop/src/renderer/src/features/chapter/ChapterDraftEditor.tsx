@@ -1,35 +1,43 @@
+import { FloppyDisk } from '@phosphor-icons/react/FloppyDisk';
+import { ShieldCheck } from '@phosphor-icons/react/ShieldCheck';
 import {
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
-  type ReactNode
+  type ReactNode,
+  type RefObject
 } from 'react';
 
 import type {
   ChapterDraftReviewResult,
   ChapterDraftWorkingCopyResult
 } from '../../../../shared/chapterContract';
+import { t } from '../../i18n/messages.zh-CN';
 
 interface ChapterDraftEditorProps {
   projectKey: string;
   draft: Extract<ChapterDraftReviewResult, { available: true }>;
   workingCopy: ChapterDraftWorkingCopyResult;
   onAdopted(): void | Promise<void>;
+  onCheckSubmission?: () => void;
 }
 
 type DialogKind = 'adopt' | 'compare' | 'discard' | null;
 type ActionState = 'idle' | 'adopting' | 'discarding';
-type FocusIntent = 'dialog_opener' | 'textarea' | null;
+type FocusIntent = 'dialog_opener' | 'textarea' | 'preview' | null;
+type SaveOrigin = 'auto' | 'manual';
 
 export function ChapterDraftEditor({
   projectKey,
   draft,
   workingCopy,
-  onAdopted
+  onAdopted,
+  onCheckSubmission
 }: ChapterDraftEditorProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const previewRef = useRef<HTMLElement>(null);
   const recoveryActionRef = useRef<HTMLButtonElement>(null);
   const openerRef = useRef<HTMLButtonElement | null>(null);
   const saveTail = useRef<Promise<string | null>>(Promise.resolve(null));
@@ -39,6 +47,9 @@ export function ChapterDraftEditor({
     workingCopy.recoveryAvailable ? null : workingCopy.revisionToken
   );
   const [markdown, setMarkdown] = useState(draft.markdown);
+  const [adoptedMarkdown, setAdoptedMarkdown] = useState(draft.markdown);
+  const [hasAdopted, setHasAdopted] = useState(draft.versionKind === 'author_adopted');
+  const [saveOrigin, setSaveOrigin] = useState<SaveOrigin>('auto');
   const [recoveryPending, setRecoveryPending] = useState(
     workingCopy.recoveryAvailable
   );
@@ -46,12 +57,15 @@ export function ChapterDraftEditor({
   const [saveState, setSaveState] = useState<'saved' | 'unsaved' | 'saving'>(
     'saved'
   );
-  const [preview, setPreview] = useState(false);
+  const [preview, setPreview] = useState(
+    draft.versionKind === 'author_adopted' && !workingCopy.recoveryAvailable
+  );
   const [dialog, setDialog] = useState<DialogKind>(null);
   const [actionState, setActionState] = useState<ActionState>('idle');
   const [actionError, setActionError] = useState<string | null>(null);
   const [adoptionRecoveryRequired, setAdoptionRecoveryRequired] = useState(false);
   const [focusIntent, setFocusIntent] = useState<FocusIntent>(null);
+  const hasPendingRevision = markdown !== adoptedMarkdown || revisionTokenRef.current !== null;
 
   useEffect(() => {
     if (
@@ -76,6 +90,12 @@ export function ChapterDraftEditor({
   }, [adoptionRecoveryRequired]);
 
   useLayoutEffect(() => {
+    if (focusIntent === 'preview') {
+      if (!preview || dialog !== null || actionState !== 'idle') return;
+      previewRef.current?.focus();
+      setFocusIntent(null);
+      return;
+    }
     if (focusIntent === 'textarea') {
       if (
         recoveryPending
@@ -116,7 +136,7 @@ export function ChapterDraftEditor({
           && !adoptionRecoveryRequired
           && actionState === 'idle'
           && dialog === null
-        ) void save();
+        ) void save('manual');
       }
       if (
         event.ctrlKey
@@ -144,17 +164,24 @@ export function ChapterDraftEditor({
     revisionTokenRef.current = token;
   }
 
-  function save(): Promise<string | null> {
+  function save(origin: SaveOrigin = 'auto'): Promise<string | null> {
     if (
       recoveryPending
       || adoptionRecoveryRequired
       || actionState !== 'idle'
       || dialog !== null
     ) return Promise.resolve(null);
-    return enqueueSave(markdown, editVersion.current);
+    if (saveState === 'saved') {
+      if (origin === 'manual') {
+        setSaveOrigin('manual');
+        setActionError(null);
+      }
+      return Promise.resolve(revisionTokenRef.current);
+    }
+    return enqueueSave(markdown, editVersion.current, origin);
   }
 
-  function enqueueSave(snapshot: string, version: number): Promise<string | null> {
+  function enqueueSave(snapshot: string, version: number, origin: SaveOrigin = 'auto'): Promise<string | null> {
     if (version <= latestQueuedSaveVersion.current) return saveTail.current;
     latestQueuedSaveVersion.current = version;
     const queued = saveTail.current.catch(() => null).then(async () => {
@@ -166,6 +193,7 @@ export function ChapterDraftEditor({
         });
         if (version === editVersion.current) {
           updateRevisionToken(result.revisionToken);
+          setSaveOrigin(origin);
           setSaveState('saved');
           setActionError(null);
         }
@@ -191,7 +219,7 @@ export function ChapterDraftEditor({
     setActionError(null);
     try {
       await window.novelLoop.chapter.discardDraftWorkingCopy({ projectKey });
-      setMarkdown(draft.markdown);
+      setMarkdown(adoptedMarkdown);
       updateRevisionToken(null);
       setRecoveryPending(false);
       setSaveState('saved');
@@ -221,7 +249,7 @@ export function ChapterDraftEditor({
     try {
       await saveTail.current.catch(() => null);
       await window.novelLoop.chapter.discardDraftWorkingCopy({ projectKey });
-      setMarkdown(draft.markdown);
+      setMarkdown(adoptedMarkdown);
       updateRevisionToken(null);
       setSaveState('saved');
       setDialog(null);
@@ -234,7 +262,7 @@ export function ChapterDraftEditor({
   }
 
   async function adopt(): Promise<void> {
-    if (actionState !== 'idle' || adoptionRecoveryRequired) return;
+    if (actionState !== 'idle' || adoptionRecoveryRequired || !hasPendingRevision) return;
     setActionState('adopting');
     setActionError(null);
     let adoptionCompleted = false;
@@ -259,10 +287,15 @@ export function ChapterDraftEditor({
       }
       adoptionCompleted = true;
       updateRevisionToken(null);
+      setAdoptedMarkdown(markdown);
+      setHasAdopted(true);
       setSaveState('saved');
       setDialog(null);
+      setPreview(true);
+      setFocusIntent('preview');
       await onAdopted();
     } catch {
+      if (adoptionCompleted) setAdoptionRecoveryRequired(true);
       setActionError(adoptionCompleted
         ? '修订已采用，但界面暂时无法刷新。重新进入本章即可查看。'
         : '此修订暂时无法采用，请重新检查当前草稿。');
@@ -285,7 +318,7 @@ export function ChapterDraftEditor({
   }
 
   function openDialog(next: Exclude<DialogKind, null>, opener: HTMLButtonElement): void {
-    if (adoptionRecoveryRequired) return;
+    if (adoptionRecoveryRequired || (next === 'adopt' && !hasPendingRevision)) return;
     openerRef.current = opener;
     setActionError(null);
     setDialog(next);
@@ -298,7 +331,9 @@ export function ChapterDraftEditor({
   }
 
   const status = saveState === 'saved'
-    ? '已自动保存'
+    ? saveOrigin === 'manual'
+      ? '已保存'
+      : hasPendingRevision ? '已自动保存' : hasAdopted ? '修订已采用' : '当前草稿已保存'
     : saveState === 'saving'
       ? '正在保存'
       : '尚未保存';
@@ -306,6 +341,10 @@ export function ChapterDraftEditor({
     || adoptionRecoveryRequired
     || actionState !== 'idle';
   const editingDisabled = controlsDisabled || dialog !== null;
+  const submissionDisabled = editingDisabled
+    || discardingRecovery
+    || saveState !== 'saved'
+    || hasPendingRevision;
 
   return (
     <section className="nl-draft-editor" aria-label="章节正文编辑器">
@@ -349,6 +388,9 @@ export function ChapterDraftEditor({
         </div>
       )}
       {actionError !== null && <p className="nl-inline-alert nl-inline-alert--error" role="alert">{actionError}</p>}
+      {hasAdopted && !hasPendingRevision && !recoveryPending && !adoptionRecoveryRequired && (
+        <p className="nl-draft-editor__adopted" role="note">修订已采用，尚未正式提交。</p>
+      )}
       <div className="nl-draft-editor__toolbar">
         <div role="tablist" aria-label="章节视图">
           <button
@@ -370,8 +412,35 @@ export function ChapterDraftEditor({
             预览
           </button>
         </div>
-        <p aria-live="polite" role="status">{status}</p>
+        <div className="nl-draft-editor__save-actions">
+          <p aria-live="polite" role="status">{status}</p>
+          <button
+            className="nl-secondary-action"
+            disabled={editingDisabled || saveState === 'saving'}
+            type="button"
+            onClick={() => { void save('manual'); }}
+          >
+            <FloppyDisk aria-hidden size={18} />
+            保存草稿
+          </button>
+          {onCheckSubmission && (
+            <button
+              className="nl-primary-action"
+              disabled={submissionDisabled}
+              type="button"
+              onClick={() => {
+                if (!submissionDisabled) onCheckSubmission();
+              }}
+            >
+              <ShieldCheck aria-hidden size={18} />
+              {t('submission.title')}
+            </button>
+          )}
+        </div>
       </div>
+      {onCheckSubmission && hasPendingRevision && !adoptionRecoveryRequired && (
+        <p className="nl-inline-alert" role="note">{t('submission.pendingEdits')}</p>
+      )}
       <textarea
         aria-label="章节正文"
         disabled={editingDisabled}
@@ -385,7 +454,7 @@ export function ChapterDraftEditor({
         ref={textareaRef}
         value={markdown}
       />
-      {preview && <SafeDraftBlocks markdown={markdown} />}
+      {preview && <SafeDraftBlocks markdown={markdown} previewRef={previewRef} />}
       <footer className="nl-draft-editor__footer">
         <p>{countWords(markdown)} 字</p>
         <div>
@@ -404,7 +473,7 @@ export function ChapterDraftEditor({
             放弃草稿
           </button>
           <button
-            disabled={controlsDisabled}
+            disabled={controlsDisabled || !hasPendingRevision}
             type="button"
             onClick={(event) => openDialog('adopt', event.currentTarget)}
           >
@@ -509,13 +578,17 @@ function DraftDialog({
   );
 }
 
-function SafeDraftBlocks({ markdown }: { markdown: string }) {
+function SafeDraftBlocks({ markdown, previewRef }: {
+  markdown: string;
+  previewRef?: RefObject<HTMLElement | null>;
+}) {
   const blocks = markdown
     .split(/\n\s*\n/u)
     .map((block) => block.trim())
-    .filter(Boolean);
+    .filter(Boolean)
+    .filter((block, index) => !(index === 0 && /^#\s+Chapter\s+\d+\s+Draft$/u.test(block)));
   return (
-    <article className="nl-draft-editor__preview" data-testid="draft-manuscript-preview">
+    <article ref={previewRef} tabIndex={-1} className="nl-draft-editor__preview" data-testid="draft-manuscript-preview">
       {blocks.map((block, index) => {
         const heading = /^#{1,6}\s+(.+)$/u.exec(block);
         return heading === null

@@ -8,6 +8,19 @@ import type {
 } from '../../src/shared/chapterContract';
 import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 
+export function createInertSubmissionApi() {
+  const unexpectedCall = async (): Promise<never> => {
+    throw new Error('Unexpected submission API call.');
+  };
+  return {
+    startCheck: vi.fn<NovelLoopDesktopApi['submission']['startCheck']>(unexpectedCall),
+    get: vi.fn<NovelLoopDesktopApi['submission']['get']>(unexpectedCall),
+    cancel: vi.fn<NovelLoopDesktopApi['submission']['cancel']>(unexpectedCall),
+    readPreview: vi.fn<NovelLoopDesktopApi['submission']['readPreview']>(unexpectedCall),
+    confirm: vi.fn<NovelLoopDesktopApi['submission']['confirm']>(unexpectedCall)
+  } satisfies NovelLoopDesktopApi['submission'];
+}
+
 export function createInertChapterApi() {
   return {
     inspect: vi.fn<NovelLoopDesktopApi['chapter']['inspect']>()

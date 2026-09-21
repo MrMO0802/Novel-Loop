@@ -1,4 +1,27 @@
 export {
+  checkDesktopChapterSubmission,
+  readDesktopSubmissionPreview,
+  confirmDesktopChapterSubmission,
+  readDesktopSubmissionTasks,
+  readDesktopSubmissionRecovery,
+  readDesktopSubmissionDiagnostics,
+  type SubmissionDiagnosticsInput,
+  type DesktopSubmissionDiagnostics,
+  type SubmissionConfirmInput,
+  type SubmissionConfirmResult,
+  type SubmissionReadInput,
+  type DesktopSubmissionRecoveryResult,
+  verifyDesktopSubmissionPreviewIntegrity,
+  type DesktopSubmissionVerifiedPreview,
+  type SubmissionProjectInput,
+  type SubmissionCheckInput,
+  type SubmissionCheckOptions,
+  type DesktopSubmissionPreview,
+  type DesktopSubmissionSource,
+  type DesktopSubmissionTask
+} from './chapterSubmission.js';
+
+export {
   getDesktopSystemReadiness,
   type CodexStatusChecker,
   type DesktopSystemReadiness

@@ -1,3 +1,4 @@
+import { createInertDiagnosticRevisionApi } from "./desktopApiFixtures";
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
@@ -98,7 +99,8 @@ function installReadiness(
         read: vi.fn()
       },
       chapter: createInertChapterApi(),
-      submission: createInertSubmissionApi()
+      diagnosticRevision: createInertDiagnosticRevisionApi(),
+    submission: createInertSubmissionApi()
     } satisfies NovelLoopDesktopApi
   });
   return getReadiness;
@@ -132,6 +134,7 @@ function installProjectApi(project: ProjectSummary) {
       read: vi.fn()
     },
     chapter: createInertChapterApi(),
+    diagnosticRevision: createInertDiagnosticRevisionApi(),
     submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {
@@ -271,7 +274,8 @@ describe('production first-launch readiness', () => {
           read: vi.fn()
         },
         chapter: createInertChapterApi(),
-        submission: createInertSubmissionApi()
+        diagnosticRevision: createInertDiagnosticRevisionApi(),
+    submission: createInertSubmissionApi()
       } satisfies NovelLoopDesktopApi
     });
 

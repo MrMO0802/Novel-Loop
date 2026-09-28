@@ -163,6 +163,15 @@ Three statuses have different meanings:
   as the canonical chapter, with a recorded Story State and queue transition.
 
 After adopting the intended prose, select `检查并提交`, then `开始检查`.
+If diagnostics fail, `让 AI 根据检查结果修订` opens an isolated candidate
+workflow. Only `生成修订候选` starts Codex. Compare source and candidate,
+review the AI's unverified explanations, and explicitly adopt or reject the
+whole candidate. Adoption changes the authored version only and requires a
+fresh check; it never commits or invokes a provider. Candidates and provenance
+remain in `diagnostic_revisions/revision_vN/`. Stale sources, pending editor
+changes, tampered evidence, and ambiguous interrupted adoptions block adoption.
+Cancellation does not publish late provider results. Generation uses the existing
+read-only Codex boundary and sends checked prose/context to that service.
 Entering the screen does not start Codex. Checking uses the existing read-only
 local Codex boundary to produce isolated diagnostics and proposed story changes;
 it does not rewrite the prose or commit those changes. Review the displayed

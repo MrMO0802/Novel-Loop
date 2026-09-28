@@ -1,3 +1,4 @@
+import { createInertDiagnosticRevisionApi } from "./desktopApiFixtures";
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
@@ -133,6 +134,7 @@ function installApi(result: PlanningReviewResult = review) {
         .mockRejectedValueOnce(new Error('chapter inspection unavailable'))
         .mockResolvedValue(readyChapterInspection)
     },
+    diagnosticRevision: createInertDiagnosticRevisionApi(),
     submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {

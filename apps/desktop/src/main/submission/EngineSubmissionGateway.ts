@@ -100,7 +100,7 @@ export class EngineSubmissionGateway implements SubmissionEngineGateway {
     if (await readManifest(input.projectRoot, relative) !== before) throw submissionError('source_stale');
     const stateText = await readManifest(input.projectRoot, preview.source.state.path);
     if (createHash('sha256').update(stateText).digest('hex') !== preview.source.state.hash) throw submissionError('source_stale');
-    const names = storyNames([JSON.parse(stateText), verified.patch]);
+    const { names, placeholderCount } = storyNames([JSON.parse(stateText), verified.patch]);
     // Refuse an unrepresentable review rather than hide a change from the author.
     const changes = verified.diff.changes.flatMap(change => change.path === '/readerState'
       ? readerChanges(change) : [toAuthorChange(change, names)]);
@@ -112,8 +112,10 @@ export class EngineSubmissionGateway implements SubmissionEngineGateway {
         label: preview.source.sourceKind === 'adopted' ? '已采用正文' : '生成正文',
         summary: `第 ${preview.chapterNumber} 章，共 ${verified.sourceText.length} 字符。`
       }),
-      changes, warnings: changes.some(change => change.risk === 'high')
-        ? ['包含高风险变化，请逐项核对后再确认。'] : []
+      changes, warnings: [
+        ...(changes.some(change => change.risk === 'high') ? ['包含高风险变化，请逐项核对后再确认。'] : []),
+        ...(placeholderCount > 0 ? [`有 ${placeholderCount} 位人物的姓名仍是系统占位标识，以下以“待命名人物”区分，请结合人物描述核对。此展示不会自动补全或更改提案中的姓名。`] : [])
+      ]
     };
   }
 
@@ -281,19 +283,27 @@ function fieldLabel(field: string): string {
   return label;
 }
 
-function storyNames(values: unknown[]): Map<string, string> {
+function storyNames(values: unknown[]): { names: Map<string, string>; placeholderCount: number } {
   const names = new Map<string, string>();
+  const placeholders = new Map<string, string>();
   const visit = (value: unknown): void => {
     if (typeof value !== 'object' || value === null) return;
     if (Array.isArray(value)) { value.forEach(visit); return; }
     const record = value as Record<string, unknown>;
     const id = record['id'];
     const name = record['name'] ?? record['title'] ?? record['promise'] ?? record['text'] ?? record['content'] ?? record['summary'] ?? record['surfaceDetail'] ?? record['truth'];
-    if (typeof id === 'string' && typeof name === 'string') names.set(id, name);
+    if (typeof id === 'string' && typeof name === 'string') {
+      // Legacy slim patches used the character ID as its name. Label that fact,
+      // rather than leaking IDs, guessing a name, or rewriting approved evidence.
+      if (name === id && /^char_[A-Za-z0-9][A-Za-z0-9_-]*$/u.test(id) && typeof record['publicDescription'] === 'string') {
+        if (!placeholders.has(id)) placeholders.set(id, `待命名人物 ${placeholders.size + 1}（姓名为系统占位标识）`);
+        names.set(id, placeholders.get(id)!);
+      } else names.set(id, name);
+    }
     Object.values(record).forEach(visit);
   };
   values.forEach(visit);
-  return names;
+  return { names, placeholderCount: placeholders.size };
 }
 
 async function readManifest(root: string, relative: string): Promise<string> {

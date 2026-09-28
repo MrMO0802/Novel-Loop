@@ -156,6 +156,7 @@ describe('typed preload boundary', () => {
       'foundation',
       'planning',
       'chapter',
+      'diagnosticRevision',
       'submission'
     ]);
     expect(Object.keys(api.chapter)).toEqual([
@@ -362,7 +363,7 @@ describe('typed preload boundary', () => {
       'codex'
     ];
 
-    for (const surface of [api, api.chapter, api.submission]) {
+    for (const surface of [api, api.chapter, api.submission, api.diagnosticRevision]) {
       for (const property of forbidden) {
         expect(surface).not.toHaveProperty(property);
       }

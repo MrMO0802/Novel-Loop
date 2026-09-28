@@ -62,6 +62,7 @@ import type {
 } from './submissionContract';
 
 export interface NovelLoopDesktopApi {
+  diagnosticRevision: import('./diagnosticRevisionContract').DiagnosticRevisionApi;
   submission: {
     startCheck(request: SubmissionStartCheckRequest): Promise<SubmissionStartCheckResult>;
     get(request: SubmissionGetRequest): Promise<SubmissionTask>;

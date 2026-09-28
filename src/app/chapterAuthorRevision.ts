@@ -98,6 +98,7 @@ export interface CreateAuthorRevisionInput {
   authorInstruction: string | null;
   assertCanCommit?: () => void;
   onCommitPoint?: () => void;
+  onRecordPrepared?: (record: AuthorRevisionRecord) => Promise<void>;
 }
 
 export interface CreateAuthorRevisionResult {
@@ -296,6 +297,7 @@ export async function createAuthorRevision(
     });
 
     input.assertCanCommit?.();
+    await input.onRecordPrepared?.(record);
     input.onCommitPoint?.();
     try {
       await store.writeText(markdownPath, input.content);

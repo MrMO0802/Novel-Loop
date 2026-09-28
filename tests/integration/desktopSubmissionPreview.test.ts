@@ -15,6 +15,8 @@ import { startCommitJournal } from '../../src/app/commitJournal.js';
 import { ProjectPaths } from '../../src/storage/ProjectPaths.js';
 import { createHash } from 'node:crypto';
 import { captureSubmissionSource, readExactSubmissionText } from '../../src/app/desktopSubmissionSource.js';
+import { adoptAuthorRevision, createAuthorRevision } from '../../src/app/chapterAuthorRevision.js';
+import { AuthorRevisionRecordSchema } from '../../src/schemas/index.js';
 
 const chapter = 'chapters/chapter_001';
 const previews = `${chapter}/submission_previews`;
@@ -260,6 +262,64 @@ describe('isolated desktop submission', () => {
     expect(source.revisionId).toBe('author_revision_ch001_draft_v2');
     expect(JSON.stringify(editor)).toContain('LATEST_ADOPTED_C');
     expect(source.sourcePath).toBe(draftPath);
+  });
+
+  async function revision(artifactKind: 'mission' | 'selected_plan' | 'draft') {
+    const filename = { mission: 'mission.json', selected_plan: 'selected_plan.md', draft: 'draft_v1.md' }[artifactKind];
+    const sourceArtifactPath = path.join(projectRoot, chapter, filename);
+    return createAuthorRevision({
+      projectRoot, chapterNumber: 1, artifactKind, mode: 'direct_edit',
+      sourceArtifactPath, sourceCandidateId: artifactKind === 'selected_plan' ? 'plan_fixture' : null,
+      content: await store.readText(sourceArtifactPath), authorInstruction: null
+    }, store);
+  }
+
+  it.each(['mission', 'selected_plan', 'draft'] as const)('keeps older ready %s alternatives as evidence after a later revision is adopted', async kind => {
+    const old = await revision(kind);
+    const chosen = await revision(kind);
+    await adoptAuthorRevision({ projectRoot, chapterNumber: 1, revisionId: chosen.record.revisionId }, store);
+    const unchanged = await snapshot(projectRoot);
+    expect((await check()).status).toBe('ready');
+    const preview = (await desktop.readDesktopSubmissionPreview(input()))!;
+    const verified = await desktop.verifyDesktopSubmissionPreviewIntegrity(preview, projectRoot);
+    expect(verified.sourceText).toBe(kind === 'draft' ? seed.originalText : seed.adoptedText);
+    expect(preview.source.additionalInputs.map(item => item.path)).toContain(old.relativeRecordPath);
+    expect(await snapshot(projectRoot)).toEqual(unchanged);
+    expect((await store.readJson(path.join(projectRoot, old.relativeRecordPath), AuthorRevisionRecordSchema)).state).toBe('ready');
+  });
+
+  it.each(['working', 'publishing', 'ready'] as const)('still blocks a newer %s revision after adoption', async state => {
+    const chosen = await revision('mission');
+    await adoptAuthorRevision({ projectRoot, chapterNumber: 1, revisionId: chosen.record.revisionId }, store);
+    const pending = await revision('mission');
+    await store.writeJson(path.join(projectRoot, pending.relativeRecordPath), { ...pending.record, state, mode: 'codex_adjustment', authorInstruction: 'Adjust the mission.' }, AuthorRevisionRecordSchema);
+    expect(await check()).toMatchObject({ status: 'blocked', safeErrorCode: 'working_copy_pending' });
+    expect(requests).toHaveLength(0);
+    await noManifest();
+  });
+
+  it.each(['working', 'publishing'] as const)('does not hide an older incomplete %s revision behind a later adoption', async state => {
+    const pending = await revision('mission');
+    const chosen = await revision('mission');
+    await adoptAuthorRevision({ projectRoot, chapterNumber: 1, revisionId: chosen.record.revisionId }, store);
+    await store.writeJson(path.join(projectRoot, pending.relativeRecordPath), { ...pending.record, state, mode: 'codex_adjustment', authorInstruction: 'Adjust the mission.' }, AuthorRevisionRecordSchema);
+    expect(await check()).toMatchObject({ status: 'blocked', safeErrorCode: 'working_copy_pending' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('does not use a draft adoption to dismiss a pending mission revision', async () => {
+    await revision('mission');
+    expect(await check()).toMatchObject({ status: 'blocked', safeErrorCode: 'working_copy_pending' });
+    expect(requests).toHaveLength(0);
+  });
+
+  it('still verifies the content hash of an older ready alternative', async () => {
+    const old = await revision('mission');
+    const chosen = await revision('mission');
+    await adoptAuthorRevision({ projectRoot, chapterNumber: 1, revisionId: chosen.record.revisionId }, store);
+    await store.writeText(path.join(projectRoot, old.relativeMarkdownPath), 'Tampered old alternative');
+    expect(await check()).toMatchObject({ status: 'blocked', safeErrorCode: 'source_missing' });
+    expect(requests).toHaveLength(0);
   });
 
   it.each(['usage_limit', 'login_required', 'upgrade_required', 'unavailable', 'invalid_output'] as const)('preserves provider classification %s and terminal provenance', async classification => {

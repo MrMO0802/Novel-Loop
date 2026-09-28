@@ -8,6 +8,11 @@ import type {
 } from '../../src/shared/chapterContract';
 import type { NovelLoopDesktopApi } from '../../src/shared/desktopApi';
 
+export function createInertDiagnosticRevisionApi(): NovelLoopDesktopApi['diagnosticRevision'] {
+  const unexpected = async (): Promise<never> => { throw new Error('Unexpected diagnostic revision call'); };
+  return { start: vi.fn(unexpected), get: vi.fn(unexpected), cancel: vi.fn(unexpected), read: vi.fn(unexpected), adopt: vi.fn(unexpected), reject: vi.fn(unexpected) };
+}
+
 export function createInertSubmissionApi() {
   const unexpectedCall = async (): Promise<never> => {
     throw new Error('Unexpected submission API call.');

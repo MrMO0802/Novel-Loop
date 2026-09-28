@@ -26,6 +26,7 @@ const PROMPT_STAGE_RULES: Array<{
   likelyCategory: CodexPromptLikelyCategory;
 }> = [
   { match: (promptId) => promptId === 'provider.health', stage: 'health_check', likelyCategory: 'health_check' },
+  { match: (promptId) => promptId === 'revision.desktop_diagnostic_revision', stage: 'revision_plan', likelyCategory: 'drafting_subtask' },
   { match: (promptId) => promptId.includes('exec_json'), stage: 'exec_json_smoke', likelyCategory: 'exec_json_smoke' },
   { match: (promptId) => promptId.includes('smoke'), stage: 'smoke', likelyCategory: 'smoke' },
   { match: (promptId) => promptId.includes('repair_json') || promptId.includes('repair'), stage: 'json_repair', likelyCategory: 'json_repair' },

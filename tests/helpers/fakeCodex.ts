@@ -174,6 +174,10 @@ function textFor(promptId, stdin) {
 }
 
 function jsonFor(promptId, mode, repairMode, stdin) {
+  if (promptId === 'revision.desktop_diagnostic_revision') {
+    const source = stdin.split('CHECKED DRAFT:\\n')[1]?.split('\\n\\nNUMBERED ISSUES:')[0] || '# Chapter 001 Draft';
+    return { markdown: source + '\\n\\nDIAGNOSTIC_REVISION_CANDIDATE: 红伞位置已统一。', changes: [{ issueIndex: 0, reason: '统一重复事件细节，仍需重新检查。' }] };
+  }
   const chapterNumber = chapterFromPrompt(stdin);
   const nnn = formatChapter(chapterNumber);
   const previousNnn = formatChapter(Math.max(1, chapterNumber - 1));

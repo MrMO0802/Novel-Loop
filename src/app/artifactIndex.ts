@@ -411,6 +411,13 @@ function classifyArtifact(relativePath: string): { artifactType: ArtifactType; p
 }
 
 export function classifyDesktopSubmissionArtifact(relativePath: string): { artifactType: ArtifactType; phase: string; schemaName?: string } | undefined {
+  const revision = /^chapters\/chapter_\d{3,}\/diagnostic_revisions\/revision_v[1-9]\d*\/([^/]+)$/u.exec(relativePath);
+  if (revision) {
+    const schemas: Record<string, string> = { 'source_binding.json': 'DiagnosticRevisionBindingSchema', 'candidate.json': 'DiagnosticRevisionCandidateSchema', 'task.json': 'DiagnosticRevisionTaskSchema', 'disposition.json': 'DiagnosticRevisionDispositionSchema' };
+    const schemaName = schemas[revision[1]!];
+    if (schemaName) return { artifactType: 'desktop_diagnostic_revision', phase: 'revision', schemaName };
+    if (['source.md', 'candidate.md'].includes(revision[1]!)) return { artifactType: 'desktop_diagnostic_revision', phase: 'revision' };
+  }
   if (/^runs\/[A-Za-z0-9_-]+\/submission_task\.json$/u.test(relativePath)) {
     return { artifactType: 'desktop_submission_task', phase: 'submission', schemaName: 'DesktopSubmissionTaskSchema' };
   }

@@ -1,4 +1,10 @@
 export const IPC_CHANNELS = {
+  diagnosticRevisionStart: 'novel-loop:diagnostic-revision:start',
+  diagnosticRevisionGet: 'novel-loop:diagnostic-revision:get',
+  diagnosticRevisionCancel: 'novel-loop:diagnostic-revision:cancel',
+  diagnosticRevisionRead: 'novel-loop:diagnostic-revision:read',
+  diagnosticRevisionAdopt: 'novel-loop:diagnostic-revision:adopt',
+  diagnosticRevisionReject: 'novel-loop:diagnostic-revision:reject',
   systemGetReadiness: 'novel-loop:system:get-readiness',
   projectsList: 'novel-loop:projects:list',
   projectsChooseDefaultLibrary:

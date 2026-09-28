@@ -140,7 +140,7 @@ export async function captureSubmissionSource(input: SubmissionProjectInput, fil
           if (record.projectId !== paths.projectId || record.chapterNumber !== input.chapterNumber || record.workingCopyPath !== relative.replace(/\.json$/u, '.md')) throw new SubmissionError('source_missing');
           if (!files.includes(name.replace(/\.json$/u, '.md'))) throw new SubmissionError('source_missing');
           if (submissionHash(await readExactSubmissionText(store, paths.projectArtifact(record.workingCopyPath))) !== record.workingCopyHash) throw new SubmissionError('source_missing');
-          if (['working', 'publishing', 'ready'].includes(record.state)) throw new SubmissionError('working_copy_pending');
+          if (['working', 'publishing'].includes(record.state)) throw new SubmissionError('working_copy_pending');
           if (record.state === 'adopted' && record.adoptedAt === null) throw new SubmissionError('source_missing');
           records.push({ record, path: relative });
         } else if (/^(mission|plan|draft)_adoption_journal_v[1-9]\d*\.json$/u.test(name)) {
@@ -152,6 +152,17 @@ export async function captureSubmissionSource(input: SubmissionProjectInput, fil
           }
         }
       }
+    }
+    // Adoption retains older ready alternatives. They remain hashed evidence, not
+    // pending edits, only when a later revision of the same kind was adopted.
+    for (const { record } of records) {
+      if (record.state !== 'ready') continue;
+      const replaced = records.some(({ record: chosen }) => chosen.state === 'adopted'
+        && chosen.artifactKind === record.artifactKind
+        && authorRevisionVersion(chosen) > authorRevisionVersion(record)
+        && Date.parse(chosen.createdAt) >= Date.parse(record.createdAt)
+        && Date.parse(chosen.adoptedAt!) >= Date.parse(record.createdAt));
+      if (!replaced) throw new SubmissionError('working_copy_pending');
     }
     // Match readLatestAdoptedDraft ordering without its read-time journal recovery writes.
     const adopted = records.filter(item => item.record.artifactKind === 'draft' && item.record.state === 'adopted')
@@ -169,6 +180,11 @@ export async function captureSubmissionSource(input: SubmissionProjectInput, fil
       additionalInputs: additionalInputs.sort((a, b) => a.path.localeCompare(b.path))
     });
   });
+}
+
+function authorRevisionVersion(record: AuthorRevisionRecord): bigint {
+  // Identity and numeric version have already passed AuthorRevisionRecordSchema.
+  return BigInt(record.revisionId.slice(record.revisionId.lastIndexOf('_v') + 2));
 }
 
 export async function assertSubmissionSourceFresh(source: DesktopSubmissionSource, projectRoot: string, fileStore?: FileStore): Promise<void> {

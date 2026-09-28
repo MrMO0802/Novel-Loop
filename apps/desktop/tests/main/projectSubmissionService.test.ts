@@ -62,6 +62,14 @@ function engineTask(taskId: string, status: 'running' | 'ready' = 'running'): De
     startedAt: '2026-09-21T00:00:00Z', endedAt: status === 'ready' ? '2026-09-21T00:00:01Z' : null, safeErrorCode: null };
 }
 
+test('preview projection errors are not reported as failed chapter diagnostics or allowed to commit', async () => {
+  const f = await fixture();
+  f.gateway.readPreview.mockRejectedValue(Object.assign(new Error('private detail'), { code: 'invalid_output' }));
+  expect(await f.service.readPreview({ projectKey })).toEqual({ outcome: 'blocked', messageKey: 'submission.readFailed', issues: [] });
+  expect(f.gateway.check).not.toHaveBeenCalled();
+  expect(f.gateway.confirm).not.toHaveBeenCalled();
+});
+
 test('failed diagnostics survive live polling and restart preview without a ready manifest', async () => {
   const f = await fixture();
   const issues = [{ severity: 'error' as const, message: '人物提前得知了信中的秘密。', evidence: '他尚未打开信封。' }];

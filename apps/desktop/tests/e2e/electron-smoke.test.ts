@@ -203,13 +203,15 @@ test('boots with the narrow preload API and blocks renderer privilege escape', a
         foundationKeys: Object.keys(window.novelLoop.foundation),
         planningKeys: Object.keys(window.novelLoop.planning),
         submissionKeys: Object.keys(window.novelLoop.submission),
+        diagnosticRevisionKeys: Object.keys(window.novelLoop.diagnosticRevision),
         projectKeys: Object.keys(window.novelLoop.projects),
         systemKeys: Object.keys(window.novelLoop.system)
       }));
 
       expect(boundary).toEqual({
-        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter', 'submission'],
+        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter', 'diagnosticRevision', 'submission'],
         submissionKeys: ['startCheck', 'get', 'cancel', 'readPreview', 'confirm'],
+        diagnosticRevisionKeys: ['start', 'get', 'cancel', 'read', 'adopt', 'reject'],
         chapterKeys: [...CHAPTER_API_KEYS],
         hasReadinessMethod: true,
         nodeProcessType: 'undefined',
@@ -425,12 +427,14 @@ test('authors can create chapter one through planning review and initial draft w
 
       const boundary = await page.evaluate(() => ({
         apiKeys: Object.keys(window.novelLoop),
+        diagnosticRevisionKeys: Object.keys(window.novelLoop.diagnosticRevision),
         chapterKeys: Object.keys(window.novelLoop.chapter),
         nodeProcessType: typeof globalThis.process,
         nodeRequireType: typeof globalThis.require
       }));
       expect(boundary).toEqual({
-        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter', 'submission'],
+        apiKeys: ['system', 'projects', 'foundation', 'planning', 'chapter', 'diagnosticRevision', 'submission'],
+        diagnosticRevisionKeys: ['start', 'get', 'cancel', 'read', 'adopt', 'reject'],
         chapterKeys: [...CHAPTER_API_KEYS],
         nodeProcessType: 'undefined',
         nodeRequireType: 'undefined'

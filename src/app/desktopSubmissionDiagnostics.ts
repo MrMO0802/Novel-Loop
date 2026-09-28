@@ -1,7 +1,8 @@
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { z } from 'zod';
-import { DesktopSubmissionTaskSchema, DiagnosticsReportSchema, RunManifestV2Schema } from '../schemas/index.js';
+import { DesktopSubmissionSourceSchema, DesktopSubmissionTaskSchema, DiagnosticsReportSchema, RunManifestV2Schema } from '../schemas/index.js';
+import type { DiagnosticRevisionBinding } from '../schemas/desktopDiagnosticRevision.js';
 import type { DesktopSubmissionTask, DiagnosticsReport } from '../schemas/index.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { readDesktopSubmissionTasks } from './desktopSubmissionRecovery.js';
@@ -13,6 +14,7 @@ export interface DesktopSubmissionDiagnostics {
   task: DesktopSubmissionTask;
   diagnostics: DiagnosticsReport;
   sourceText: string;
+  revisionBinding?: DiagnosticRevisionBinding;
 }
 
 /** Historical, captured evidence only. This reader never authorizes a preview or checks live freshness. */
@@ -58,11 +60,22 @@ export async function readDesktopSubmissionDiagnostics(value: SubmissionDiagnost
     };
     const diagnostics = DiagnosticsReportSchema.parse(JSON.parse(await reference(diagnosticRef.path)));
     const sourceText = await reference(`${base}/source.md`);
+    let revisionBinding: DiagnosticRevisionBinding | undefined;
+    if (run.artifacts.some(ref => ref.path === `${base}/source_evidence.json`)) {
+      const evidence = await reference(`${base}/source_evidence.json`);
+      const source = DesktopSubmissionSourceSchema.parse(JSON.parse(evidence));
+      requireEvidence(source.projectId === task.projectId && source.chapterNumber === task.chapterNumber && source.sourceHash === submissionHash(sourceText));
+      revisionBinding = {
+        schemaVersion: 1, source, diagnosticTaskId: task.taskId, diagnosticRunId: task.runId!,
+        diagnostics: { path: diagnosticRef.path, hash: submissionHash(files.get(diagnosticRef.path)!) },
+        sourceEvidence: { path: `${base}/source_evidence.json`, hash: submissionHash(evidence) }, capturedAt: task.endedAt!
+      };
+    }
     requireEvidence(diagnostics.chapterNumber === task.chapterNumber && diagnostics.draftVersion === 1 && diagnostics.passed === false);
     for (const [relative, text] of files) {
       requireEvidence(await readExactSubmissionText(store, paths.projectArtifact(relative)) === text);
     }
-    return { task, diagnostics, sourceText };
+    return { task, diagnostics, sourceText, ...(revisionBinding === undefined ? {} : { revisionBinding }) };
   } catch { throw new SubmissionError('invalid_output'); }
 }
 

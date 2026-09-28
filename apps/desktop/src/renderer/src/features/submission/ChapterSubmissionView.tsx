@@ -7,6 +7,7 @@ import type {
 } from '../../../../shared/submissionContract';
 import { formatMessage, t, type MessageKey } from '../../i18n/messages.zh-CN';
 import { SubmissionChanges } from './SubmissionChanges';
+import { DiagnosticRevisionView } from './DiagnosticRevisionView';
 import './submission.css';
 
 export interface ChapterSubmissionViewProps {
@@ -50,6 +51,7 @@ export function ChapterSubmissionView(props: ChapterSubmissionViewProps) {
 }
 
 function SubmissionSession({ projectKey, onBack, onCommitted }: ChapterSubmissionViewProps) {
+  const [revisionOpen, setRevisionOpen] = useState(false);
   const [phase, setPhase] = useState<Phase>('loading');
   const [preview, setPreview] = useState<ReadyPreview | null>(null);
   const [task, setTask] = useState<SubmissionTask | null>(null);
@@ -279,6 +281,9 @@ function SubmissionSession({ projectKey, onBack, onCommitted }: ChapterSubmissio
         : phase === 'review' ? t('submission.notCommitted') : phase === 'success' ? title
           : phase === 'idle' && message ? t(message) : '';
 
+  if (revisionOpen) return <DiagnosticRevisionView projectKey={projectKey} onBack={() => { setRevisionOpen(false); void readPreview(); }} onRecheck={() => {
+    setRevisionOpen(false); setPreview(null); setTask(null); setMessage(null); setIssues([]); setCanStart(true); setCanRead(false); setPhase('idle');
+  }} />;
   return (
     <section className="nl-submission" aria-labelledby={titleId}>
       <div className="nl-submission__page" inert={dialogOpen}>
@@ -318,6 +323,7 @@ function SubmissionSession({ projectKey, onBack, onCommitted }: ChapterSubmissio
           </>}
         </div>
         <footer className="nl-submission__actions">
+          {phase === 'problem' && message === 'submission.diagnostics_failed' && <button className="nl-submission-button nl-submission-button--primary" onClick={() => setRevisionOpen(true)}>{t('diagnosticRevision.entry')}</button>}
           {((phase === 'idle' || phase === 'problem') && canStart || phase === 'starting') && <button type="button" className="nl-submission-button nl-submission-button--primary" disabled={phase === 'starting'} onClick={() => { void startCheck(); }}>{t(phase === 'idle' && !message || phase === 'starting' ? 'submission.start' : 'submission.retry')}</button>}
           {phase === 'problem' && canRead && <button type="button" className="nl-submission-button" onClick={() => { void readPreview(); }}>{t('submission.refresh')}</button>}
           {phase === 'checking' && <>

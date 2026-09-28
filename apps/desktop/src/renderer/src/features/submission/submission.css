@@ -118,3 +118,11 @@
   .nl-submission-approval { flex-basis: 100%; }
   .nl-submission-dialog { padding: 22px; }
 }
+.nl-diagnostic-revision { padding: 32px; }
+.nl-diagnostic-revision__compare { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; margin: 24px 0; }
+.nl-diagnostic-revision__compare > section { min-width: 0; overflow-wrap: anywhere; }
+.nl-diagnostic-revision__compare h2 { font-size: 18px; }
+.nl-diagnostic-revision__diff del, .nl-diagnostic-revision__diff ins { display: block; white-space: pre-wrap; overflow-wrap: anywhere; padding: 8px; }
+.nl-diagnostic-revision__diff del { background: #fae9e7; }
+.nl-diagnostic-revision__diff ins { background: #e7f1eb; }
+@media (max-width: 900px) { .nl-diagnostic-revision__compare { grid-template-columns: minmax(0, 1fr); } }

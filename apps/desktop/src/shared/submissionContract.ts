@@ -33,7 +33,8 @@ export const SubmissionSafeErrorCodeSchema = z.enum([
 export const SubmissionMessageKeySchema = z.enum([
   'submission.not_ready', 'submission.stale', 'submission.busy', 'submission.blocked',
   'submission.recovery_required', 'submission.working_copy_pending',
-  'submission.plan_missing', 'submission.project_unavailable', 'submission.diagnostics_failed'
+  'submission.plan_missing', 'submission.project_unavailable', 'submission.diagnostics_failed',
+  'submission.readFailed'
 ]);
 
 export const SubmissionIssueSchema = z.object({

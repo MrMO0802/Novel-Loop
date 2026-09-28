@@ -94,3 +94,4 @@ export {
   type DesktopMissionAuthorEdit,
   type SelectDesktopChapterDirectionInput
 } from './chapterAuthoring.js';
+export * from './chapterDiagnosticRevision.js';

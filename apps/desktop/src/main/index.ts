@@ -10,6 +10,8 @@ import { ProjectChapterService } from './chapter/ProjectChapterService';
 import { ProjectSubmissionGuard } from './submission/ProjectSubmissionGuard';
 import { EngineSubmissionGateway } from './submission/EngineSubmissionGateway';
 import { ProjectSubmissionService } from './submission/ProjectSubmissionService';
+import { ProjectDiagnosticRevisionService } from './submission/ProjectDiagnosticRevisionService';
+import { registerDiagnosticRevisionHandlers } from './ipc/registerDiagnosticRevisionHandlers';
 import { EngineFoundationGateway } from './foundation/EngineFoundationGateway';
 import { ProjectFoundationService } from './foundation/ProjectFoundationService';
 import { registerChapterHandlers } from './ipc/registerChapterHandlers';
@@ -172,6 +174,9 @@ void app.whenReady().then(() => {
   );
 
   installSessionPermissionDenial(session.defaultSession);
+  registerDiagnosticRevisionHandlers({ handle: (channel, handler) => {
+    ipcMain.handle(channel, (event, request) => handler({ senderFrame: { url: event.senderFrame?.url ?? '' } }, request));
+  } }, new ProjectDiagnosticRevisionService({ projects: projectService, gateway: new EngineSubmissionGateway(), workingCopies, guard: submissionGuard }), rendererTarget.trustedRendererUrl);
 
   createMainWindow(rendererTarget);
 

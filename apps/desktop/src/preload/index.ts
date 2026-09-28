@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 import type { NovelLoopDesktopApi } from '../shared/desktopApi';
 import { IPC_CHANNELS } from '../shared/ipcChannels';
+import type { DiagnosticRevisionResponse } from '../shared/diagnosticRevisionContract';
 import type {
   FoundationCancelRequest,
   FoundationGetRequest,
@@ -291,6 +292,14 @@ const novelLoopApi: NovelLoopDesktopApi = {
       );
       return response as ChapterAuthoringResult;
     }
+  },
+  diagnosticRevision: {
+    start: async request => await ipcRenderer.invoke(IPC_CHANNELS.diagnosticRevisionStart, request) as DiagnosticRevisionResponse,
+    get: async request => await ipcRenderer.invoke(IPC_CHANNELS.diagnosticRevisionGet, request) as DiagnosticRevisionResponse,
+    cancel: async request => await ipcRenderer.invoke(IPC_CHANNELS.diagnosticRevisionCancel, request) as DiagnosticRevisionResponse,
+    read: async request => await ipcRenderer.invoke(IPC_CHANNELS.diagnosticRevisionRead, request) as DiagnosticRevisionResponse,
+    adopt: async request => await ipcRenderer.invoke(IPC_CHANNELS.diagnosticRevisionAdopt, request) as DiagnosticRevisionResponse,
+    reject: async request => await ipcRenderer.invoke(IPC_CHANNELS.diagnosticRevisionReject, request) as DiagnosticRevisionResponse
   },
   submission: {
     startCheck: async (request: SubmissionStartCheckRequest) => {

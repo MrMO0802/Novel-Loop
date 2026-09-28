@@ -11,6 +11,7 @@ const SCHEMA_ROOT = fileURLToPath(
 );
 
 const CODEX_OUTPUT_SCHEMAS: Record<string, CodexOutputSchemaDescriptor> = {
+  'revision.desktop_diagnostic_revision': slimDescriptor('DiagnosticRevisionOutputSchema', 'revision.desktop_diagnostic_revision.slim.schema.json'),
   'strategy.build_story_bible': descriptor('CodexStoryBibleResponseSchema', 'strategy.story_bible.schema.json'),
   'strategy.build_genre_contract': descriptor('CodexGenreContractResponseSchema', 'strategy.genre_contract.schema.json'),
   'strategy.build_reader_promise': descriptor('CodexReaderPromiseResponseSchema', 'strategy.reader_promise.schema.json'),

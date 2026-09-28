@@ -658,3 +658,4 @@ export type {
   CandidateCommitDecisionCarryForward,
   CandidatePatchRefined
 } from './codexCandidatePatchRefinement.js';
+export * from './desktopDiagnosticRevision.js';

@@ -149,7 +149,8 @@ export class ProjectSubmissionService implements ProjectSubmissionServiceContrac
         return result;
       } catch (error) {
         const code = safeCode(error);
-        return previewUnavailable(code === 'source_stale' ? 'stale' : 'blocked', messageKey(code));
+        return previewUnavailable(code === 'source_stale' ? 'stale' : 'blocked',
+          code === 'invalid_output' || code === 'unexpected' || code === 'io_error' ? 'submission.readFailed' : messageKey(code));
       }
     });
   }

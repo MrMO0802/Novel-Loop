@@ -73,7 +73,7 @@ async function fakeHelperUrl(): Promise<string> {
   return `data:text/javascript;base64,${Buffer.from(fakeSource).toString('base64')}`;
 }
 
-type FailureMode = 'codex-controlled-diagnostics-fail' | 'jsonl-usage-limit';
+type FailureMode = 'codex-controlled-diagnostics-fail' | 'jsonl-usage-limit' | 'invalid-json';
 
 async function writeFailureFake(root: string, mode: FailureMode) {
   const output = await runModule(`
@@ -162,6 +162,20 @@ test('explicit UI save/adopt B, check, restart, human confirmation, exact commit
   try {
     const fixture = await seed(root);
     const chapter = path.join(fixture.projectRoot, 'chapters/chapter_001');
+    // Reproduce retained task alternatives from repeated editing before adoption.
+    await runModule(`
+      import { readFile } from 'node:fs/promises';
+      import { createAuthorRevision, adoptAuthorRevision } from './dist/app/chapterAuthorRevision.js';
+      const input = { projectRoot: ${JSON.stringify(fixture.projectRoot)}, chapterNumber: 1,
+        artifactKind: 'mission', mode: 'direct_edit', sourceCandidateId: null, authorInstruction: null,
+        sourceArtifactPath: ${JSON.stringify(path.join(chapter, 'mission.json'))} };
+      const content = await readFile(input.sourceArtifactPath, 'utf8');
+      for (let i = 0; i < 3; i++) await createAuthorRevision({ ...input, content });
+      const chosen = await createAuthorRevision({ ...input, content });
+      await adoptAuthorRevision({ ...input, revisionId: chosen.record.revisionId });
+    `);
+    const oldMissionPath = path.join(chapter, 'author_revisions', 'mission_revision_v1.json');
+    const oldMission = await readFile(oldMissionPath);
     const statePath = path.join(fixture.projectRoot, 'state/story_state.json');
     const queuePath = path.join(fixture.projectRoot, 'planning/chapter_queue.json');
     const original = await readFile(path.join(chapter, 'draft_v1.md'));
@@ -194,6 +208,7 @@ test('explicit UI save/adopt B, check, restart, human confirmation, exact commit
       'diagnostics.diagnose_chapter_slim', 'memory.extract_canon_patch_proposal_slim'
     ]);
     for (const prompt of checkCalls) expect(prompt).toContain(adopted);
+    expect(await readFile(oldMissionPath)).toEqual(oldMission);
     expect(await readFile(statePath)).toEqual(stateBefore);
     expect(await readFile(queuePath)).toEqual(queueBefore);
     expect(await readdir(chapter)).not.toContain('final.md');
@@ -297,12 +312,137 @@ async function protectedBytes(projectRoot: string) {
   };
 }
 
+test('diagnostics AI candidate can be rejected, restored, adopted and rechecked without committing', async () => {
+  test.setTimeout(180_000);
+  const blocker = secureSandboxBlocker();
+  if (blocker && process.env.NOVEL_LOOP_REQUIRE_ELECTRON_SMOKE === '1') throw new Error(blocker);
+  test.skip(Boolean(blocker), blocker ?? '');
+  const root = await mkdtemp(path.join(tmpdir(), 'desktop-diagnostic-revision-e2e-'));
+  let app: ElectronApplication | null = null;
+  try {
+    const fixture = await seed(root);
+    const fake = await writeFailureFake(root, 'codex-controlled-diagnostics-fail');
+    const before = await protectedBytes(fixture.projectRoot);
+    app = await launch(fixture.userData, fake.codexBin);
+    let page = await app.firstWindow();
+    await openDraft(page);
+    await page.getByRole('button', { name: '检查并提交', exact: true }).click();
+    await page.getByRole('button', { name: '开始检查', exact: true }).click();
+    await page.getByRole('button', { name: '让 AI 根据检查结果修订' }).click({ timeout: 45000 });
+    const sourceCheck = JSON.parse(await runModule(`
+      import { readDesktopSubmissionTasks, captureDiagnosticRevisionSource } from './dist/desktop/index.js';
+      const projectRoot = ${JSON.stringify(fixture.projectRoot)};
+      const tasks = await readDesktopSubmissionTasks({ projectRoot });
+      const latest = tasks.sort((a, b) => b.startedAt.localeCompare(a.startedAt))[0];
+      try { await captureDiagnosticRevisionSource({ projectRoot, chapterNumber: 1, diagnosticTaskId: latest.taskId }); console.log(JSON.stringify({ ok: true })); }
+      catch (error) { console.log(JSON.stringify({ ok: false, code: error.code, tasks })); }
+    `));
+    expect(sourceCheck).toEqual({ ok: true });
+    await page.getByRole('button', { name: '生成修订候选', exact: true }).click();
+    await expect(page.getByRole('button', { name: '采用此修订', exact: true })).toBeEnabled({ timeout: 45000 });
+    await expectNotCommitted(fixture.projectRoot, before);
+    const afterGeneration = await calls(fake.codexBin);
+    await page.getByRole('button', { name: '拒绝候选', exact: true }).click();
+    await expect(page.getByText('候选已拒绝，原正文保持不变。')).toBeVisible();
+    expect(await calls(fake.codexBin)).toEqual(afterGeneration);
+    await page.getByRole('button', { name: '生成修订候选', exact: true }).click();
+    await expect(page.getByRole('button', { name: '采用此修订', exact: true })).toBeEnabled({ timeout: 45000 });
+    const afterSecond = await calls(fake.codexBin);
+    await page.setViewportSize({ width: 1200, height: 800 });
+    await screenshot(page, 'diagnostic-revision-1200x800.png');
+    await page.setViewportSize({ width: 800, height: 700 });
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+    await screenshot(page, 'diagnostic-revision-800x700.png');
+    await app.close(); app = null;
+    app = await launch(fixture.userData, fake.codexBin);
+    page = await app.firstWindow();
+    await openDraft(page);
+    await page.getByRole('button', { name: '检查并提交', exact: true }).click();
+    await page.getByRole('button', { name: '让 AI 根据检查结果修订' }).click();
+    await page.getByRole('button', { name: '采用此修订', exact: true }).click();
+    await page.getByRole('button', { name: '确认采用修订', exact: true }).click();
+    await expect(page.getByText('修订已采用，尚未正式提交。')).toBeVisible();
+    expect(await calls(fake.codexBin)).toEqual(afterSecond);
+    await expectNotCommitted(fixture.projectRoot, before);
+    await page.getByRole('button', { name: '重新检查', exact: true }).click();
+    await page.getByRole('button', { name: '开始检查', exact: true }).click();
+    await expect(page.getByRole('button', { name: '让 AI 根据检查结果修订' })).toBeVisible({ timeout: 45000 });
+    const afterCheck = await calls(fake.codexBin);
+    expect(afterCheck.at(-1)).toContain('DIAGNOSTIC_REVISION_CANDIDATE');
+    await expectNoApproval(page);
+    await expectNotCommitted(fixture.projectRoot, before);
+    await page.getByRole('button', { name: '让 AI 根据检查结果修订' }).click();
+    await expect(page.getByRole('button', { name: '生成修订候选', exact: true })).toBeVisible();
+    const audit = JSON.parse(await runModule(`
+      import { auditProject } from './dist/app/projectAudit.js';
+      console.log(JSON.stringify(await auditProject(${JSON.stringify({ projectId, projectsRoot: fixture.projectsRoot, strict: true, fixIndex: true })})));
+    `));
+    expect(audit.report.issues.filter((issue: { severity: string }) => ['error', 'critical'].includes(issue.severity))).toEqual([]);
+  } finally {
+    if (app) await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
 async function expectNotCommitted(projectRoot: string, before: Awaited<ReturnType<typeof protectedBytes>>) {
   expect(await protectedBytes(projectRoot)).toEqual(before);
   const files = await readdir(path.join(projectRoot, 'chapters/chapter_001'));
   expect(files.filter(name => /^(?:final\.md|canon_patch\.json|commit_report\.json|commit_journal_v\d+\.json)$/u.test(name))).toEqual([]);
   expect(await readdir(path.join(projectRoot, 'snapshots'))).toEqual([]);
 }
+
+test('diagnostics revision cancellation, invalid JSON and stale context never authorize adoption', async () => {
+  test.setTimeout(180_000);
+  const blocker = secureSandboxBlocker();
+  if (blocker && process.env.NOVEL_LOOP_REQUIRE_ELECTRON_SMOKE === '1') throw new Error(blocker);
+  test.skip(Boolean(blocker), blocker ?? '');
+  const root = await mkdtemp(path.join(tmpdir(), 'desktop-diagnostic-revision-negative-'));
+  let app: ElectronApplication | null = null;
+  let releasePath: string | undefined;
+  try {
+    const fixture = await seed(root);
+    const fake = await writeFailureFake(root, 'codex-controlled-diagnostics-fail');
+    const hold = await heldFake(root, fake.codexBin, 'revision.desktop_diagnostic_revision');
+    releasePath = hold.release;
+    const before = await protectedBytes(fixture.projectRoot);
+    app = await launch(fixture.userData, hold.codexBin);
+    const page = await app.firstWindow();
+    await openDraft(page);
+    await page.getByRole('button', { name: '检查并提交', exact: true }).click();
+    await page.getByRole('button', { name: '开始检查', exact: true }).click();
+    await page.getByRole('button', { name: '让 AI 根据检查结果修订' }).click({ timeout: 45000 });
+    await page.getByRole('button', { name: '生成修订候选', exact: true }).click();
+    await expect.poll(() => exists(hold.entered), { timeout: 45000 }).toBe(true);
+    await page.getByRole('button', { name: '取消生成', exact: true }).click();
+    await writeFile(hold.release, 'release');
+    await expect(page.getByText('修订生成已取消，原正文保持不变。')).toBeVisible({ timeout: 45000 });
+    await expect(page.getByRole('button', { name: '采用此修订', exact: true })).toHaveCount(0);
+    await expectNotCommitted(fixture.projectRoot, before);
+
+    const invalid = await writeFailureFake(root, 'invalid-json');
+    await heldFake(root, invalid.codexBin, 'revision.desktop_diagnostic_revision');
+    await page.getByRole('button', { name: '生成修订候选', exact: true }).click();
+    await expect(page.getByText('本次检查结果暂时无法使用，尚未正式提交。')).toBeVisible({ timeout: 45000 });
+    await expect(page.getByRole('button', { name: '采用此修订', exact: true })).toHaveCount(0);
+    await expectNotCommitted(fixture.projectRoot, before);
+
+    await heldFake(root, fake.codexBin, 'revision.desktop_diagnostic_revision');
+    await page.getByRole('button', { name: '生成修订候选', exact: true }).click();
+    await expect(page.getByRole('button', { name: '采用此修订', exact: true })).toBeEnabled({ timeout: 45000 });
+    const callCount = await calls(fake.codexBin);
+    const plan = path.join(fixture.projectRoot, 'chapters/chapter_001/selected_plan.md');
+    await writeFile(plan, `${await readFile(plan, 'utf8')}\nChanged after generation.\n`);
+    await page.getByRole('button', { name: '采用此修订', exact: true }).click();
+    await page.getByRole('button', { name: '确认采用修订', exact: true }).click();
+    await expect(page.getByRole('alert')).toContainText('当前候选不能采用');
+    expect(await calls(fake.codexBin)).toEqual(callCount);
+    await expectNotCommitted(fixture.projectRoot, before);
+  } finally {
+    if (releasePath) await writeFile(releasePath, 'release').catch(() => undefined);
+    if (app) await app.close();
+    await rm(root, { recursive: true, force: true });
+  }
+});
 
 async function expectNoApproval(page: Page) {
   await expect(page.getByRole('checkbox', { name: '我已审阅正文版本和全部故事变化' })).toHaveCount(0);
@@ -322,7 +462,7 @@ async function submissionTasks(projectRoot: string) {
 }
 
 // Only the temporary fake process is held; the production IPC/backend is unmodified.
-async function heldFake(root: string, delegate: string) {
+async function heldFake(root: string, delegate: string, promptId = 'diagnostics.diagnose_chapter_slim') {
   const codexBin = path.join(root, 'held-codex.cjs');
   const entered = path.join(root, 'diagnostics-entered');
   const release = path.join(root, 'diagnostics-release');
@@ -332,7 +472,7 @@ const fs = require('node:fs');
 const { spawnSync } = require('node:child_process');
 const args = process.argv.slice(2);
 const input = args.includes('exec') ? fs.readFileSync(0, 'utf8') : '';
-const held = input.includes('PROMPT_ID: diagnostics.diagnose_chapter_slim');
+const held = input.includes(${JSON.stringify('PROMPT_ID: ')} + ${JSON.stringify(promptId)});
 try {
   if (held) {
     fs.writeFileSync(${JSON.stringify(entered)}, 'entered');

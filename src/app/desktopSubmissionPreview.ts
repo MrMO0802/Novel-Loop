@@ -304,7 +304,7 @@ function normalizeSubmissionPatch(proposal: unknown, projectId: string, chapterN
   return CanonPatchSchema.parse(normalizeCodexSlimOutput('memory.extract_canon_patch_proposal_slim', proposal, { projectId, chapterNumber }));
 }
 
-function submissionErrorCode(error: unknown, stage: DesktopSubmissionStage): DesktopSubmissionSafeErrorCode {
+export function submissionErrorCode(error: unknown, stage: DesktopSubmissionStage): DesktopSubmissionSafeErrorCode {
   if (error instanceof SubmissionError) return error.code;
   if (error instanceof ProviderError && error.classification !== undefined) return error.classification === 'unavailable' ? 'codex_unavailable' : error.classification;
   const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : '';
@@ -318,7 +318,7 @@ function submissionErrorCode(error: unknown, stage: DesktopSubmissionStage): Des
   if (code.includes('UPGRADE')) return 'upgrade_required';
   if (code.includes('UNAVAILABLE') || code.includes('NOT_FOUND')) return 'codex_unavailable';
   if (stage === 'checking_source' && (error instanceof z.ZodError || error instanceof SyntaxError || code === 'ENOENT')) return 'source_missing';
-  if (error instanceof z.ZodError || error instanceof SyntaxError || code.includes('JSON') || code.includes('SCHEMA')) return 'invalid_output';
+  if (error instanceof z.ZodError || error instanceof SyntaxError || code.includes('JSON') || code.includes('SCHEMA') || code === 'CODEX_REPAIR_FAILED') return 'invalid_output';
   if (code.startsWith('E')) return 'io_error';
   return 'unexpected';
 }

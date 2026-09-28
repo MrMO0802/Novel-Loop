@@ -23,6 +23,7 @@ export const ArtifactTypeSchema = z.enum([
   'draft',
   'desktop_submission_preview',
   'desktop_submission_task',
+  'desktop_diagnostic_revision',
   'desktop_submission_approval',
   'desktop_submission_source',
   'diagnostics',

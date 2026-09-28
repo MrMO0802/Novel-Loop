@@ -103,6 +103,7 @@ import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { classifyDesktopSubmissionArtifact, refreshArtifactIndex } from './artifactIndex.js';
 import { auditDesktopSubmissions } from './desktopSubmissionAudit.js';
+import { auditDesktopDiagnosticRevisions } from './desktopDiagnosticRevisionAudit.js';
 import { readExactSubmissionText, submissionHash, submissionStore } from './desktopSubmissionSource.js';
 import { isCompletedCommitJournal } from './commitJournal.js';
 import { readFileMetadata } from './fileHash.js';
@@ -171,6 +172,7 @@ export async function auditProject(input: ProjectAuditInput, fileStore = new Fil
   }
 
   const submissionIssues = await auditDesktopSubmissions(paths, fileStore);
+  submissionIssues.push(...await auditDesktopDiagnosticRevisions(paths, fileStore));
   issues.push(...submissionIssues);
   // Do not reopen submission manifests already rejected by the guarded evidence reader.
   const invalidSubmissionManifests = new Set(submissionIssues

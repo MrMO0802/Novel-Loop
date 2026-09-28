@@ -1,3 +1,4 @@
+import { createInertDiagnosticRevisionApi } from "./desktopApiFixtures";
 // @vitest-environment jsdom
 
 import '@testing-library/jest-dom/vitest';
@@ -93,6 +94,7 @@ function installApi() {
       read: vi.fn()
     },
     chapter,
+    diagnosticRevision: createInertDiagnosticRevisionApi(),
     submission: createInertSubmissionApi()
   } satisfies NovelLoopDesktopApi;
   Object.defineProperty(window, 'novelLoop', {

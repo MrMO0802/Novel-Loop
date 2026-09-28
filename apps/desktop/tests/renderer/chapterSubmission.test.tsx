@@ -93,6 +93,23 @@ afterEach(() => {
 });
 
 describe('isolated chapter submission', () => {
+  test('a display failure can be reread without regenerating or submitting the adopted draft', async () => {
+    const api = installApi();
+    api.readPreview.mockResolvedValueOnce({ outcome: 'blocked', messageKey: 'submission.readFailed', issues: [] });
+    await mount();
+    expect(screen.getByRole('alert')).toHaveTextContent('暂时无法读取检查记录');
+    expect(screen.queryByText('检查未通过，请核对问题后返回修改。')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '让 AI 根据检查结果修订' })).not.toBeInTheDocument();
+    api.readPreview.mockResolvedValue(ready);
+    fireEvent.click(screen.getByRole('button', { name: '重新读取检查记录' }));
+    await flush();
+    expect(screen.getByRole('button', { name: '正式提交第 1 章' })).toBeDisabled();
+    expect(api.startCheck).not.toHaveBeenCalled();
+    expect(api.confirm).not.toHaveBeenCalled();
+    openConfirmation();
+    expect(api.confirm).not.toHaveBeenCalled();
+  });
+
   test('reads only on mount and requires explicit start, with request objects and a duplicate guard', async () => {
     const api = installApi();
     const pending = deferred<{ taskId: string }>();

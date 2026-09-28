@@ -107,6 +107,37 @@ test('relationship review preserves both actor identities using names, not inter
   expect(JSON.stringify(result)).not.toMatch(/fromCharacterId|toCharacterId|evidence:|change:/u);
 });
 
+test('legacy character name placeholders remain distinct, explicitly warned, and do not break preview', async () => {
+  const f = await fixture();
+  f.patch.characterStates = ['char_new_one', 'char_new_two'].map((id, index) => CharacterStateSchema.parse({
+    id, name: id, role: 'supporting', publicDescription: `新增人物描述${index + 1}。`
+  }));
+  f.patch.relationshipUpdates.push({ fromCharacterId: 'char_new_one', toCharacterId: 'char_new_two', change: '相互信任。', evidence: '一起读信。' });
+  f.verified.diff.changes = diffPatchPreview(f.state, f.patch);
+  const before = JSON.stringify(f.verified);
+  const result = await f.gateway.readPreview({ projectRoot: f.root, chapterNumber: 1 });
+  expect(result?.changes).toHaveLength(f.verified.diff.changes.length);
+  const text = JSON.stringify(result);
+  expect(text).toContain('待命名人物 1');
+  expect(text).toContain('待命名人物 2');
+  expect(text).toContain('新增人物描述1。');
+  expect(text).not.toContain('char_new_');
+  expect(result?.warnings.join('')).toContain('姓名仍是系统占位标识');
+  expect(JSON.stringify(f.verified)).toBe(before);
+  expect(f.local.confirm).not.toHaveBeenCalled();
+});
+
+test('placeholder display does not conceal unsafe text or unresolved references', async () => {
+  const f = await fixture();
+  f.patch.characterStates = [CharacterStateSchema.parse({ id: 'char_new', name: 'char_new', role: 'supporting', publicDescription: 'Bearer private-secret' })];
+  f.verified.diff.changes = diffPatchPreview(f.state, f.patch);
+  await expect(f.gateway.readPreview({ projectRoot: f.root, chapterNumber: 1 })).rejects.toBeDefined();
+  f.patch.characterStates = [];
+  f.patch.relationshipUpdates.push({ fromCharacterId: 'char_unknown', toCharacterId: 'char_alice', change: '信任。', evidence: '读信。' });
+  f.verified.diff.changes = diffPatchPreview(f.state, f.patch);
+  await expect(f.gateway.readPreview({ projectRoot: f.root, chapterNumber: 1 })).rejects.toBeDefined();
+});
+
 test('real debt and character mutations retain identity, translated states and every before/after detail', async () => {
   const f = await fixture();
   f.patch.characterUpdates.push({ characterId: 'char_alice', field: 'emotionalState', newValue: '不安', reason: '收到陌生人的来信。' });

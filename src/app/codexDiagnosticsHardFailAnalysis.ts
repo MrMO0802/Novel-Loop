@@ -195,7 +195,7 @@ export async function generateCodexDiagnosticsHardFailAnalysis(
       sourceFinalPath: context.finalExists ? context.finalPath : '',
       sourceMissionPath: context.missionPath,
       sourceSelectedPlanPath: context.selectedPlanPath,
-      sourceStoryStatePath: path.join('state', 'story_state.json'),
+      sourceStoryStatePath: path.posix.join('state', 'story_state.json'),
       sourceReaderStateSummary: summarizeReaderState(context.storyState),
       hardFailures,
       softScoreSummary: summarizeSoftScores(context.diagnostics),
@@ -337,7 +337,7 @@ async function buildContextAvailability(context: SourceContext): Promise<Context
   const artifacts: Array<{ name: string; path: string; text: string; tokens: string[] }> = [
     {
       name: 'story_state summary',
-      path: path.join('state', 'story_state.json'),
+      path: path.posix.join('state', 'story_state.json'),
       text: JSON.stringify({
         latestCommittedChapter: context.storyState.latestCommittedChapter,
         canonFacts: context.storyState.canonFacts.slice(-5),
@@ -345,18 +345,18 @@ async function buildContextAvailability(context: SourceContext): Promise<Context
       }),
       tokens: ['story_state', 'story state', 'canonfacts', 'latestcommittedchapter']
     },
-    { name: 'character states', path: path.join('state', 'story_state.json#characters'), text: JSON.stringify(context.storyState.characters), tokens: ['character states', 'characters', 'character_states'] },
-    { name: 'timeline', path: path.join('state', 'story_state.json#timeline'), text: JSON.stringify(context.storyState.timeline), tokens: ['timeline'] },
-    { name: 'reader_state', path: path.join('state', 'story_state.json#readerState'), text: JSON.stringify(context.storyState.readerState), tokens: ['reader_state', 'readerstate', 'reader state'] },
+    { name: 'character states', path: path.posix.join('state', 'story_state.json#characters'), text: JSON.stringify(context.storyState.characters), tokens: ['character states', 'characters', 'character_states'] },
+    { name: 'timeline', path: path.posix.join('state', 'story_state.json#timeline'), text: JSON.stringify(context.storyState.timeline), tokens: ['timeline'] },
+    { name: 'reader_state', path: path.posix.join('state', 'story_state.json#readerState'), text: JSON.stringify(context.storyState.readerState), tokens: ['reader_state', 'readerstate', 'reader state'] },
     {
       name: 'open narrative debts',
-      path: path.join('state', 'story_state.json#narrativeDebts'),
+      path: path.posix.join('state', 'story_state.json#narrativeDebts'),
       text: JSON.stringify(context.storyState.narrativeDebts.filter((debt) => debt.status !== 'resolved')),
       tokens: ['narrative debts', 'narrativedebts', 'open debts']
     },
     {
       name: 'unresolved foreshadowing',
-      path: path.join('state', 'story_state.json#foreshadowing'),
+      path: path.posix.join('state', 'story_state.json#foreshadowing'),
       text: JSON.stringify(context.storyState.foreshadowing.filter((item) => item.status !== 'resolved')),
       tokens: ['foreshadowing']
     },
@@ -451,25 +451,25 @@ function analyzeHardFailure(
 function extractStoryStateEvidence(context: SourceContext, checkName: CodexDiagnosticsHardCheckName, diagnosticsMessage: string): CodexDiagnosticsEvidence[] {
   if (checkName === 'timeline_consistency') {
     return context.storyState.timeline.flatMap((event) =>
-      extractEvidence('timeline', path.join('state', 'story_state.json#timeline'), event.summary, checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [event.id] }))
+      extractEvidence('timeline', path.posix.join('state', 'story_state.json#timeline'), event.summary, checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [event.id] }))
     );
   }
   if (checkName === 'character_knowledge_consistency') {
     return context.storyState.characters.flatMap((character) =>
-      extractEvidence('character_states', path.join('state', 'story_state.json#characters'), JSON.stringify(character), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [character.id] }))
+      extractEvidence('character_states', path.posix.join('state', 'story_state.json#characters'), JSON.stringify(character), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [character.id] }))
     );
   }
   if (checkName === 'world_rule_consistency') {
     return context.storyState.worldRules.flatMap((rule) =>
-      extractEvidence('story_state', path.join('state', 'story_state.json#worldRules'), JSON.stringify(rule), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [rule.id] }))
+      extractEvidence('story_state', path.posix.join('state', 'story_state.json#worldRules'), JSON.stringify(rule), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [rule.id] }))
     );
   }
   return [
     ...context.storyState.revealSchedule.flatMap((reveal) =>
-      extractEvidence('story_state', path.join('state', 'story_state.json#revealSchedule'), JSON.stringify(reveal), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [reveal.id] }))
+      extractEvidence('story_state', path.posix.join('state', 'story_state.json#revealSchedule'), JSON.stringify(reveal), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [reveal.id] }))
     ),
     ...context.storyState.foreshadowing.flatMap((item) =>
-      extractEvidence('foreshadowing', path.join('state', 'story_state.json#foreshadowing'), JSON.stringify(item), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [item.id] }))
+      extractEvidence('foreshadowing', path.posix.join('state', 'story_state.json#foreshadowing'), JSON.stringify(item), checkName, diagnosticsMessage).map((evidence) => ({ ...evidence, relatedIds: [item.id] }))
     )
   ];
 }
@@ -1022,10 +1022,10 @@ function isV2(manifest: RunManifest): manifest is RunManifestV2 {
 }
 
 async function latestContextManifest(paths: ProjectPaths, fileStore: FileStore): Promise<string> {
-  const contextDir = paths.projectArtifact(path.join('codex', 'context'));
+  const contextDir = paths.projectArtifact(path.posix.join('codex', 'context'));
   if (!(await fileStore.exists(contextDir))) return '';
   const fileName = (await fileStore.list(contextDir)).filter((entry) => /^context_manifest_v\d+\.json$/.test(entry)).at(-1);
-  return fileName === undefined ? '' : path.join('codex', 'context', fileName);
+  return fileName === undefined ? '' : path.posix.join('codex', 'context', fileName);
 }
 
 async function readLatestVersionedJson<T>(
@@ -1263,7 +1263,7 @@ function formatChapterNumber(chapterNumber: number): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
 }
 
 function suggestedRetryCommand(projectIdValue: string, chapterNumber: number): string {

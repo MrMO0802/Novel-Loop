@@ -240,6 +240,18 @@ corepack pnpm install
 corepack pnpm desktop:dev
 ```
 
+The same commands run in Windows PowerShell. On Windows, the desktop can use a
+native `codex.exe` on `PATH` or the JavaScript entry point of a global
+`@openai/codex` npm installation. It invokes neither `.cmd` files nor a shell
+for provider requests. The project remains a source-run application; this
+repository does not produce a Windows installer.
+
+Windows cannot flush directory handles through Node.js. Temporary draft and
+lease files are still synced before publication, while project journals and
+recovery checks guard interrupted operations. Back up important project and
+application-data directories because crash-time directory durability differs
+from Linux.
+
 Build and verify the desktop package:
 
 ```bash

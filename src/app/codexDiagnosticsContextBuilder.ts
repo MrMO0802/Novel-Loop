@@ -87,8 +87,8 @@ export async function buildDiagnosticsContextManifest(
         version: 1,
         jsonPath: paths.projectArtifact(path.join(input.outputDirectory, 'diagnostics_context_manifest.json')),
         mdPath: paths.projectArtifact(path.join(input.outputDirectory, 'diagnostics_context_manifest.md')),
-        relativeJsonPath: path.join(input.outputDirectory, 'diagnostics_context_manifest.json'),
-        relativeMdPath: path.join(input.outputDirectory, 'diagnostics_context_manifest.md')
+        relativeJsonPath: path.posix.join(input.outputDirectory, 'diagnostics_context_manifest.json'),
+        relativeMdPath: path.posix.join(input.outputDirectory, 'diagnostics_context_manifest.md')
       };
   if (input.outputDirectory !== undefined && (await fileStore.exists(versioned.jsonPath) || await fileStore.exists(versioned.mdPath))) {
     throw new Error('Isolated diagnostics context output already exists.');
@@ -152,7 +152,7 @@ async function buildCandidates(
   return [
     {
       name: 'story_state summary',
-      path: path.join('state', 'story_state.json'),
+      path: path.posix.join('state', 'story_state.json'),
       artifactType: 'story_state_summary',
       text: JSON.stringify(summarizeStoryState(storyState), null, 2),
       present: true,
@@ -162,7 +162,7 @@ async function buildCandidates(
     },
     {
       name: 'character_states',
-      path: path.join('state', 'story_state.json#characters'),
+      path: path.posix.join('state', 'story_state.json#characters'),
       artifactType: 'character_states',
       text: JSON.stringify(storyState.characters, null, 2),
       present: true,
@@ -172,7 +172,7 @@ async function buildCandidates(
     },
     {
       name: 'timeline',
-      path: path.join('state', 'story_state.json#timeline'),
+      path: path.posix.join('state', 'story_state.json#timeline'),
       artifactType: 'timeline',
       text: JSON.stringify(storyState.timeline, null, 2),
       present: true,
@@ -182,7 +182,7 @@ async function buildCandidates(
     },
     {
       name: 'reader_state',
-      path: path.join('state', 'story_state.json#readerState'),
+      path: path.posix.join('state', 'story_state.json#readerState'),
       artifactType: 'reader_state',
       text: JSON.stringify(storyState.readerState, null, 2),
       present: true,
@@ -192,7 +192,7 @@ async function buildCandidates(
     },
     {
       name: 'open narrative debts',
-      path: path.join('state', 'story_state.json#narrativeDebts'),
+      path: path.posix.join('state', 'story_state.json#narrativeDebts'),
       artifactType: 'narrative_debts',
       text: JSON.stringify(storyState.narrativeDebts.filter((debt) => debt.status !== 'resolved'), null, 2),
       present: true,
@@ -202,7 +202,7 @@ async function buildCandidates(
     },
     {
       name: 'unresolved foreshadowing',
-      path: path.join('state', 'story_state.json#foreshadowing'),
+      path: path.posix.join('state', 'story_state.json#foreshadowing'),
       artifactType: 'foreshadowing',
       text: JSON.stringify(storyState.foreshadowing.filter((item) => item.status !== 'resolved'), null, 2),
       present: true,
@@ -350,5 +350,5 @@ function formatChapterNumber(chapterNumber: number): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
 }

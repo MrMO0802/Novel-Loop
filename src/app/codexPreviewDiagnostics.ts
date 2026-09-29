@@ -384,8 +384,8 @@ async function collectPreviewArtifactChecks(input: WriteCodexPreviewCompleteness
     );
   }
 
-  checks.push(await checkJsonArtifact(input.paths, input.fileStore, 'preview_run_manifest', path.join('runs', input.previewRunId, 'run_manifest.json'), RunManifestSchema, true).then((result) => result.check));
-  checks.push(await checkTextArtifact(input.paths, input.fileStore, 'preview_event_log', path.join('runs', input.previewRunId, 'events.ndjson'), true));
+  checks.push(await checkJsonArtifact(input.paths, input.fileStore, 'preview_run_manifest', path.posix.join('runs', input.previewRunId, 'run_manifest.json'), RunManifestSchema, true).then((result) => result.check));
+  checks.push(await checkTextArtifact(input.paths, input.fileStore, 'preview_event_log', path.posix.join('runs', input.previewRunId, 'events.ndjson'), true));
 
   const queueStatus = await readCurrentQueueStatus(input.paths, input.fileStore, input.chapterNumber);
   if (queueStatus === 'committed') {
@@ -553,7 +553,7 @@ async function readRunManifest(paths: ProjectPaths, fileStore: FileStore, runId:
 }
 
 async function readProviderFailure(paths: ProjectPaths, fileStore: FileStore, runId: string): Promise<{ rawOutputPath?: string; finalOutputPath?: string; schemaErrorPath?: string } | undefined> {
-  const relativePath = path.join('codex', 'failures', runId, 'codex_failure_report.json');
+  const relativePath = path.posix.join('codex', 'failures', runId, 'codex_failure_report.json');
   if (!(await fileStore.exists(paths.projectArtifact(relativePath)))) return undefined;
   try {
     const parsed = JSON.parse(await fileStore.readText(paths.projectArtifact(relativePath))) as Record<string, unknown>;
@@ -706,7 +706,7 @@ async function findLatestVersionedChapterArtifact(
 }
 
 function relativeChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName).split(path.sep).join(path.posix.sep);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName).split(path.sep).join(path.posix.sep);
 }
 
 function formatChapterNumber(chapterNumber: number): string {

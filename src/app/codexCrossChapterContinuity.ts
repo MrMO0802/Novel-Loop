@@ -207,8 +207,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }
@@ -243,5 +243,5 @@ function normalize(text: string): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
+  return path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
 }

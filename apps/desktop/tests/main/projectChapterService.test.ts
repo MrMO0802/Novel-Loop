@@ -2221,7 +2221,7 @@ describe('EngineChapterGateway plan candidate containment', () => {
       '# Outside\n\nThis must never be read.\n',
       'utf8'
     );
-    await symlink(outsideCandidates, fixture.candidatesRoot, 'dir');
+    await symlink(outsideCandidates, fixture.candidatesRoot, process.platform === 'win32' ? 'junction' : 'dir');
 
     try {
       await expect(new EngineChapterGateway().readPlan(fixture.projectRoot))

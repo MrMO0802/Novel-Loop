@@ -1112,7 +1112,7 @@ function renderHighRisk(report: Awaited<ReturnType<typeof CandidateRefinedHighRi
 function renderCarryForward(report: CandidateCommitDecisionCarryForward) { return `# Candidate Commit Decision Carry-forward\n\n- approved: ${report.approved}\n- eligibleDecisionCount: ${report.eligibleDecisionCount}\n- ineligibleDecisionCount: ${report.ineligibleDecisionCount}\n${report.decisions.map((decision) => `- ${decision.oldMutationId} -> ${decision.newMutationId ?? 'removed'}: eligible=${decision.eligible}`).join('\n')}\n`; }
 
 function createPaths(input: { projectId: string; projectsRoot?: string }) { return new ProjectPaths(input.projectsRoot ?? DEFAULT_PROJECTS_ROOT, input.projectId); }
-function relativeChapterArtifact(chapterNumber: number, fileName: string) { return path.join('chapters', `chapter_${pad(chapterNumber)}`, fileName); }
+function relativeChapterArtifact(chapterNumber: number, fileName: string) { return path.posix.join('chapters', `chapter_${pad(chapterNumber)}`, fileName); }
 function pad(chapterNumber: number) { return String(chapterNumber).padStart(3, '0'); }
 function escapeRegExp(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 function asRecord(value: unknown): Record<string, unknown> { return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}; }

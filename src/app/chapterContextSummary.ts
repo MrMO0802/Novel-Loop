@@ -163,5 +163,5 @@ function unique(values: string[]): string[] {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
+  return path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
 }

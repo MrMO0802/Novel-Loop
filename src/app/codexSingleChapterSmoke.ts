@@ -296,8 +296,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }
@@ -353,7 +353,7 @@ async function findFailureReportPath(
 ): Promise<string | undefined> {
   const failedRunId = [...stages].reverse().find((stage) => stage.runId !== undefined)?.runId;
   if (failedRunId !== undefined) {
-    const providerFailurePath = path.join('codex', 'failures', failedRunId, 'codex_failure_report.json');
+    const providerFailurePath = path.posix.join('codex', 'failures', failedRunId, 'codex_failure_report.json');
     if (await fileStore.exists(paths.projectArtifact(providerFailurePath))) {
       return providerFailurePath;
     }
@@ -362,5 +362,5 @@ async function findFailureReportPath(
   if (!(await fileStore.exists(chapterDir))) return undefined;
   const reports = (await fileStore.list(chapterDir)).filter((entry) => /^codex_patch_failure_report_v\d+\.json$/.test(entry));
   const latest = reports.at(-1);
-  return latest === undefined ? undefined : path.join('chapters', 'chapter_001', latest);
+  return latest === undefined ? undefined : path.posix.join('chapters', 'chapter_001', latest);
 }

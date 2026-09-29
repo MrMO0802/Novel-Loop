@@ -16,7 +16,10 @@ export class PromptService {
   }
 
   async loadTemplate(promptId: string): Promise<string> {
-    return this.fileStore.readText(this.resolvePromptPath(promptId));
+    const template = await this.fileStore.readText(this.resolvePromptPath(promptId));
+    // Git may check Markdown templates out with CRLF on Windows. Keep model
+    // prompts and their recorded hashes independent of checkout line endings.
+    return template.replace(/\r\n?/gu, '\n');
   }
 
   async renderPrompt(promptId: string, values: TemplateValues): Promise<string> {

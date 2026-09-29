@@ -132,7 +132,7 @@ async function readBestBenchmark(paths: ProjectPaths, fileStore: FileStore): Pro
     if (!/^codex_runtime_benchmark_report_v\d+\.json$/.test(fileName)) continue;
     try {
       reports.push({
-        relativePath: path.join('audit', fileName),
+        relativePath: path.posix.join('audit', fileName),
         report: await fileStore.readJson(paths.auditArtifact(fileName), CodexRuntimeBenchmarkReportSchema),
         version: versionOf(fileName)
       });
@@ -158,7 +158,7 @@ async function readLatestProfile(paths: ProjectPaths, fileStore: FileStore): Pro
   if (fileName === undefined) return undefined;
   try {
     return {
-      relativePath: path.join('audit', fileName),
+      relativePath: path.posix.join('audit', fileName),
       report: await fileStore.readJson(paths.auditArtifact(fileName), CodexStageRuntimeProfileReportSchema)
     };
   } catch {
@@ -486,8 +486,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }

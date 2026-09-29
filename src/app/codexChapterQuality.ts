@@ -442,7 +442,7 @@ async function findLatestVersionedChapterArtifact(
 }
 
 function relativeChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName);
 }
 
 function formatChapterNumber(chapterNumber: number): string {

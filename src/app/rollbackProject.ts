@@ -32,7 +32,7 @@ export async function rollbackProject(input: RollbackProjectInput, fileStore = n
     projectId: paths.projectId,
     snapshotId,
     restoredSnapshotPath: snapshot.meta.path,
-    storyStatePath: path.join('state', 'story_state.json'),
+    storyStatePath: path.posix.join('state', 'story_state.json'),
     restoredLatestCommittedChapter: storyState.latestCommittedChapter,
     preservedArtifacts: true,
     rolledBackAt: new Date().toISOString()
@@ -42,7 +42,7 @@ export async function rollbackProject(input: RollbackProjectInput, fileStore = n
 
   return {
     report: writtenReport,
-    artifacts: [path.join('state', 'story_state.json'), path.join('state', 'rollback_report.json')]
+    artifacts: [path.posix.join('state', 'story_state.json'), path.posix.join('state', 'rollback_report.json')]
   };
 }
 

@@ -203,10 +203,14 @@ describe('isolated desktop submission', () => {
     await noManifest();
   });
 
-  it.each(['source', 'output'])('rejects %s symlinks even with an injected unrestricted store', async scenario => {
+  it.each(process.platform === 'win32' ? ['output'] : ['source', 'output'])('rejects %s symlinks even with an injected unrestricted store', async scenario => {
     const target = path.join(projectRoot, scenario === 'source' ? seed.adoptedDraftPath : previews);
     if (scenario === 'source') await rm(target);
-    await symlink(scenario === 'source' ? path.join(seed.projectRoot, seed.adoptedDraftPath) : root, target);
+    await symlink(
+      scenario === 'source' ? path.join(seed.projectRoot, seed.adoptedDraftPath) : root,
+      target,
+      process.platform === 'win32' ? 'junction' : undefined
+    );
     const task = await desktop.checkDesktopChapterSubmission(input(), { fileStore: new FileStore(), client: client(), shouldCancel: () => false, onProgress: async () => {} });
     expect(task).toMatchObject({ status: 'blocked', safeErrorCode: 'unsafe_path' });
     expect(requests).toHaveLength(0);

@@ -369,7 +369,7 @@ async function readBenchmarkReports(
   const reports: Array<{ relativePath: string; report: CodexRuntimeBenchmarkReport }> = [];
   for (const entry of await fileStore.list(paths.auditDir())) {
     if (!/^codex_runtime_benchmark_report_v\d+\.json$/.test(entry)) continue;
-    const relativePath = path.join('audit', entry);
+    const relativePath = path.posix.join('audit', entry);
     try {
       reports.push({
         relativePath,
@@ -958,8 +958,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }

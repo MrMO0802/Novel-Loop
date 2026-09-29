@@ -22,8 +22,8 @@ export async function writePromptRunArtifacts(
   const redact = shouldRedactPromptArtifacts(options.env ?? process.env);
   const requestText = redact ? redactedContent(promptId, 'request') : renderedPrompt;
   const response = redact ? redactedContent(promptId, 'response') : responseText;
-  const requestPath = path.join('runs', runId, 'prompts', `${promptFileBase}_request.md`);
-  const responsePath = path.join('runs', runId, 'prompts', `${promptFileBase}_response.md`);
+  const requestPath = path.posix.join('runs', runId, 'prompts', `${promptFileBase}_request.md`);
+  const responsePath = path.posix.join('runs', runId, 'prompts', `${promptFileBase}_response.md`);
 
   await fileStore.writeText(path.join(promptRunDir, `${promptFileBase}_request.md`), requestText);
   await fileStore.writeText(path.join(promptRunDir, `${promptFileBase}_response.md`), response);

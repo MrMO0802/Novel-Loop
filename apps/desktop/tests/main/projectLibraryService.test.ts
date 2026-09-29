@@ -544,7 +544,7 @@ describe('ProjectLibraryService', () => {
     await expect(service.resolveRegisteredRootForRecovery('project_missing')).resolves.toBeNull();
     const moved = `${projectRoot}-moved`;
     await import('node:fs/promises').then(({ rename }) => rename(projectRoot, moved));
-    await symlink(moved, projectRoot);
+    await symlink(moved, projectRoot, process.platform === 'win32' ? 'junction' : undefined);
     await expect(service.resolveRegisteredRootForRecovery(projectKey)).resolves.toBeNull();
   });
 
@@ -701,7 +701,7 @@ describe('ProjectLibraryService', () => {
     const projectRoot = path.join(libraryRoot, 'novel-20260727-120000-a1b2c3');
     const aliasRoot = path.join(root, 'alias');
     await mkdir(projectRoot);
-    await symlink(projectRoot, aliasRoot, 'dir');
+    await symlink(projectRoot, aliasRoot, process.platform === 'win32' ? 'junction' : 'dir');
 
     dialog.projectDirectoryResult = projectRoot;
     await service.openExisting();

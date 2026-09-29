@@ -53,7 +53,7 @@ export async function startCommitJournal(input: StartCommitJournalInput): Promis
     ...(input.runId === undefined ? {} : { runId: input.runId }),
     journalPath: artifact.relativePath,
     ...(input.canonPatchPath === undefined ? {} : { canonPatchPath: input.canonPatchPath }),
-    storyStatePath: path.join('state', 'story_state.json'),
+    storyStatePath: path.posix.join('state', 'story_state.json'),
     ...(input.latestCommittedChapterBefore === undefined ? {} : { latestCommittedChapterBefore: input.latestCommittedChapterBefore }),
     ...(input.latestCommittedChapterAfter === undefined ? {} : { latestCommittedChapterAfter: input.latestCommittedChapterAfter }),
     stateWriteCompleted: false,
@@ -158,7 +158,7 @@ function definedUpdates(updates: UpdateCommitJournalInput): Partial<CommitJourna
 }
 
 function relativeChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName);
 }
 
 function formatChapterNumber(chapterNumber: number): string {

@@ -1631,7 +1631,12 @@ async function runFakeCodex(
   prompt: string
 ): Promise<void> {
   await new Promise<void>((resolve, reject) => {
-    const child = spawn(binaryPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const useNode = process.platform === 'win32' && binaryPath.endsWith('.cjs');
+    const child = spawn(
+      useNode ? process.execPath : binaryPath,
+      useNode ? [binaryPath, ...args] : args,
+      { stdio: ['pipe', 'pipe', 'pipe'] }
+    );
     let stderr = '';
     child.stderr.on('data', (chunk: Buffer) => {
       stderr += chunk.toString('utf8');
@@ -1677,7 +1682,7 @@ async function writePlanningFakeCodex(root: string): Promise<{
   codexBin: string;
   errorLogPath: string;
 }> {
-  const codexBin = path.join(root, 'codex');
+  const codexBin = path.join(root, process.platform === 'win32' ? 'codex.cjs' : 'codex');
   const callsLogPath = path.join(root, 'planning-codex-calls.ndjson');
   const errorLogPath = path.join(root, 'planning-codex-errors.log');
   const statePath = path.join(root, 'planning-codex-state.json');

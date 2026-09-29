@@ -390,7 +390,7 @@ async function commitChapterStateWithinLease(input: ChapterCommitInput, fileStor
     });
 
     const applied = await applyCanonPatch(input, patch, fileStore);
-    artifacts.push(path.join('state', 'story_state.json'));
+    artifacts.push(path.posix.join('state', 'story_state.json'));
     await recordCommitJournalPhase(commitJournal, fileStore, 'story_state_written', {
       stateWriteCompleted: true,
       latestCommittedChapterAfter: applied.storyState.latestCommittedChapter
@@ -446,7 +446,7 @@ async function commitChapterStateWithinLease(input: ChapterCommitInput, fileStor
       chapterNumber: input.chapterNumber,
       status: 'committed',
       canonPatchPath: patchPath,
-      storyStatePath: path.join('state', 'story_state.json'),
+      storyStatePath: path.posix.join('state', 'story_state.json'),
       beforeSnapshot,
       afterSnapshot,
       conflicts,
@@ -1672,7 +1672,7 @@ function countReaderStateChanges(patch: CanonPatch): number {
 }
 
 function relativeSnapshotArtifact(snapshotPath: string): string {
-  return path.join('snapshots', path.basename(snapshotPath));
+  return path.posix.join('snapshots', path.basename(snapshotPath));
 }
 
 function formatChapterNumber(chapterNumber: number): string {
@@ -1680,7 +1680,7 @@ function formatChapterNumber(chapterNumber: number): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
 }
 
 function chapterFixtureScenario(chapterNumber: number): string {

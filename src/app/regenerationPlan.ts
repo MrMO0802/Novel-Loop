@@ -67,8 +67,8 @@ function targetChapter(paths: ProjectPaths, chapter: ChapterQueueItem, suggested
     requiredInputs: [
       'state/story_state.json',
       'planning/chapter_queue.json',
-      path.join('chapters', `chapter_${formatChapterNumber(chapter.chapterNumber)}`, 'final.md'),
-      path.join('chapters', `chapter_${formatChapterNumber(chapter.chapterNumber)}`, 'canon_patch.json')
+      path.posix.join('chapters', `chapter_${formatChapterNumber(chapter.chapterNumber)}`, 'final.md'),
+      path.posix.join('chapters', `chapter_${formatChapterNumber(chapter.chapterNumber)}`, 'canon_patch.json')
     ],
     risks: ['old chapter text may no longer match the edited canonical history'],
     suggestedCommand
@@ -93,8 +93,8 @@ async function nextPlanningVersion(
     if (!(await fileStore.exists(jsonAbsolutePath))) {
       return {
         version,
-        jsonRelativePath: path.join('planning', jsonFile),
-        mdRelativePath: path.join('planning', mdFile),
+        jsonRelativePath: path.posix.join('planning', jsonFile),
+        mdRelativePath: path.posix.join('planning', mdFile),
         jsonAbsolutePath,
         mdAbsolutePath: paths.planningArtifact(mdFile)
       };

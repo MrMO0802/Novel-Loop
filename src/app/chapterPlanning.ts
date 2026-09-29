@@ -1005,7 +1005,7 @@ async function ensurePlanningPrerequisites(paths: ProjectPaths, fileStore: FileS
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
+  return path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
 }
 
 function chapterFixtureScenario(chapterNumber: number): string {

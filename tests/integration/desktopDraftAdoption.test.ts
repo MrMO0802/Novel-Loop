@@ -334,7 +334,12 @@ describe('desktop draft adoption', () => {
         child.once('exit', (code, signal) => resolve({ code, signal }));
       }
     );
-    expect(exit).toEqual({ code: null, signal: 'SIGKILL' });
+    if (process.platform === 'win32') {
+      expect(exit.signal).toBeNull();
+      expect(exit.code).not.toBe(0);
+    } else {
+      expect(exit).toEqual({ code: null, signal: 'SIGKILL' });
+    }
 
     await expect(readDesktopChapterDraft({ projectRoot: paths.projectRoot }))
       .resolves.toMatchObject({

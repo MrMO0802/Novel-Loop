@@ -141,11 +141,11 @@ async function latestRuntimeProfile(paths: ProjectPaths, fileStore: FileStore): 
   }
   const fileName = (await fileStore.list(paths.auditDir()))
     .filter((entry) => /^codex_stage_runtime_profile_v\d+\.json$/.test(entry))
-    .sort((left, right) => versionOf(path.join('audit', right)) - versionOf(path.join('audit', left)))[0];
+    .sort((left, right) => versionOf(path.posix.join('audit', right)) - versionOf(path.posix.join('audit', left)))[0];
   if (fileName === undefined) {
     throw new Error(`No runtime profile found for ${paths.projectId}. Run novel-loop codex profile-runtime ${paths.projectId} first.`);
   }
-  return path.join('audit', fileName);
+  return path.posix.join('audit', fileName);
 }
 
 function buildTargetStages(report: CodexStageRuntimeProfileReport): CodexBusinessOptimizationPlan['targetStages'] {
@@ -541,8 +541,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }

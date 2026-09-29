@@ -745,8 +745,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile).split(path.sep).join(path.posix.sep),
-        relativeMdPath: path.join('audit', mdFile).split(path.sep).join(path.posix.sep)
+        relativeJsonPath: path.posix.join('audit', jsonFile).split(path.sep).join(path.posix.sep),
+        relativeMdPath: path.posix.join('audit', mdFile).split(path.sep).join(path.posix.sep)
       };
     }
   }

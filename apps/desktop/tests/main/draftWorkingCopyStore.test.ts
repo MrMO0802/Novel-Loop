@@ -65,8 +65,10 @@ describe('DraftWorkingCopyStore', () => {
     });
     const directory = path.join(root, 'working-copies', projectKey, 'chapter_001');
     const file = path.join(directory, 'draft.json');
-    expect((await lstat(directory)).mode & 0o777).toBe(0o700);
-    expect((await lstat(file)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await lstat(directory)).mode & 0o777).toBe(0o700);
+      expect((await lstat(file)).mode & 0o777).toBe(0o600);
+    }
   });
 
   test('reports malformed and stale recovery without returning unsafe content', async () => {
@@ -160,7 +162,7 @@ describe('DraftWorkingCopyStore', () => {
     expect(await readFile(`${target}.quarantine`)).toEqual(bytes);
   });
 
-  test('closes an owned child directory handle when mode hardening throws', async () => {
+  test.skipIf(process.platform === 'win32')('closes an owned child directory handle when mode hardening throws', async () => {
     const root = await makeRoot();
     let openedFd: number | null = null;
     const store = new DraftWorkingCopyStore(root, {
@@ -247,6 +249,8 @@ describe('DraftWorkingCopyStore', () => {
     await writeFile(path.join(directory, 'draft.json'), 'x'.repeat(2 * 1024 * 1024 + 16 * 1024 + 1));
     await expect(store.read(projectKey, 1)).resolves.toMatchObject({ recoveryAvailable: false });
 
+    if (process.platform === 'win32') return;
+
     const outside = path.join(root, 'outside.json');
     await writeFile(outside, JSON.stringify({
       schemaVersion: '1.0', projectKey, chapterNumber: 1, sourceHash,
@@ -294,7 +298,7 @@ describe('DraftWorkingCopyStore', () => {
     }
   );
 
-  test('rejects a symlinked working-copy directory before reading or writing outside user data', async () => {
+  test.skipIf(process.platform === 'win32')('rejects a symlinked working-copy directory before reading or writing outside user data', async () => {
     const root = await makeRoot();
     const outside = await makeRoot();
     const workingCopiesRoot = path.join(root, 'working-copies');
@@ -318,7 +322,7 @@ describe('DraftWorkingCopyStore', () => {
     expect(await readFile(outsideDraft, 'utf8')).toBe('outside remains unchanged');
   });
 
-  test('keeps replacement descriptor-anchored when a validated component is swapped for a symlink', async () => {
+  test.skipIf(process.platform === 'win32')('keeps replacement descriptor-anchored when a validated component is swapped for a symlink', async () => {
     const root = await makeRoot();
     const outside = await makeRoot();
     const projectDirectory = path.join(root, 'working-copies', projectKey);
@@ -368,7 +372,7 @@ describe('DraftWorkingCopyStore', () => {
     expect(movedRecord.markdown).toBe('# 第一章\n\n安全的新草稿。\n');
   });
 
-  test('fails closed when descriptor-anchored filesystem access is unavailable', async () => {
+  test.skipIf(process.platform === 'win32')('fails closed when descriptor-anchored filesystem access is unavailable', async () => {
     const root = await makeRoot();
     const store = new DraftWorkingCopyStore(root, {
       descriptorRoot: path.join(root, 'missing-proc-fd')
@@ -381,6 +385,24 @@ describe('DraftWorkingCopyStore', () => {
       markdown: '# 第一章\n\n不得降级为路径写入。\n',
       savedAt: '2026-08-04T01:00:00.000Z'
     })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+  });
+
+  test.skipIf(process.platform !== 'win32')('rejects a Windows junction outside user data', async () => {
+    const root = await makeRoot();
+    const outside = await makeRoot();
+    await mkdir(path.join(root, 'working-copies'));
+    await symlink(outside, path.join(root, 'working-copies', projectKey), 'junction');
+    const store = new DraftWorkingCopyStore(root);
+    await expect(store.read(projectKey, 1, sourceHash))
+      .rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+    await expect(store.save({
+      projectKey,
+      chapterNumber: 1,
+      sourceHash,
+      markdown: '# 不得写到外部\n',
+      savedAt: '2026-08-04T01:00:00.000Z'
+    })).rejects.toMatchObject({ code: 'DRAFT_WORKING_COPY_UNAVAILABLE' });
+    expect(await import('node:fs/promises').then(({ readdir }) => readdir(outside))).toEqual([]);
   });
 });
 

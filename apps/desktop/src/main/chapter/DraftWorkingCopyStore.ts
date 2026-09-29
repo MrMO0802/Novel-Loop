@@ -4,6 +4,7 @@ import {
   lstat,
   mkdir,
   open,
+  realpath,
   rename,
   rm
 } from 'node:fs/promises';
@@ -55,7 +56,8 @@ export interface DraftWorkingCopyStoreOptions {
 }
 
 interface AnchoredDirectory {
-  handle: FileHandle;
+  path: string;
+  handle?: FileHandle;
   handles: FileHandle[];
 }
 
@@ -88,7 +90,7 @@ export class DraftWorkingCopyStore {
         true
       );
       if (directory === null) throw draftStoreError();
-      const directoryPath = this.descriptorPath(directory.handle);
+      const directoryPath = directory.path;
       const target = path.join(directoryPath, 'draft.json');
       const temporary = path.join(
         directoryPath,
@@ -96,19 +98,25 @@ export class DraftWorkingCopyStore {
       );
       let temporaryCreated = false;
       try {
-        await directory.handle.chmod(0o700);
+        if (directory.handle !== undefined) await directory.handle.chmod(0o700);
         const temporaryHandle = await open(
           temporary,
-          writeExclusiveFlags(),
+          process.platform === 'win32'
+            ? constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL
+            : writeExclusiveFlags(),
           0o600
         );
         temporaryCreated = true;
         try {
-          await temporaryHandle.chmod(0o600);
+          if (process.platform !== 'win32') await temporaryHandle.chmod(0o600);
           await temporaryHandle.writeFile(serialized, 'utf8');
           await temporaryHandle.sync();
         } finally {
           await temporaryHandle.close();
+        }
+        if (process.platform === 'win32') {
+          await this.checkWindowsDirectory(directoryPath, false);
+          await assertWindowsRegularFileOrMissing(target);
         }
         await this.replace(temporary, target);
         temporaryCreated = false;
@@ -138,7 +146,7 @@ export class DraftWorkingCopyStore {
       false
     );
     if (directory === null) return unavailable();
-    const target = path.join(this.descriptorPath(directory.handle), 'draft.json');
+    const target = path.join(directory.path, 'draft.json');
     try {
       let text: string;
       try {
@@ -205,11 +213,11 @@ export class DraftWorkingCopyStore {
       if (directory === null) return;
       try {
         await rm(
-          path.join(this.descriptorPath(directory.handle), 'draft.json'),
+          path.join(directory.path, 'draft.json'),
           { force: true }
         );
         await rm(
-          path.join(this.descriptorPath(directory.handle), 'draft.json.quarantine'),
+          path.join(directory.path, 'draft.json.quarantine'),
           { force: true }
         );
       } finally {
@@ -228,7 +236,7 @@ export class DraftWorkingCopyStore {
     try {
       for (const name of ['draft.json', 'draft.json.quarantine']) {
         try {
-          await lstat(path.join(this.descriptorPath(directory.handle), name));
+          await lstat(path.join(directory.path, name));
           return true;
         } catch (error) {
           if (!isMissing(error)) throw error;
@@ -259,7 +267,7 @@ export class DraftWorkingCopyStore {
         false
       );
       if (directory === null) return;
-      const target = path.join(this.descriptorPath(directory.handle), 'draft.json');
+      const target = path.join(directory.path, 'draft.json');
       try {
         let record: DraftWorkingCopyRecord;
         try {
@@ -296,6 +304,9 @@ export class DraftWorkingCopyStore {
     chapterNumber: number,
     createMissing: boolean
   ): Promise<AnchoredDirectory | null> {
+    if (process.platform === 'win32') {
+      return this.openWindowsDirectory(projectKey, chapterNumber, createMissing);
+    }
     const flags = directoryFlags();
     const handles: FileHandle[] = [];
     try {
@@ -339,12 +350,56 @@ export class DraftWorkingCopyStore {
         }
         current = child;
       }
-      return { handle: current, handles };
+      return { path: this.descriptorPath(current), handle: current, handles };
     } catch (error) {
       await closeHandles(handles);
       if (errorCode(error) === 'DRAFT_WORKING_COPY_UNAVAILABLE') throw error;
       throw draftStoreError();
     }
+  }
+
+  private async openWindowsDirectory(
+    projectKey: string,
+    chapterNumber: number,
+    createMissing: boolean
+  ): Promise<AnchoredDirectory | null> {
+    // Windows has no /proc/self/fd or Node descriptor-relative directory API.
+    // Keep every component under Electron's userData directory, and reject
+    // junctions and symbolic links before using a path-based operation.
+    if (createMissing) await mkdir(this.userDataRoot, { recursive: true });
+    const segments = [
+      this.userDataRoot,
+      'working-copies',
+      projectKey,
+      `chapter_${String(chapterNumber).padStart(3, '0')}`
+    ];
+    let current = segments[0]!;
+    for (const segment of segments.slice(1)) {
+      if (!(await this.checkWindowsDirectory(current, createMissing))) return null;
+      current = path.join(current, segment);
+    }
+    if (!(await this.checkWindowsDirectory(current, createMissing))) return null;
+    return { path: current, handles: [] };
+  }
+
+  private async checkWindowsDirectory(directoryPath: string, createMissing: boolean): Promise<boolean> {
+    let metadata;
+    try {
+      metadata = await lstat(directoryPath);
+    } catch (error) {
+      if (!isMissing(error)) throw draftStoreError();
+      if (!createMissing) return false;
+      await mkdir(directoryPath).catch((mkdirError: unknown) => {
+        if (!isAlreadyExists(mkdirError)) throw mkdirError;
+      });
+      metadata = await lstat(directoryPath);
+    }
+    if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw draftStoreError();
+    const resolved = await realpath(directoryPath);
+    if (path.normalize(resolved).toLowerCase() !== path.normalize(directoryPath).toLowerCase()) {
+      throw draftStoreError();
+    }
+    return true;
   }
 
   private async verifyDescriptorRoot(
@@ -455,12 +510,16 @@ function errorCode(error: unknown): string {
 
 async function readBoundedText(target: string): Promise<string> {
   if (
-    typeof constants.O_NOFOLLOW !== 'number'
-    || typeof constants.O_NONBLOCK !== 'number'
+    process.platform !== 'win32'
+    && (typeof constants.O_NOFOLLOW !== 'number'
+      || typeof constants.O_NONBLOCK !== 'number')
   ) throw draftStoreError();
+  if (process.platform === 'win32') await assertWindowsRegularFileOrMissing(target);
   const handle = await open(
     target,
-    constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
+    process.platform === 'win32'
+      ? constants.O_RDONLY
+      : constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK
   );
   try {
     const metadata = await handle.stat();
@@ -497,6 +556,21 @@ async function readBoundedText(target: string): Promise<string> {
     }
   } finally {
     await handle.close();
+  }
+}
+
+async function assertWindowsRegularFileOrMissing(target: string): Promise<void> {
+  try {
+    const metadata = await lstat(target);
+    if (!metadata.isFile() || metadata.isSymbolicLink()) {
+      throw Object.assign(new Error('Unsafe draft working copy path.'), { code: 'ELOOP' });
+    }
+    const resolved = await realpath(target);
+    if (path.normalize(resolved).toLowerCase() !== path.normalize(target).toLowerCase()) {
+      throw Object.assign(new Error('Unsafe draft working copy path.'), { code: 'ELOOP' });
+    }
+  } catch (error) {
+    if (!isMissing(error)) throw error;
   }
 }
 

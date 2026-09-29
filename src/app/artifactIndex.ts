@@ -5,6 +5,7 @@ import type { ArtifactIndex, ArtifactIndexItem, ArtifactLineageRecord, ArtifactS
 import { FileStore } from '../storage/FileStore.js';
 import { ProjectPaths } from '../storage/ProjectPaths.js';
 import { readFileMetadata } from './fileHash.js';
+import { PROJECT_OPERATION_LOCK_NAME } from './projectOperationLease.js';
 
 export interface ArtifactIndexInput {
   projectId: string;
@@ -178,6 +179,7 @@ async function listProjectFiles(paths: ProjectPaths, fileStore: FileStore): Prom
 async function listFiles(paths: ProjectPaths, fileStore: FileStore, dir: string): Promise<string[]> {
   const files: string[] = [];
   for (const entry of await fileStore.list(dir)) {
+    if (dir === paths.projectRoot && entry.startsWith(PROJECT_OPERATION_LOCK_NAME)) continue;
     const absolutePath = path.join(dir, entry);
     if (await isDirectory(fileStore, absolutePath)) {
       files.push(...(await listFiles(paths, fileStore, absolutePath)));

@@ -37,9 +37,11 @@ const projectSummary = {
   globalPlanAvailable: false
 };
 
+const novelsRoot = path.join(path.parse(process.cwd()).root, 'home', 'author', 'novels');
+
 const registryProject = {
   projectKey: projectSummary.projectKey,
-  projectRoot: '/home/author/novels/fog-harbor',
+  projectRoot: path.join(novelsRoot, 'fog-harbor'),
   title: projectSummary.title,
   addedAt: '2026-07-27T03:00:00.000Z',
   lastOpenedAt: projectSummary.lastOpenedAt
@@ -73,7 +75,7 @@ describe('project renderer contract', () => {
   test('rejects an absolute project path in a public project summary', () => {
     expect(() => ProjectSummarySchema.parse({
       ...projectSummary,
-      projectRoot: '/home/author/novels/private'
+      projectRoot: path.join(novelsRoot, 'private')
     })).toThrow();
   });
 
@@ -127,7 +129,7 @@ describe('FileProjectRegistryStore', () => {
     const store = await createStore();
     const registry: ProjectRegistry = {
       schemaVersion: 1,
-      defaultLibraryRoot: '/home/author/novels',
+      defaultLibraryRoot: novelsRoot,
       projects: [registryProject]
     };
 
@@ -135,7 +137,9 @@ describe('FileProjectRegistryStore', () => {
 
     await expect(store.load()).resolves.toEqual({ registry, warning: null });
     await expect(stat(store.registryPath)).resolves.toMatchObject({ mode: expect.any(Number) });
-    expect((await stat(store.registryPath)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32') {
+      expect((await stat(store.registryPath)).mode & 0o777).toBe(0o600);
+    }
   });
 
   test('returns a warning without replacing a corrupt registry file', async () => {
@@ -211,12 +215,12 @@ describe('FileProjectRegistryStore', () => {
         {
           ...registryProject,
           projectKey: 'project_duplicate',
-          projectRoot: '/home/author/novels/./fog-harbor'
+          projectRoot: `${novelsRoot}${path.sep}.${path.sep}fog-harbor`
         },
         {
           ...registryProject,
           projectKey: 'project_other',
-          projectRoot: '/home/author/novels/other'
+          projectRoot: path.join(novelsRoot, 'other')
         }
       ]
     };
@@ -224,14 +228,14 @@ describe('FileProjectRegistryStore', () => {
     const updated = upsertRegistryProject(registry, {
       ...registryProject,
       projectKey: 'project_reopened',
-      projectRoot: '/home/author/novels/archive/../fog-harbor'
+      projectRoot: `${novelsRoot}${path.sep}archive${path.sep}..${path.sep}fog-harbor`
     });
 
     expect(updated.projects).toEqual([
       {
         ...registryProject,
         projectKey: 'project_other',
-        projectRoot: '/home/author/novels/other'
+        projectRoot: path.join(novelsRoot, 'other')
       },
       {
         ...registryProject,
@@ -240,11 +244,25 @@ describe('FileProjectRegistryStore', () => {
     ]);
   });
 
+  test.skipIf(process.platform !== 'win32')('deduplicates Windows paths regardless of letter case', () => {
+    const updated = upsertRegistryProject({
+      schemaVersion: 1,
+      defaultLibraryRoot: null,
+      projects: [registryProject]
+    }, {
+      ...registryProject,
+      projectKey: 'project_reopened',
+      projectRoot: registryProject.projectRoot.toUpperCase()
+    });
+    expect(updated.projects).toHaveLength(1);
+    expect(updated.projects[0]?.projectKey).toBe('project_reopened');
+  });
+
   test('evicts the least recently opened project when upserting into a full registry', async () => {
     const projects = Array.from({ length: 5_000 }, (_, index) => ({
       ...registryProject,
       projectKey: `project_${index.toString().padStart(4, '0')}`,
-      projectRoot: `/home/author/novels/${index}`,
+      projectRoot: path.join(novelsRoot, String(index)),
       lastOpenedAt: new Date(Date.UTC(2026, 6, 1, 0, 0, index)).toISOString()
     }));
     const registry: ProjectRegistry = {
@@ -255,7 +273,7 @@ describe('FileProjectRegistryStore', () => {
     const reopenedProject = {
       ...registryProject,
       projectKey: 'project_reopened',
-      projectRoot: '/home/author/novels/reopened',
+      projectRoot: path.join(novelsRoot, 'reopened'),
       lastOpenedAt: '2026-07-27T04:00:00.000Z'
     };
 
@@ -277,7 +295,7 @@ describe('FileProjectRegistryStore', () => {
         {
           ...registryProject,
           projectKey: 'project_other',
-          projectRoot: '/home/author/novels/other'
+          projectRoot: path.join(novelsRoot, 'other')
         }
       ]
     };
@@ -286,7 +304,7 @@ describe('FileProjectRegistryStore', () => {
       {
         ...registryProject,
         projectKey: 'project_other',
-        projectRoot: '/home/author/novels/other'
+        projectRoot: path.join(novelsRoot, 'other')
       }
     ]);
   });

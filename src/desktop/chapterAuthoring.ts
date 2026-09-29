@@ -316,7 +316,7 @@ export async function adoptDesktopChapterDraft(
       artifactKind: 'draft',
       mode: 'direct_edit',
       sourceArtifactPath: latestAdopted?.relativeMarkdownPath
-        ?? path.join('chapters', `chapter_${String(current.chapterNumber).padStart(3, '0')}`, 'draft_v1.md'),
+        ?? path.posix.join('chapters', `chapter_${String(current.chapterNumber).padStart(3, '0')}`, 'draft_v1.md'),
       sourceCandidateId: null,
       expectedSourceHash: current.sourceHash,
       content: input.markdown,

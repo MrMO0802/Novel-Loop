@@ -968,7 +968,7 @@ function formatChapterNumber(chapterNumber: number): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
 }
 
 function chapterFixtureScenario(chapterNumber: number): string {

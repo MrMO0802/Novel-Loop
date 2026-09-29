@@ -43,6 +43,9 @@ async function defaultEngineReadinessReader(): Promise<DesktopSystemReadiness> {
     'novel-loop-engine/desktop'
   );
   return getDesktopSystemReadiness({
+    ...(process.env['NLE_CODEX_BIN'] === undefined
+      ? {}
+      : { codexBin: process.env['NLE_CODEX_BIN'] }),
     timeoutMs: CODEX_STATUS_COMMAND_TIMEOUT_MS
   });
 }

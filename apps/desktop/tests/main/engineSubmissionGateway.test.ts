@@ -80,7 +80,7 @@ test('does not issue a review after source freshness, schema or hash validation 
   await expect(f.gateway.readPreview({ projectRoot: f.root, chapterNumber: 1 })).rejects.toMatchObject({ code: 'source_stale' });
 });
 
-test('does not follow a substituted manifest symlink', async () => {
+test.skipIf(process.platform === 'win32')('does not follow a substituted manifest symlink', async () => {
   const f = await fixture(); const outside = path.join(f.root, 'outside.json');
   await writeFile(outside, f.manifestText); await rm(f.manifest); await symlink(outside, f.manifest);
   await expect(f.gateway.readPreview({ projectRoot: f.root, chapterNumber: 1 })).rejects.toMatchObject({ code: 'unsafe_path' });

@@ -37,7 +37,7 @@
 
 ### 环境要求
 
-- 首版目标系统：Ubuntu 24.04。Windows 和 macOS 尚未作为本轮桌面验收平台。
+- 源码桌面版支持 Ubuntu 24.04 和 Windows；macOS 尚未作为本轮桌面验收平台。
 - 桌面构建：Node.js `20.19+` 或 `22.12+`，与当前 Vite 依赖要求一致；仅使用 CLI 的最低要求是 Node.js 20。
 - pnpm `10.12.1`，可通过 Corepack 使用。
 - AI 生成需要预先安装并登录的本机 Codex CLI。应用不替你管理安装、更新、认证或使用额度。
@@ -45,7 +45,7 @@
 
 ### 克隆与运行
 
-需要已配置 GitHub SSH 访问权限。当前桌面开发分支为 `codex/novel-loop-desktop-prototype`：
+使用 SSH 地址需要已配置 GitHub SSH 访问权限。当前桌面开发分支为 `codex/novel-loop-desktop-prototype`：
 
 ```bash
 git clone --branch codex/novel-loop-desktop-prototype git@github.com:MrMO0802/Novel-Loop.git
@@ -58,6 +58,17 @@ corepack pnpm desktop:dev
 
 如果系统没有 `corepack`，先为当前 Node.js 环境安装 Corepack，或直接使用 pnpm `10.12.1`。已可用时不必重复执行 `corepack enable`。首次安装请允许仓库配置的 Electron/esbuild 依赖构建，否则 Electron 二进制可能不可用。
 
+Windows PowerShell 可使用 HTTPS 克隆并直接通过 Corepack 运行，避免在受保护的 Node 安装目录执行 `corepack enable`：
+
+```powershell
+git clone --branch codex/novel-loop-desktop-prototype https://github.com/MrMO0802/Novel-Loop.git
+Set-Location Novel-Loop
+corepack pnpm install --frozen-lockfile
+corepack pnpm desktop:dev
+```
+
+Windows 上的 AI 功能需要可用的 `codex.exe`，或通过 npm 安装且位于 `PATH` 中的 `@openai/codex`。应用会优先调用原生可执行文件；不会通过 shell 执行 `.cmd` 包装脚本。没有登录 Codex 时仍可打开桌面窗口，但生成和检查功能需要先完成登录。
+
 命令会构建本地引擎并打开 **Novel Loop 桌面窗口**。终端显示的 `http://127.0.0.1:5173/` 是开发用 renderer 服务，不是让作者在浏览器中使用的产品入口。
 
 仅构建桌面应用：
@@ -67,6 +78,8 @@ corepack pnpm desktop:build
 ```
 
 该命令生成 Electron 构建目录，不生成 `.deb`、AppImage 或 Windows 安装包。更新源码后，请停止原启动进程并重新运行 `desktop:dev`，确保 main 和 preload 也加载新版本。
+
+Windows 的 Node.js 不支持对目录执行 `fsync`。应用仍同步写入临时文件并保留项目锁、提交日志和恢复检查；在突然断电后的目录项持久性上，Windows 与已验收的 Linux 环境不具备完全相同的保证。重要作品请另行备份项目目录与应用数据。
 
 ## 作者使用流程
 

@@ -398,7 +398,7 @@ export class RunLogger {
     storyStateInput?: unknown
   ): Promise<RunManifestV2> {
     const manifest = await this.readManifestV2(runId);
-    const relativePath = path.join('snapshots', `${snapshot.snapshotId}.json`);
+    const relativePath = path.posix.join('snapshots', `${snapshot.snapshotId}.json`);
     const stateHash = storyStateInput === undefined ? undefined : hashJson(StoryStateSchema.parse(storyStateInput));
     if (!manifest.snapshots.some((item) => item.snapshotId === snapshot.snapshotId)) {
       manifest.snapshots.push({

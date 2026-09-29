@@ -323,7 +323,7 @@ async function collectContextBudgetStats(
   paths: ProjectPaths,
   fileStore: FileStore
 ): Promise<CodexRealOptimizationBenchmarkReport['contextBudgetStats']> {
-  const contextDir = paths.projectArtifact(path.join('codex', 'context'));
+  const contextDir = paths.projectArtifact(path.posix.join('codex', 'context'));
   if (!(await fileStore.exists(contextDir))) {
     return {
       manifestCount: 0,

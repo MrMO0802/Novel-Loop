@@ -632,6 +632,7 @@ async function mayRecoverLock(observation: LockObservation): Promise<boolean> {
 async function isLockOwnerAlive(
   owner: ProjectOperationLeaseOwner
 ): Promise<boolean | null> {
+  if (owner.bootId === ABANDONED_BOOT_ID) return false;
   if (process.platform === 'linux') {
     const currentBootId = await readLinuxBootId();
     if (currentBootId === null) return null;
@@ -1109,6 +1110,10 @@ async function rewriteMetadataCandidate(
 }
 
 async function syncParentDirectory(filePath: string): Promise<void> {
+  // Windows does not permit fsync on a directory handle. The candidate file
+  // itself is synced before publication; retain the directory flush on
+  // platforms where Node can perform it.
+  if (process.platform === 'win32') return;
   const handle = await open(
     path.dirname(filePath),
     constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW

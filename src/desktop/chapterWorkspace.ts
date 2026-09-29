@@ -367,7 +367,7 @@ async function assertDesktopArtifactPathsSafe(paths: ProjectPaths): Promise<void
     paths.chapterArtifact(chapterNumber, 'scenes'),
     paths.runsDir(),
     paths.projectArtifact('codex'),
-    paths.projectArtifact(path.join('codex', 'runs'))
+    paths.projectArtifact(path.posix.join('codex', 'runs'))
   ]) {
     await fileStore.assertSafePath(artifactPath);
   }

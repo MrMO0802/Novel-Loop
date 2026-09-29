@@ -224,8 +224,8 @@ async function writeDiffReport(paths: ProjectPaths, fileStore: FileStore, report
     report: written,
     jsonPath,
     markdownPath,
-    relativeJsonPath: path.join('diffs', `${fileBase}.json`),
-    relativeMarkdownPath: path.join('diffs', `${fileBase}.md`)
+    relativeJsonPath: path.posix.join('diffs', `${fileBase}.json`),
+    relativeMarkdownPath: path.posix.join('diffs', `${fileBase}.md`)
   };
 }
 

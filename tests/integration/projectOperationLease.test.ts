@@ -81,11 +81,16 @@ describe('project operation lease', () => {
           fs.rmSync(lockPath, { recursive: true, force: true });
           process.exit(0);
         });
+        process.on('message', (message) => {
+          if (message !== 'release') return;
+          fs.rmSync(lockPath, { recursive: true, force: true });
+          process.exit(0);
+        });
         setInterval(() => fs.utimesSync(lockPath, new Date(), new Date()), 50);
       `,
       paths.projectRoot
     ], {
-      stdio: ['ignore', 'pipe', 'inherit']
+      stdio: ['ignore', 'pipe', 'inherit', 'ipc']
     });
     await waitForChildReady(child);
 
@@ -99,7 +104,8 @@ describe('project operation lease', () => {
     })).rejects.toMatchObject({ code: 'PROJECT_OPERATION_LOCKED' });
     await expect(store.exists(paths.chapterArtifact(1, 'mission.json'))).resolves.toBe(false);
 
-    child.kill('SIGTERM');
+    if (process.platform === 'win32') child.send('release');
+    else child.kill('SIGTERM');
     await waitForExit(child);
     child = undefined;
 

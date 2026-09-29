@@ -440,7 +440,7 @@ async function collectSampleEvidence(paths: ProjectPaths, fileStore: FileStore, 
   finalOutputPath: string;
   parsedOutputPath: string;
 }> {
-  const root = paths.projectArtifact(path.join('codex', 'runs'));
+  const root = paths.projectArtifact(path.posix.join('codex', 'runs'));
   if (!(await fileStore.exists(root))) return { rawOutputPath: '', finalOutputPath: '', parsedOutputPath: '' };
   const childRunId = (await fileStore.list(root)).filter((entry) => entry.startsWith(`${parentRunId}_codex_`)).sort().at(-1);
   if (childRunId === undefined) return { rawOutputPath: '', finalOutputPath: '', parsedOutputPath: '' };

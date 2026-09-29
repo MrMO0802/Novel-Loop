@@ -364,7 +364,7 @@ export async function recommitChapter(input: RecommitChapterInput, fileStore = n
     diff.relativeMarkdownPath,
     approvalRecordPath,
     recommitReportPath,
-    path.join('state', 'story_state.json')
+    path.posix.join('state', 'story_state.json')
   ]);
   await runLogger.endRun(runId, 'completed');
   return {
@@ -958,7 +958,7 @@ async function nextVersionedChapterArtifact(
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, ...segments);
 }
 
 function formatChapterNumber(chapterNumber: number): string {

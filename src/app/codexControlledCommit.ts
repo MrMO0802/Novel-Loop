@@ -590,8 +590,8 @@ export async function runCodexControlledCommit(input: CodexControlledCommitInput
 
     const applied = applyCanonPatchToStoryState(storyStateBefore, patchResult.value);
     await fileStore.writeJson(paths.storyState(), applied.storyState, StoryStateSchema);
-    recordArtifact(artifacts, path.join('state', 'story_state.json'), generatedArtifacts);
-    await runLogger.recordArtifact(runId, path.join('state', 'story_state.json'), {
+    recordArtifact(artifacts, path.posix.join('state', 'story_state.json'), generatedArtifacts);
+    await runLogger.recordArtifact(runId, path.posix.join('state', 'story_state.json'), {
       action: 'generated',
       derivedFrom: [patchResult.artifact],
       stage: 'commit',
@@ -832,7 +832,7 @@ async function writeCodexPatchFailureReport(
   error: unknown
 ): Promise<string> {
   const artifact = await nextVersionedChapterArtifact(paths, fileStore, input.chapterNumber, 'codex_patch_failure_report');
-  const providerFailurePath = path.join('codex', 'failures', runId, 'codex_failure_report.json');
+  const providerFailurePath = path.posix.join('codex', 'failures', runId, 'codex_failure_report.json');
   const providerFailure = (await fileStore.exists(paths.projectArtifact(providerFailurePath)))
     ? await fileStore.readJson(paths.projectArtifact(providerFailurePath), CodexJsonFailureReportSchema)
     : undefined;
@@ -1386,7 +1386,7 @@ async function writeCompatibleCommitReport(
       chapterNumber,
       status: 'committed',
       canonPatchPath,
-      storyStatePath: path.join('state', 'story_state.json'),
+      storyStatePath: path.posix.join('state', 'story_state.json'),
       beforeSnapshot,
       afterSnapshot,
       conflicts,
@@ -1520,12 +1520,12 @@ function recordArtifact(allArtifacts: string[], artifact: string, bucket: string
 }
 
 function relativeChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName);
+  return path.posix.join('chapters', `chapter_${formatChapterNumber(chapterNumber)}`, fileName);
 }
 
 function relativeSnapshotArtifact(snapshotPath: string): string {
   const index = snapshotPath.lastIndexOf(`${path.sep}snapshots${path.sep}`);
-  if (index === -1) return path.join('snapshots', path.basename(snapshotPath));
+  if (index === -1) return path.posix.join('snapshots', path.basename(snapshotPath));
   return snapshotPath.slice(index + 1).split(path.sep).join(path.posix.sep);
 }
 

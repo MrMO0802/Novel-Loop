@@ -1,5 +1,6 @@
 import { _electron as electron, expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import { execFile as execFileCallback } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { readFileSync, statSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -42,11 +43,12 @@ function environment(codexBin: string): Record<string, string> {
 }
 
 async function launch(userData: string, codexBin: string): Promise<ElectronApplication> {
-  // Readiness resolves PATH independently of the provider's NLE_CODEX_BIN.
-  // A private PATH prevents either path from reaching the user's real Codex.
+  // A private PATH and explicit fake binary keep the test away from real Codex.
   const bin = await mkdtemp(path.join(path.dirname(userData), 'launch-bin-'));
-  await symlink(codexBin, path.join(bin, 'codex'));
-  await symlink(process.execPath, path.join(bin, 'node'));
+  if (process.platform !== 'win32') {
+    await symlink(codexBin, path.join(bin, 'codex'));
+    await symlink(process.execPath, path.join(bin, 'node'));
+  }
   const app = await electron.launch({
     args: [`--user-data-dir=${userData}`, desktopRoot],
     chromiumSandbox: true, cwd: desktopRoot, env: { ...environment(codexBin), PATH: bin }
@@ -57,11 +59,18 @@ async function launch(userData: string, codexBin: string): Promise<ElectronAppli
 }
 
 async function runModule(source: string, codexBin?: string): Promise<string> {
-  const result = await execFile(process.execPath, ['--input-type=module', '--eval', source], {
-    cwd: repositoryRoot, env: codexBin ? environment(codexBin) : process.env,
-    timeout: 60_000, maxBuffer: 4 * 1024 * 1024
-  });
-  return result.stdout;
+  // Windows has a much smaller command-line limit than this seeded module.
+  const modulePath = path.join(repositoryRoot, `.novel-loop-e2e-${randomUUID()}.mjs`);
+  await writeFile(modulePath, source);
+  try {
+    const result = await execFile(process.execPath, [modulePath], {
+      cwd: repositoryRoot, env: codexBin ? environment(codexBin) : process.env,
+      timeout: 60_000, maxBuffer: 4 * 1024 * 1024
+    });
+    return result.stdout;
+  } finally {
+    await rm(modulePath, { force: true });
+  }
 }
 
 async function fakeHelperUrl(): Promise<string> {

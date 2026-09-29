@@ -558,7 +558,7 @@ async function assertStoryStateUnchanged(paths: ProjectPaths, fileStore: FileSto
 
 async function findCodexFailurePath(paths: ProjectPaths, fileStore: FileStore, runIds: string[]): Promise<string | undefined> {
   for (const runId of [...runIds].reverse()) {
-    const relativePath = path.join('codex', 'failures', runId, 'codex_failure_report.json');
+    const relativePath = path.posix.join('codex', 'failures', runId, 'codex_failure_report.json');
     if (await fileStore.exists(paths.projectArtifact(relativePath))) {
       return relativePath;
     }
@@ -608,8 +608,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }
@@ -738,7 +738,7 @@ function codexOptions(input: RunCodexMultiChapterPilotInput) {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
+  return path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
 }
 
 function renderPilotMarkdown(report: CodexMultiChapterPilotReport): string {

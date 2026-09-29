@@ -109,7 +109,7 @@ describe('desktop local controlled commit', () => {
     expect(await store.exists(paths.chapterArtifact(1, 'final.md'))).toBe(false);
   });
 
-  it('rejects a symlinked preview and preserves its target', async () => {
+  it.skipIf(process.platform === 'win32')('rejects a symlinked preview and preserves its target', async () => {
     const original = path.join(projectRoot, previewDir, 'source.md');
     await rm(original);
     await symlink(path.join(seed.projectRoot, previewDir, 'source.md'), original);

@@ -124,9 +124,9 @@ export async function reviewCodexRevisionCandidate(
     baselineMedianScore: bundle.diagnostics.baselineAverageScoreMedian,
     candidateMedianScore: bundle.diagnostics.candidateAverageScoreMedian,
     scoreDelta: bundle.diagnostics.scoreDelta,
-    sourceStatePath: path.join('state', 'story_state.json'),
+    sourceStatePath: path.posix.join('state', 'story_state.json'),
     sourceStateHash: bundle.sourceStateHash,
-    sourceQueuePath: path.join('planning', 'chapter_queue.json'),
+    sourceQueuePath: path.posix.join('planning', 'chapter_queue.json'),
     sourceQueueHash: bundle.sourceQueueHash,
     humanReviewChecklist: checklist,
     approvedForAdoption: false,
@@ -310,8 +310,8 @@ async function loadCandidateBundle(
   if (queueItem === undefined) {
     throw new AppError('CODEX_REVISION_CANDIDATE_APPROVAL_SOURCE_STALE', `Chapter ${chapterNumber} is missing from chapter queue.`, 2);
   }
-  const stateProtected = requiredProtectedHash(experiment, path.join('state', 'story_state.json'));
-  const queueProtected = requiredProtectedHash(experiment, path.join('planning', 'chapter_queue.json'));
+  const stateProtected = requiredProtectedHash(experiment, path.posix.join('state', 'story_state.json'));
+  const queueProtected = requiredProtectedHash(experiment, path.posix.join('planning', 'chapter_queue.json'));
   return {
     dispositionPath: selected.relativePath,
     dispositionText,
@@ -530,7 +530,7 @@ function renderManifest(manifest: DraftAdoptionManifest): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${pad(chapterNumber)}`, fileName);
+  return path.posix.join('chapters', `chapter_${pad(chapterNumber)}`, fileName);
 }
 
 function normalizeProjectPath(value: string): string {

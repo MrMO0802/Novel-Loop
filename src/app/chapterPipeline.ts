@@ -404,7 +404,7 @@ async function writeArchiveManifest(
     ...(input.invalidatedBy === undefined ? {} : { invalidatedByChapter: input.invalidatedBy.chapterNumber }),
     ...(input.invalidatedBy === undefined ? {} : { invalidatedByReportPath: input.invalidatedBy.reportPath }),
     createdAt: new Date().toISOString(),
-    sourceArtifactRoot: path.join('chapters', `chapter_${String(input.chapterNumber).padStart(3, '0')}`),
+    sourceArtifactRoot: path.posix.join('chapters', `chapter_${String(input.chapterNumber).padStart(3, '0')}`),
     copiedArtifacts,
     missingArtifacts,
     fileHashes: copiedArtifacts,
@@ -416,7 +416,7 @@ async function writeArchiveManifest(
   });
   await fileStore.writeJson(path.join(archiveDir, 'manifest.json'), manifest, ArchiveManifestSchema);
   return {
-    relativePath: path.join('chapters', `chapter_${String(input.chapterNumber).padStart(3, '0')}`, 'archive', archiveDirName, 'manifest.json'),
+    relativePath: path.posix.join('chapters', `chapter_${String(input.chapterNumber).padStart(3, '0')}`, 'archive', archiveDirName, 'manifest.json'),
     manifest
   };
 }
@@ -452,7 +452,7 @@ async function listFilesRecursive(
     } else {
       files.push({
         absolutePath,
-        projectRelativePath: path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, relativeToChapter),
+        projectRelativePath: path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, relativeToChapter),
         relativeToChapter
       });
     }
@@ -485,7 +485,7 @@ async function findInvalidationForStaleChapter(
     const chapterDir = path.join(paths.chaptersDir(), chapterDirName);
     for (const fileName of await fileStore.list(chapterDir)) {
       if (/^downstream_invalidation_report_v\d+\.json$/.test(fileName)) {
-        const reportPath = path.join('chapters', chapterDirName, fileName);
+        const reportPath = path.posix.join('chapters', chapterDirName, fileName);
         const raw = JSON.parse(await fileStore.readText(paths.projectArtifact(reportPath))) as {
           invalidatedChapters?: Array<{ chapterNumber?: number }>;
         };
@@ -557,7 +557,7 @@ async function nextVersionedChapterArtifact(
     if (!(await fileStore.exists(absolutePath))) {
       return {
         version,
-        relativePath: path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, fileName),
+        relativePath: path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, fileName),
         absolutePath
       };
     }
@@ -566,7 +566,7 @@ async function nextVersionedChapterArtifact(
 }
 
 function expectedCoreArtifacts(chapterNumber: number): string[] {
-  const base = path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`);
+  const base = path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`);
   return [
     path.join(base, 'final.md'),
     path.join(base, 'canon_patch.json'),
@@ -731,7 +731,7 @@ function versionFromFileName(fileName: string): number {
 }
 
 function pathJoinChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, fileName);
+  return path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, fileName);
 }
 
 function appendUnique(target: string[], values: string[]): void {

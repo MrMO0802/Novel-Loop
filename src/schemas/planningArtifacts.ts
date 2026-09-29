@@ -91,7 +91,7 @@ const ChapterQueueItemSchema = z
   })
   .transform((item) => ({
     ...item,
-    artifactPath: item.artifactPath ?? path.join('chapters', `chapter_${String(item.chapterNumber).padStart(3, '0')}`)
+    artifactPath: item.artifactPath ?? path.posix.join('chapters', `chapter_${String(item.chapterNumber).padStart(3, '0')}`)
   }));
 
 export const ChapterQueueSchema = z.object({

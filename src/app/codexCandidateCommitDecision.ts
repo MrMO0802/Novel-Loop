@@ -852,7 +852,7 @@ function stableJson(value: unknown): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, fileName: string): string {
-  return path.join('chapters', `chapter_${pad(chapterNumber)}`, fileName);
+  return path.posix.join('chapters', `chapter_${pad(chapterNumber)}`, fileName);
 }
 
 function pad(chapterNumber: number): string {

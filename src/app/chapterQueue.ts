@@ -308,7 +308,7 @@ function transitionReason(before: ChapterQueueItem, after: ChapterQueueItem): st
 
 function relatedArtifactPath(chapter: ChapterQueueItem): string | undefined {
   if (chapter.status === 'committed' || chapter.status === 'recommitted') {
-    return path.join('chapters', `chapter_${String(chapter.chapterNumber).padStart(3, '0')}`, 'commit_report.json');
+    return path.posix.join('chapters', `chapter_${String(chapter.chapterNumber).padStart(3, '0')}`, 'commit_report.json');
   }
   return undefined;
 }

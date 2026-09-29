@@ -125,7 +125,7 @@ export function upsertRegistryProject(
   };
   const retainedProjects = retainUniqueProjects(registry.projects).filter((candidate) => (
     candidate.projectKey !== normalizedProject.projectKey
-      && path.resolve(candidate.projectRoot) !== normalizedProject.projectRoot
+      && canonicalRegistryPath(candidate.projectRoot) !== canonicalRegistryPath(normalizedProject.projectRoot)
   ));
 
   return {
@@ -157,7 +157,7 @@ function retainUniqueProjects(projects: ProjectRegistryProject[]): ProjectRegist
   const uniqueProjects: ProjectRegistryProject[] = [];
 
   for (const project of [...projects].reverse()) {
-    const canonicalPath = path.resolve(project.projectRoot);
+    const canonicalPath = canonicalRegistryPath(project.projectRoot);
     if (paths.has(canonicalPath)) {
       continue;
     }
@@ -166,6 +166,11 @@ function retainUniqueProjects(projects: ProjectRegistryProject[]): ProjectRegist
   }
 
   return uniqueProjects.reverse();
+}
+
+function canonicalRegistryPath(projectRoot: string): string {
+  const resolved = path.resolve(projectRoot);
+  return process.platform === 'win32' ? resolved.toLowerCase() : resolved;
 }
 
 function limitRegistryProjects(projects: ProjectRegistryProject[]): ProjectRegistryProject[] {

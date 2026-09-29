@@ -262,7 +262,7 @@ async function checkCommitJournals(issues: AuditIssue[], paths: ProjectPaths, fi
     for (const fileName of await fileStore.list(chapterDir)) {
       if (!/^commit_journal_v\d+\.json$/.test(fileName)) continue;
       const absolutePath = path.join(chapterDir, fileName);
-      const relativePath = path.join('chapters', chapterDirName, fileName);
+      const relativePath = path.posix.join('chapters', chapterDirName, fileName);
       try {
         const journal = CommitJournalSchema.parse(JSON.parse(await readExactSubmissionText(submissionStore(paths.projectRoot, fileStore), absolutePath)));
         if (!isCompletedCommitJournal(journal)) {
@@ -279,7 +279,7 @@ async function checkRunManifests(issues: AuditIssue[], paths: ProjectPaths, file
   if (!(await fileStore.exists(paths.runsDir()))) return;
   const manifests: Array<{ runId: string; relativeManifestPath: string; manifest?: RunManifest }> = [];
   for (const runId of await fileStore.list(paths.runsDir())) {
-    const relativeManifestPath = path.join('runs', runId, 'run_manifest.json');
+    const relativeManifestPath = path.posix.join('runs', runId, 'run_manifest.json');
     if (invalidSubmissionManifests.has(path.posix.join('runs', runId, 'run_manifest.json'))) {
       manifests.push({ runId, relativeManifestPath });
       continue;
@@ -400,7 +400,7 @@ async function checkRunEvents(
   manifest: Extract<RunManifest, { schemaVersion: '2' }>
 ): Promise<void> {
   const eventPath = paths.runEvents(runId);
-  const relativeEventPath = path.join('runs', runId, 'events.ndjson');
+  const relativeEventPath = path.posix.join('runs', runId, 'events.ndjson');
   if (!(await fileStore.exists(eventPath))) {
     issues.push(issue(`events_missing_${runId}`, 'error', 'event_log', relativeEventPath, 'Run event log is missing.', 'Regenerate the run or restore events.ndjson.', true));
     return;
@@ -592,7 +592,7 @@ async function checkStateMutations(
   for (const mutation of manifest.stateMutations) {
     for (const snapshotId of [mutation.beforeSnapshotId, mutation.afterSnapshotId]) {
       if (snapshotId !== undefined && !(await fileStore.exists(paths.snapshot(snapshotId)))) {
-        issues.push(issue(`state_mutation_snapshot_missing_${runId}_${snapshotId}`, 'error', 'state_mutation', path.join('snapshots', `${snapshotId}.json`), 'State mutation references a missing snapshot.', 'Restore the snapshot or invalidate the mutation record.', true));
+        issues.push(issue(`state_mutation_snapshot_missing_${runId}_${snapshotId}`, 'error', 'state_mutation', path.posix.join('snapshots', `${snapshotId}.json`), 'State mutation references a missing snapshot.', 'Restore the snapshot or invalidate the mutation record.', true));
       }
     }
     if (mutation.mutationType === 'codex_controlled_commit') {
@@ -615,68 +615,68 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
   if (await fileStore.exists(paths.auditDir())) {
     for (const fileName of await fileStore.list(paths.auditDir())) {
       if (/^codex_single_chapter_smoke_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_smoke', path.join('audit', fileName), CodexSingleChapterSmokeReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_smoke', path.posix.join('audit', fileName), CodexSingleChapterSmokeReportSchema);
       }
       if (/^codex_multi_chapter_pilot_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_pilot', path.join('audit', fileName), CodexMultiChapterPilotReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_pilot', path.posix.join('audit', fileName), CodexMultiChapterPilotReportSchema);
       }
       if (/^codex_cross_chapter_drift_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_drift', path.join('audit', fileName), CodexCrossChapterDriftReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_drift', path.posix.join('audit', fileName), CodexCrossChapterDriftReportSchema);
       }
       if (/^codex_cross_chapter_continuity_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_continuity', path.join('audit', fileName), CodexCrossChapterContinuityReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_continuity', path.posix.join('audit', fileName), CodexCrossChapterContinuityReportSchema);
       }
       if (/^codex_budget_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_budget', path.join('audit', fileName), CodexBudgetReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_budget', path.posix.join('audit', fileName), CodexBudgetReportSchema);
       }
       if (/^codex_call_reduction_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_call_reduction', path.join('audit', fileName), CodexCallReductionReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_call_reduction', path.posix.join('audit', fileName), CodexCallReductionReportSchema);
       }
       if (/^codex_stage_runtime_profile_v\d+\.json$/.test(fileName)) {
-        const relativePath = path.join('audit', fileName);
+        const relativePath = path.posix.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_stage_profile', relativePath, CodexStageRuntimeProfileReportSchema);
         await checkCodexStageRuntimeProfile(issues, paths, fileStore, fileName, relativePath);
       }
       if (/^codex_runtime_benchmark_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_benchmark', path.join('audit', fileName), CodexRuntimeBenchmarkReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_benchmark', path.posix.join('audit', fileName), CodexRuntimeBenchmarkReportSchema);
       }
       if (/^codex_runtime_optimization_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_optimization', path.join('audit', fileName), CodexRuntimeOptimizationReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_optimization', path.posix.join('audit', fileName), CodexRuntimeOptimizationReportSchema);
       }
       if (/^codex_real_optimization_benchmark_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_real_optimization', path.join('audit', fileName), CodexRealOptimizationBenchmarkReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_real_optimization', path.posix.join('audit', fileName), CodexRealOptimizationBenchmarkReportSchema);
       }
       if (/^codex_chapter_regression_analysis_v\d+\.json$/.test(fileName)) {
-        const relativePath = path.join('audit', fileName);
+        const relativePath = path.posix.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_regression_analysis', relativePath, CodexChapterRegressionAnalysisSchema);
         await checkCodexChapterRegressionAnalysis(issues, paths, fileStore, fileName, relativePath);
       }
       if (/^codex_runtime_gap_report_v\d+\.json$/.test(fileName)) {
-        const relativePath = path.join('audit', fileName);
+        const relativePath = path.posix.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_gap', relativePath, CodexRuntimeGapReportSchema);
         await checkCodexRuntimeGapReport(issues, paths, fileStore, fileName, relativePath);
       }
       if (/^codex_runtime_sampling_report_v\d+\.json$/.test(fileName)) {
-        const relativePath = path.join('audit', fileName);
+        const relativePath = path.posix.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_sampling', relativePath, CodexRuntimeSamplingReportSchema);
         await checkCodexRuntimeSamplingReport(issues, paths, fileStore, fileName, relativePath);
       }
       if (/^codex_mission_retry_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), CodexMissionRetryReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.posix.join('audit', fileName), CodexMissionRetryReportSchema);
       }
       if (/^codex_mission_micro_benchmark_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), CodexMissionMicroBenchmarkReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.posix.join('audit', fileName), CodexMissionMicroBenchmarkReportSchema);
       }
       if (/^mission_schema_diagnostics_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.join('audit', fileName), MissionSchemaDiagnosticsReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_mission_benchmark', path.posix.join('audit', fileName), MissionSchemaDiagnosticsReportSchema);
       }
       if (/^codex_business_optimization_plan_v\d+\.json$/.test(fileName)) {
-        const relativePath = path.join('audit', fileName);
+        const relativePath = path.posix.join('audit', fileName);
         await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_optimization', relativePath, CodexBusinessOptimizationPlanSchema);
         await checkCodexBusinessOptimizationPlan(issues, paths, fileStore, fileName, relativePath);
       }
       if (/^codex_runtime_failure_report_v\d+\.json$/.test(fileName)) {
-        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_failure', path.join('audit', fileName), CodexRuntimeFailureReportSchema);
+        await checkJson(issues, fileStore, paths.auditArtifact(fileName), 'codex_runtime_failure', path.posix.join('audit', fileName), CodexRuntimeFailureReportSchema);
       }
     }
   }
@@ -686,7 +686,7 @@ async function checkCodexM25Artifacts(issues: AuditIssue[], paths: ProjectPaths,
     const chapterDir = path.join(paths.chaptersDir(), chapterDirName);
     for (const fileName of await fileStore.list(chapterDir)) {
       const absolutePath = path.join(chapterDir, fileName);
-      const relativePath = path.join('chapters', chapterDirName, fileName);
+      const relativePath = path.posix.join('chapters', chapterDirName, fileName);
       if (/^codex_chapter_quality_report_v\d+\.json$/.test(fileName)) {
         await checkJson(issues, fileStore, absolutePath, 'codex_quality', relativePath, CodexChapterQualityReportSchema);
       }
@@ -886,7 +886,7 @@ async function checkBuildBibleCacheReports(issues: AuditIssue[], paths: ProjectP
   for (const fileName of await fileStore.list(paths.strategyDir())) {
     if (!/^build_bible_cache_report_v\d+\.json$/.test(fileName)) continue;
     const absolutePath = path.join(paths.strategyDir(), fileName);
-    const relativePath = path.join('strategy', fileName);
+    const relativePath = path.posix.join('strategy', fileName);
     await checkJson(issues, fileStore, absolutePath, 'build_bible_cache', relativePath, BuildBibleCacheReportSchema);
     try {
       const report = await fileStore.readJson(absolutePath, BuildBibleCacheReportSchema);
@@ -925,8 +925,8 @@ async function checkDraftAdoptionManifest(
       ['approval', manifest.approvalPath, manifest.approvalHash],
       ['experiment', manifest.experimentPath, manifest.experimentHash],
       ['disposition', manifest.dispositionPath, manifest.dispositionHash],
-      ['story_state', path.join('state', 'story_state.json'), manifest.sourceStateHash],
-      ['chapter_queue', path.join('planning', 'chapter_queue.json'), manifest.sourceQueueHash]
+      ['story_state', path.posix.join('state', 'story_state.json'), manifest.sourceStateHash],
+      ['chapter_queue', path.posix.join('planning', 'chapter_queue.json'), manifest.sourceQueueHash]
     ];
     for (const [label, artifactPath, expectedHash] of sources) {
       await checkD3ArtifactHash(issues, paths, fileStore, relativePath, `draft_adoption_hash_${label}`, artifactPath, expectedHash);
@@ -1040,8 +1040,8 @@ async function checkCandidatePreviewReport(
         true
       ));
     }
-    const runManifestPath = path.join('runs', report.runId, 'run_manifest.json');
-    const runEventsPath = path.join('runs', report.runId, 'events.ndjson');
+    const runManifestPath = path.posix.join('runs', report.runId, 'run_manifest.json');
+    const runEventsPath = path.posix.join('runs', report.runId, 'events.ndjson');
     for (const provenancePath of [runManifestPath, runEventsPath]) {
       if (await fileStore.exists(paths.projectArtifact(provenancePath))) continue;
       issues.push(issue(
@@ -1059,8 +1059,8 @@ async function checkCandidatePreviewReport(
     await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_draft', report.adoptedDraftPath, report.adoptedDraftHash);
     await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_approval', report.adoptionApprovalPath, report.adoptionApprovalHash);
     await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_experiment', report.experimentPath, report.experimentHash);
-    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_state', path.join('state', 'story_state.json'), report.sourceStateHash);
-    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_queue', path.join('planning', 'chapter_queue.json'), report.sourceQueueHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_state', path.posix.join('state', 'story_state.json'), report.sourceStateHash);
+    await checkD3ArtifactHash(issues, paths, fileStore, relativePath, 'candidate_preview_queue', path.posix.join('planning', 'chapter_queue.json'), report.sourceQueueHash);
 
     const [manifest, selection, diagnostics, context, completeness, storyState, queue, runManifest] = await Promise.all([
       fileStore.readJson(paths.projectArtifact(report.draftAdoptionManifestPath), DraftAdoptionManifestSchema),
@@ -1247,7 +1247,7 @@ async function checkCandidateCommitReview(
       report.overallDecision !== 'approved_for_commit' && !report.commitApprovalGenerated &&
       report.patchReview.proposalSchemaValid && report.patchReview.normalizedSchemaValid && report.patchReview.proposalNormalizationEquivalent &&
       report.conflictReview.conflictCheckPassed && report.conflictReview.conflictCount === 0 && report.conflictReview.decision === 'approve';
-    const provenancePath = path.join('runs', report.runId, 'events.ndjson');
+    const provenancePath = path.posix.join('runs', report.runId, 'events.ndjson');
     const eventText = await fileStore.readText(paths.projectArtifact(provenancePath));
     const runBoundaryValid = runManifest.command === 'codex.review-candidate-commit' &&
       runManifest.promptCalls.length === 0 && runManifest.llmCalls.length === 0 &&
@@ -1295,7 +1295,7 @@ async function checkCandidateCommitDecisionChain(
   const approvalFiles = entries.filter((entry) => /^candidate_commit_approval_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare);
   if (decisionFiles.length === 0 && noopFiles.length === 0 && finalizedFiles.length === 0 && approvalFiles.length === 0) return;
 
-  const issuePath = path.join('chapters', chapterDirName);
+  const issuePath = path.posix.join('chapters', chapterDirName);
   try {
     const stateText = await fileStore.readText(paths.storyState());
     const queueText = await fileStore.readText(paths.chapterQueue());
@@ -1451,7 +1451,7 @@ async function checkCandidatePatchRefinementChain(
   const entries = await fileStore.list(chapterDir);
   const manifestFile = entries.filter((entry) => /^candidate_patch_refinement_manifest_v\d+\.json$/.test(entry)).sort(versionedArtifactCompare).at(-1);
   if (manifestFile === undefined) return;
-  const issuePath = path.join('chapters', chapterDirName, manifestFile);
+  const issuePath = path.posix.join('chapters', chapterDirName, manifestFile);
   try {
     const latest = (pattern: RegExp) => entries.filter((entry) => pattern.test(entry)).sort(versionedArtifactCompare).at(-1);
     const equivalenceFile = latest(/^candidate_patch_refinement_equivalence_v\d+\.json$/);
@@ -1502,11 +1502,11 @@ async function checkCandidatePatchRefinementChain(
       refinedDiff.removedMutationIds.length === removed.size && refinedDiff.removedMutationIds.every((mutationId) => removed.has(mutationId)) &&
       refinedDiff.changes.every((change) => change.mutationId === undefined || !removed.has(change.mutationId)) &&
       refinedDiff.addedMutationCount === 0 && refinedDiff.changedMutationCount === 0;
-    const lineageValid = lineage.refinedDiffPath === path.join('chapters', chapterDirName, diffFile!) &&
+    const lineageValid = lineage.refinedDiffPath === path.posix.join('chapters', chapterDirName, diffFile!) &&
       lineage.removedNoopMutationCount === removed.size && lineage.changedMutationCount === 0 && lineage.addedMutationCount === 0 &&
       lineage.entries.filter((entry) => entry.status === 'removed_noop').every((entry) => entry.oldMutationId !== null && removed.has(entry.oldMutationId)) &&
       lineage.entries.filter((entry) => entry.status !== 'removed_noop').every((entry) => entry.status === 'unchanged');
-    const carryValid = carry.lineagePath === path.join('chapters', chapterDirName, lineageFile!) && carry.newReviewPath !== manifest.sourceReviewPath &&
+    const carryValid = carry.lineagePath === path.posix.join('chapters', chapterDirName, lineageFile!) && carry.newReviewPath !== manifest.sourceReviewPath &&
       carry.sourceStateHash === sha256(stateText) && carry.sourceQueueHash === sha256(queueText) &&
       carry.sourcePatchHash === newReview.normalizedPatchHash && carry.sourceDiffHash === newReview.stateDiffHash &&
       carry.decisions.every((decision) => decision.eligible ? decision.evidenceUnchanged && decision.newMutationId !== null : removed.has(decision.oldMutationId));
@@ -1756,7 +1756,7 @@ async function checkDiagnosticsContextManifest(
         true
       ));
     }
-    for (const requiredPath of [path.join('state', 'story_state.json'), relativeChapterArtifact(report.chapterNumber, 'mission.json'), relativeChapterArtifact(report.chapterNumber, 'draft_v1.md')]) {
+    for (const requiredPath of [path.posix.join('state', 'story_state.json'), relativeChapterArtifact(report.chapterNumber, 'mission.json'), relativeChapterArtifact(report.chapterNumber, 'draft_v1.md')]) {
       if (!(await fileStore.exists(paths.projectArtifact(requiredPath)))) {
         issues.push(issue(
           `diagnostics_context_manifest_missing_required_${sanitizeIssueId(relativePath)}_${sanitizeIssueId(requiredPath)}`,
@@ -2459,7 +2459,7 @@ async function checkTargetedRevisionExperiment(
         `targeted_revision_run_safety_${sanitizeIssueId(report.runId)}`,
         'critical',
         'targeted_revision',
-        path.join('runs', report.runId, 'run_manifest.json'),
+        path.posix.join('runs', report.runId, 'run_manifest.json'),
         'Targeted revision run provenance violates preview-only safety or call-count expectations.',
         'Restore canonical artifacts and investigate the run before using its candidate.',
         true
@@ -3034,16 +3034,16 @@ async function findLatestChapterArtifact(
   if (!(await fileStore.exists(chapterDir))) return undefined;
   const pattern = new RegExp(`^${baseName}_v\\d+\\.json$`);
   const entry = (await fileStore.list(chapterDir)).filter((fileName) => pattern.test(fileName)).at(-1);
-  return entry === undefined ? undefined : path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, entry);
+  return entry === undefined ? undefined : path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, entry);
 }
 
 async function checkCodexContextManifests(issues: AuditIssue[], paths: ProjectPaths, fileStore: FileStore): Promise<void> {
-  const contextDir = paths.projectArtifact(path.join('codex', 'context'));
+  const contextDir = paths.projectArtifact(path.posix.join('codex', 'context'));
   if (!(await fileStore.exists(contextDir))) return;
   for (const fileName of await fileStore.list(contextDir)) {
     if (!/^context_manifest_v\d+\.json$/.test(fileName)) continue;
     const absolutePath = path.join(contextDir, fileName);
-    const relativePath = path.join('codex', 'context', fileName);
+    const relativePath = path.posix.join('codex', 'context', fileName);
     await checkJson(issues, fileStore, absolutePath, 'codex_context', relativePath, CodexContextManifestSchema);
     try {
       const manifest = await fileStore.readJson(absolutePath, CodexContextManifestSchema);
@@ -3577,7 +3577,7 @@ async function checkArchives(issues: AuditIssue[], paths: ProjectPaths, fileStor
     if (!(await fileStore.exists(archiveRoot))) continue;
     for (const archiveDir of await fileStore.list(archiveRoot)) {
       const manifestPath = path.join(archiveRoot, archiveDir, 'manifest.json');
-      const relativeManifestPath = path.join('chapters', chapterDirName, 'archive', archiveDir, 'manifest.json');
+      const relativeManifestPath = path.posix.join('chapters', chapterDirName, 'archive', archiveDir, 'manifest.json');
       if (!(await fileStore.exists(manifestPath))) {
         issues.push(issue(`archive_manifest_missing_${chapterDirName}_${archiveDir}`, 'error', 'archive', relativeManifestPath, 'Archive manifest is missing.', 'Restore archive manifest.', true));
         continue;
@@ -3640,8 +3640,8 @@ async function nextAuditArtifact(paths: ProjectPaths, fileStore: FileStore, base
         version,
         jsonPath,
         mdPath: paths.auditArtifact(mdFile),
-        relativeJsonPath: path.join('audit', jsonFile),
-        relativeMdPath: path.join('audit', mdFile)
+        relativeJsonPath: path.posix.join('audit', jsonFile),
+        relativeMdPath: path.posix.join('audit', mdFile)
       };
     }
   }
@@ -3732,7 +3732,7 @@ function sanitizeIssueId(value: string): string {
 }
 
 function relativeChapterArtifact(chapterNumber: number, ...segments: string[]): string {
-  return path.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
+  return path.posix.join('chapters', `chapter_${String(chapterNumber).padStart(3, '0')}`, ...segments);
 }
 
 function isUnknownRecord(value: unknown): value is Record<string, unknown> {

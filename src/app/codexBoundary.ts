@@ -458,16 +458,27 @@ function wrapperCallTypeFor(operation: ExecPromptInput['operation']): 'exec_text
 }
 
 async function resolveCodexBinary(codexBin?: string): Promise<string> {
-  const candidates =
-    codexBin === undefined
-      ? (process.env.PATH ?? '')
-          .split(path.delimiter)
-          .filter((entry) => entry.length > 0)
-          .map((entry) => path.join(entry, 'codex'))
-      : [path.resolve(codexBin)];
+  const directories = (process.env.PATH ?? '')
+    .split(path.delimiter)
+    .filter((entry) => entry.length > 0);
+  // execFile cannot launch npm's Windows .cmd shim safely. Prefer the native
+  // Codex executable, even if an npm shim occurs earlier on PATH.
+  const candidates = codexBin === undefined
+    ? process.platform === 'win32'
+      ? [
+          ...directories.flatMap((directory) => [
+          path.join(directory, 'codex.exe'),
+          path.join(directory, 'codex.com')
+          ]),
+          ...directories.map((directory) => path.join(
+            directory, 'node_modules', '@openai', 'codex', 'bin', 'codex.js'
+          ))
+        ]
+      : directories.map((directory) => path.join(directory, 'codex'))
+    : [path.resolve(codexBin)];
   for (const candidate of candidates) {
     try {
-      await access(candidate, constants.X_OK);
+      await access(candidate, process.platform === 'win32' ? constants.F_OK : constants.X_OK);
       return candidate;
     } catch {
       // Try next candidate.
@@ -478,16 +489,35 @@ async function resolveCodexBinary(codexBin?: string): Promise<string> {
   });
 }
 
+function codexInvocation(binaryPath: string, args: string[]): {
+  file: string;
+  args: string[];
+  env: NodeJS.ProcessEnv;
+} {
+  // Explicit JavaScript Codex fixtures and wrappers need Node on Windows;
+  // execFile cannot execute a shebang script there.
+  return process.platform === 'win32' && /\.(?:c|m)?js$/iu.test(binaryPath)
+    ? {
+        file: process.execPath,
+        args: [binaryPath, ...args],
+        env: process.versions.electron === undefined
+          ? process.env
+          : { ...process.env, ELECTRON_RUN_AS_NODE: '1' }
+      }
+    : { file: binaryPath, args, env: process.env };
+}
+
 async function runCodexCommand(binaryPath: string, args: string[], input: CodexBoundaryInput, stdinText?: string): Promise<CodexCommandResult> {
   return new Promise((resolve, reject) => {
+    const invocation = codexInvocation(binaryPath, args);
     const child = execFile(
-      binaryPath,
-      args,
+      invocation.file,
+      invocation.args,
       {
         cwd: input.cwd ?? process.cwd(),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
-        env: process.env
+        env: invocation.env
       },
       (error, stdout, stderr) => {
         if (error !== null) {
@@ -564,14 +594,15 @@ async function runCodexExecCommand(binaryPath: string, args: string[], input: Co
       timingEvents.push({ eventType, timestamp: new Date().toISOString(), payload });
     };
     record('CODEX_PROCESS_SPAWN_STARTED', { sandbox: CODEX_SANDBOX });
+    const invocation = codexInvocation(binaryPath, args);
     const child = execFile(
-      binaryPath,
-      args,
+      invocation.file,
+      invocation.args,
       {
         cwd: input.cwd ?? process.cwd(),
         timeout: input.timeoutMs ?? DEFAULT_TIMEOUT_MS,
         maxBuffer: 10 * 1024 * 1024,
-        env: process.env
+        env: invocation.env
       },
       (error, stdout, stderr) => {
         const childError = error as (Error & { code?: unknown; signal?: unknown; killed?: unknown }) | null;
